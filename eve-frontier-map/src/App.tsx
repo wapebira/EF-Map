@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
@@ -67,6 +67,10 @@ interface MapData {
 
 type SqlValue = number | string | Uint8Array | null;
 
+// Define colors for selection and base
+const DEFAULT_STAR_COLOR = new THREE.Color(0xffffff);
+const SELECTED_STAR_COLOR = new THREE.Color(0xff4c26); // Red/Orange for selected star when DPC is off
+const REGION_OUTLINE_COLOR = new THREE.Color(0x00aaff); // Blue for region outlines when DPC is on
 
 function App() {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -75,43 +79,13 @@ function App() {
   const [highlightedSystem, setHighlightedSystem] = useState<SolarSystem | null>(null);
   const [hoveredSystem, setHoveredSystem] = useState<SolarSystem | null>(null);
   const [isRegionHighlighterActive, setIsRegionHighlighterActive] = useState(false);
+  const [isPlanetCountActive, setIsPlanetCountActive] = useState(false);
+  const [minPlanets, setMinPlanets] = useState(0);
+  const [maxPlanets, setMaxPlanets] = useState(0);
 
   // New state for labels
   const hoverLabelObj = useRef<CSS2DObject | null>(null);
   const selectedLabelObj = useRef<CSS2DObject | null>(null);
-  const selectedStar = useRef<THREE.Object3D | null>(null);
-
-  // Helper to create label elements
-  const createSystemLabelElement = useCallback((name: string, isPersistent = false): HTMLDivElement => {
-    const wrapper = document.createElement('div');          // This becomes CSS2DObject.element
-    wrapper.className = 'system-label-wrapper';
-    wrapper.style.pointerEvents = 'none';
-
-    const inner = document.createElement('div');            // Visible box
-    inner.className = isPersistent ? 'system-label system-label--selected' : 'system-label';
-    inner.textContent = name;
-
-    wrapper.appendChild(inner);
-
-    return wrapper;
-  }, []);
-
-  // Helper to get system name
-    // Helper to get system name
-  const getSystemName = useCallback((obj: THREE.Object3D): string | null => {
-    if (obj && obj.userData && obj.userData.name) {
-      return obj.userData.name;
-    }
-    return null;
-  }, []);
-
-  
-
-  // Helper to set label text
-  const setLabelText = (obj: CSS2DObject, txt: string) => {
-    const inner = (obj.element as HTMLElement).querySelector('.system-label') as HTMLElement | null;
-    if (inner) inner.textContent = txt;
-  };
 
   // Refs for three.js objects
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -131,7 +105,11 @@ function App() {
     endTarget: new THREE.Vector3(),
     duration: 500, // ms
   });
-  const prevHighlightedSystemRef = useRef<SolarSystem | null>(null);
+
+  // New refs for managing overlays
+  const selectedStarHaloRef = useRef<THREE.Points | null>(null);
+  const regionOutlineGroupRef = useRef<THREE.Group | null>(null);
+
 
   const isDraggingRef = useRef(false);
   const mouseDownPosRef = useRef(new THREE.Vector2());
@@ -172,7 +150,79 @@ function App() {
     return material;
   }, [circleTexture]);
 
-  const stargateMaterial = useMemo(() => new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.05 }), []);
+  const stargateMaterial = useMemo(() => new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.4, depthWrite: false }), []);
+
+  // Helper to create label elements
+  const createSystemLabelElement = useCallback((name: string, isPersistent = false, planets?: number): HTMLDivElement => {
+    const wrapper = document.createElement('div');          // This becomes CSS2DObject.element
+    wrapper.className = 'system-label-wrapper';
+    wrapper.style.pointerEvents = 'none';
+
+    const inner = document.createElement('div');            // Visible box
+    inner.className = isPersistent ? 'system-label system-label--selected' : 'system-label';
+    inner.textContent = name;
+
+    // Add planet count if available and DPC is active
+    if (planets !== undefined && isPlanetCountActive) {
+      const planetCountSpan = document.createElement('span');
+      planetCountSpan.className = 'planet-count';
+      planetCountSpan.textContent = ` (${planets} planets)`;
+      inner.appendChild(planetCountSpan);
+    }
+
+    wrapper.appendChild(inner);
+
+    return wrapper;
+  }, [isPlanetCountActive]);
+
+  // Helper to set label text
+  const setLabelText = (obj: CSS2DObject, name: string, planets?: number) => {
+    const inner = (obj.element as HTMLElement).querySelector('.system-label') as HTMLElement | null;
+    if (inner) {
+      inner.textContent = name;
+      if (planets !== undefined && isPlanetCountActive) {
+        const planetCountSpan = document.createElement('span');
+        planetCountSpan.className = 'planet-count';
+        planetCountSpan.textContent = ` (${planets} planets)`;
+        inner.appendChild(planetCountSpan);
+      }
+    }
+  };
+
+  // Helper to get planet count color
+  const getPlanetCountColor = useCallback((planets: number, minPlanets: number, maxPlanets: number): THREE.Color => {
+    if (maxPlanets === minPlanets) return new THREE.Color().setHSL(0.5, 1.0, 0.5); // Default if all counts are same
+    const normalized = (planets - minPlanets) / (maxPlanets - minPlanets);
+    return new THREE.Color().setHSL(normalized * 0.33, 1.0, 0.5); // Red to Green
+  }, []);
+
+  const generatePlanetCountLegend = useCallback(() => {
+    if (!isPlanetCountActive || maxPlanets === 0) return null; // Don't show if DPC is off or no planets
+
+    const legendItems = [];
+    const numSteps = 5; // Number of steps in the legend
+    const stepSize = (maxPlanets - minPlanets) / numSteps;
+
+    for (let i = 0; i < numSteps; i++) {
+      const lowerBound = Math.round(minPlanets + i * stepSize);
+      const upperBound = Math.round(minPlanets + (i + 1) * stepSize);
+      const midPoint = Math.round((lowerBound + upperBound) / 2);
+      const color = getPlanetCountColor(midPoint, minPlanets, maxPlanets);
+
+      legendItems.push(
+        <div key={i} style={{ display: 'flex', alignItems: 'center', marginBottom: '5px' }}>
+          <div style={{ width: '20px', height: '20px', backgroundColor: `#${color.getHexString()}`, marginRight: '10px' }}></div>
+          <span>{`${lowerBound} - ${upperBound} planets`}</span>
+        </div>
+      );
+    }
+    return (
+      <div style={{ marginTop: '10px', padding: '10px', border: '1px solid #ccc', borderRadius: '5px' }}>
+        <strong>Planet Count Legend:</strong>
+        {legendItems}
+      </div>
+    );
+  }, [isPlanetCountActive, minPlanets, maxPlanets, getPlanetCountColor]);
 
   // Fetch and process data from SQLite
   useEffect(() => {
@@ -199,7 +249,8 @@ function App() {
                     x: row[7] as number,
                     y: row[8] as number,
                     z: row[9] as number,
-                    hidden: !!row[13]
+                    hidden: !!row[13],
+                    planet_count: row[14] as number
                 };
                 solar_systems[system.id] = {
                     id: system.id,
@@ -207,7 +258,7 @@ function App() {
                     position: { x: system.x, y: system.y, z: system.z },
                     region_id: system.region_id,
                     constellation_id: system.constellation_id,
-                    planets: 0,
+                    planets: system.planet_count,
                     hidden: system.hidden
                 };
             });
@@ -429,29 +480,165 @@ function App() {
     }
   }, [mapData, getTransformedPosition, pointsMaterial, stargateMaterial]);
 
-  // Handle highlighting
-  useEffect(() => {
-    if (!starFieldRef.current) return;
-    const colors = starFieldRef.current.geometry.attributes.color as THREE.BufferAttribute;
-    const white = new THREE.Color(0xffffff);
-    const red = new THREE.Color(0xff4c26);
+  // This useLayoutEffect handles all dynamic star and stargate line coloring based on the pipeline.
+  useLayoutEffect(() => {
+    if (!mapData || !starFieldRef.current || !sceneRef.current) return;
 
-    if (prevHighlightedSystemRef.current) {
-      const prevIndex = visibleSystemsRef.current.findIndex(s => s.id === prevHighlightedSystemRef.current!.id);
-      if (prevIndex !== -1) {
-        white.toArray(colors.array, prevIndex * 3);
+    const starColorsAttribute = starFieldRef.current.geometry.attributes.color as THREE.BufferAttribute;
+    const currentStarColors = starColorsAttribute.array as Float32Array;
+
+    // --- Cleanup previous state (Step 0) ---
+    // This cleanup runs before any new rendering, ensuring a clean slate.
+    // It also serves as the cleanup function for the effect.
+    const cleanupVisuals = () => {
+      // Cleanup RegionHighlighterModule effects
+      RegionHighlighterModule.cleanup(
+        starFieldRef.current!,
+        stargateLinesRef.current,
+        highlightedSystem, // Pass for consistency, though not used for star color reset
+        visibleSystemsRef.current
+      );
+
+      // Remove selected star halo
+      if (selectedStarHaloRef.current) {
+        sceneRef.current?.remove(selectedStarHaloRef.current);
+        selectedStarHaloRef.current.geometry.dispose();
+        (selectedStarHaloRef.current.material as THREE.Material).dispose();
+        selectedStarHaloRef.current = null;
+      }
+
+      // Remove region outlines (if DPC was on)
+      if (regionOutlineGroupRef.current) {
+        sceneRef.current?.remove(regionOutlineGroupRef.current);
+        regionOutlineGroupRef.current.children.forEach(child => {
+          if (child instanceof THREE.Sprite) {
+            child.geometry.dispose();
+            (child.material as THREE.Material).dispose();
+          }
+        });
+        regionOutlineGroupRef.current = null;
+      }
+
+      // Re-apply base colors to all stars to ensure no lingering highlights
+      // This is crucial for order independence and correct toggling
+      const tempColors = new Float32Array(currentStarColors.length);
+      const planetCounts = visibleSystemsRef.current.map(s => s.planets);
+      const minPlanets = Math.min(...planetCounts);
+      const maxPlanets = Math.max(...planetCounts);
+
+      for (let i = 0; i < visibleSystemsRef.current.length; i++) {
+        const system = visibleSystemsRef.current[i];
+        const color = isPlanetCountActive
+          ? getPlanetCountColor(system.planets, minPlanets, maxPlanets)
+          : DEFAULT_STAR_COLOR;
+        color.toArray(tempColors, i * 3);
+      }
+      starColorsAttribute.array.set(tempColors);
+      starColorsAttribute.needsUpdate = true;
+    };
+
+    // Call cleanup immediately to reset state before applying new visuals
+    cleanupVisuals();
+
+    // --- Step 1: Base Layer (Planet Count or White, with Region-specific DPC) ---
+    const planetCounts = visibleSystemsRef.current.map(s => s.planets);
+    const currentMinPlanets = planetCounts.length > 0 ? Math.min(...planetCounts) : 0;
+    const currentMaxPlanets = planetCounts.length > 0 ? Math.max(...planetCounts) : 0;
+    
+    if (minPlanets !== currentMinPlanets) setMinPlanets(currentMinPlanets);
+    if (maxPlanets !== currentMaxPlanets) setMaxPlanets(currentMaxPlanets);
+
+    let systemsInHighlightedRegion: Set<number> | null = null;
+    if (isRegionHighlighterActive && highlightedSystem) {
+      systemsInHighlightedRegion = new Set(
+        visibleSystemsRef.current
+          .filter(s => s.region_id === highlightedSystem.region_id)
+          .map(s => s.id)
+      );
+    }
+
+    for (let i = 0; i < visibleSystemsRef.current.length; i++) {
+      const system = visibleSystemsRef.current[i];
+      let color: THREE.Color;
+
+      if (isPlanetCountActive) {
+        if (systemsInHighlightedRegion && systemsInHighlightedRegion.has(system.id)) {
+          // DPC is ON, HR is ON, and system is in highlighted region
+          color = getPlanetCountColor(system.planets, minPlanets, maxPlanets);
+        } else if (systemsInHighlightedRegion && !systemsInHighlightedRegion.has(system.id)) {
+          // DPC is ON, HR is ON, but system is NOT in highlighted region
+          color = DEFAULT_STAR_COLOR;
+        } else {
+          // DPC is ON, but HR is OFF (global DPC)
+          color = getPlanetCountColor(system.planets, minPlanets, maxPlanets);
+        }
+      } else {
+        // DPC is OFF (global white)
+        color = DEFAULT_STAR_COLOR;
+      }
+      color.toArray(currentStarColors, i * 3);
+    }
+    starColorsAttribute.needsUpdate = true;
+
+    // --- Step 2: Region Overlay (if HR && selectedStar) ---
+    if (isRegionHighlighterActive && highlightedSystem) {
+      RegionHighlighterModule.init(
+        sceneRef.current!,
+        mapData,
+        starFieldRef.current,
+        stargateLinesRef.current,
+        highlightedSystem,
+        visibleSystemsRef.current,
+        isPlanetCountActive // Pass DPC state to RegionHighlighter
+      );
+
+      // If DPC is ON, add non-destructive region outlines
+      if (isPlanetCountActive) {
+        const targetRegionId = highlightedSystem.region_id;
+        const systemsInRegion = visibleSystemsRef.current.filter(s => s.region_id === targetRegionId);
+
+        if (!regionOutlineGroupRef.current) {
+          regionOutlineGroupRef.current = new THREE.Group();
+          sceneRef.current.add(regionOutlineGroupRef.current);
+        }
+
+        systemsInRegion.forEach(system => {
+          const pos = getTransformedPosition(system.position);
+          const spriteMaterial = new THREE.SpriteMaterial({
+            map: ringTexture,
+            color: REGION_OUTLINE_COLOR,
+            transparent: true,
+            alphaTest: 0.5,
+            sizeAttenuation: false, // Keep size consistent regardless of distance
+          });
+          const sprite = new THREE.Sprite(spriteMaterial);
+          sprite.position.set(pos.x, pos.y, pos.z);
+          sprite.scale.set(25, 25, 1); // Adjust size as needed for visibility
+          regionOutlineGroupRef.current!.add(sprite);
+        });
       }
     }
 
+    // --- Step 3: Selection Cue ---
     if (highlightedSystem) {
       const highlightedIndex = visibleSystemsRef.current.findIndex(s => s.id === highlightedSystem.id);
       if (highlightedIndex !== -1) {
-        red.toArray(colors.array, highlightedIndex * 3);
+        // Set selected star to brighter orange/red
+        SELECTED_STAR_COLOR.toArray(currentStarColors, highlightedIndex * 3);
       }
     }
-    colors.needsUpdate = true;
-    prevHighlightedSystemRef.current = highlightedSystem;
-  }, [highlightedSystem]);
+    starColorsAttribute.needsUpdate = true;
+
+    return cleanupVisuals; // Return the cleanup function
+  }, [
+    isPlanetCountActive,
+    isRegionHighlighterActive,
+    highlightedSystem,
+    mapData,
+    getPlanetCountColor,
+    getTransformedPosition,
+    ringTexture,
+  ]);
 
   // Handle camera animation
   useEffect(() => {
@@ -504,16 +691,10 @@ function App() {
   }, [hoveredSystem, getTransformedPosition, pointsMaterial]);
 
   const selectSystem = useCallback((system: SolarSystem) => {
-    // Find the system's index in the visibleSystemsRef
-    const systemIndex = visibleSystemsRef.current.findIndex(s => s.id === system.id);
-    if (systemIndex === -1) return;
+    // Set the highlighted system for camera animation and the main rendering effect
+    setHighlightedSystem(system);
 
-    // Get the position of the system
-    const positionAttribute = starFieldRef.current!.geometry.attributes.position;
-    const systemPosition = new THREE.Vector3();
-    systemPosition.fromBufferAttribute(positionAttribute, systemIndex);
-
-    // Clear previous selection
+    // Clear previous persistent label
     if (selectedLabelObj.current && selectedLabelObj.current.parent) {
       selectedLabelObj.current.parent.remove(selectedLabelObj.current);
       if (sceneRef.current && selectedLabelObj.current.parent instanceof THREE.Object3D) {
@@ -521,29 +702,27 @@ function App() {
       }
     }
 
-    // Create a new selected star object
-    const newSelectedStarObject = new THREE.Object3D();
-    newSelectedStarObject.position.copy(systemPosition);
-    Object.assign(newSelectedStarObject.userData, { id: system.id });
-    sceneRef.current?.add(newSelectedStarObject);
-    selectedStar.current = newSelectedStarObject;
+    // Create a new object to parent the label to (at the system's position)
+    const newSelectedLabelParent = new THREE.Object3D();
+    const transformedPos = getTransformedPosition(system.position);
+    newSelectedLabelParent.position.set(transformedPos.x, transformedPos.y, transformedPos.z);
+    sceneRef.current?.add(newSelectedLabelParent);
 
     // Create or update the label
     if (selectedLabelObj.current === null) {
       const el = createSystemLabelElement(system.name, true);
       selectedLabelObj.current = new CSS2DObject(el);
       selectedLabelObj.current.position.set(0, 0, 0);
-      newSelectedStarObject.add(selectedLabelObj.current);
-    } else {
+      newSelectedLabelParent.add(selectedLabelObj.current);
+    }
+    else {
       setLabelText(selectedLabelObj.current, system.name);
       selectedLabelObj.current.position.set(0, 0, 0);
-      newSelectedStarObject.add(selectedLabelObj.current);
+      newSelectedLabelParent.add(selectedLabelObj.current);
     }
     selectedLabelObj.current.visible = true;
 
-    // Set the highlighted system for camera animation
-    setHighlightedSystem(system);
-  }, [createSystemLabelElement, setLabelText]);
+  }, [createSystemLabelElement, setLabelText, getTransformedPosition]);
 
   // Handle Pointer Events
   useEffect(() => {
@@ -601,7 +780,7 @@ function App() {
           setHoveredSystem(newHoveredSystem);
 
           if (hoverLabelObj.current === null) {
-            const el = createSystemLabelElement(newHoveredSystem.name);
+            const el = createSystemLabelElement(newHoveredSystem.name, false, newHoveredSystem.planets);
             hoverLabelObj.current = new CSS2DObject(el);
             hoverLabelObj.current.position.set(0, 0, 0); // Position at star's center, offset via CSS transform
             hitStarObject.add(hoverLabelObj.current);
@@ -613,7 +792,7 @@ function App() {
               }
             }
             hitStarObject.add(hoverLabelObj.current);
-            setLabelText(hoverLabelObj.current, newHoveredSystem.name);
+            setLabelText(hoverLabelObj.current, newHoveredSystem.name, newHoveredSystem.planets);
             hoverLabelObj.current.position.set(0, 0, 0); // Reset offset
           }
           hoverLabelObj.current.visible = true;
@@ -630,7 +809,8 @@ function App() {
             }
           }
         }
-      } else if (isDraggingRef.current) {
+      }
+      else if (isDraggingRef.current) {
         setHoveredSystem(null); // Clear hover when dragging
         if (hoverLabelObj.current) {
           hoverLabelObj.current.visible = false;
@@ -674,42 +854,7 @@ function App() {
       currentRenderer.domElement.removeEventListener('pointerdown', onPointerDown);
       currentRenderer.domElement.removeEventListener('pointerup', onPointerUp);
     };
-    }, [hoveredSystem, isDraggingRef, mouseDownPosRef, mouseDownTimeRef, createSystemLabelElement, getSystemName, selectSystem]);
-
-  // Handle Region Highlighter Module
-  useEffect(() => {
-    if (!mapData || !starFieldRef.current) return;
-
-    if (isRegionHighlighterActive && highlightedSystem) { // Only init if active AND a system is highlighted
-      RegionHighlighterModule.init(
-        sceneRef.current!,
-        mapData,
-        starFieldRef.current,
-        stargateLinesRef.current,
-        highlightedSystem,
-        visibleSystemsRef.current
-      );
-    } else { // Cleanup if not active or no system is highlighted
-      RegionHighlighterModule.cleanup(
-        starFieldRef.current,
-        stargateLinesRef.current,
-        highlightedSystem,
-        visibleSystemsRef.current
-      );
-    }
-
-    // Cleanup on component unmount or when isRegionHighlighterActive becomes false
-    return () => {
-      if (mapData && starFieldRef.current) {
-        RegionHighlighterModule.cleanup(
-          starFieldRef.current,
-          stargateLinesRef.current,
-          highlightedSystem,
-          visibleSystemsRef.current
-        );
-      }
-    };
-  }, [isRegionHighlighterActive, mapData, highlightedSystem]); // Add highlightedSystem to dependencies
+    }, [hoveredSystem, isDraggingRef, mouseDownPosRef, mouseDownTimeRef, createSystemLabelElement, selectSystem]);
 
   const handleSearch = (event: React.KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'Enter' && mapData) {
@@ -751,6 +896,19 @@ function App() {
             Highlight Region
           </label>
         </div>
+        <div style={{ marginTop: '10px' }}>
+          <label>
+            <input
+              type="checkbox"
+              checked={isPlanetCountActive}
+              onChange={(e) => {
+                setIsPlanetCountActive(e.target.checked);
+              }}
+            />
+            Display Planet Counts
+          </label>
+        </div>
+        {isPlanetCountActive && generatePlanetCountLegend()}
       </div>
       <div ref={mountRef} style={{ width: '100vw', height: '100vh' }} />
     </>
@@ -758,4 +916,3 @@ function App() {
 }
 
 export default App;
-
