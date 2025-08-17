@@ -6,6 +6,7 @@ import './App.css';
 import RegionHighlighterModule from './modules/RegionHighlighter';
 import { openDbFromArrayBuffer } from "./lib/sql";
 import type { SystemRow, StargateRow, RegionRow, ConstellationRow } from "./types/db";
+import LoadingScreen from './components/LoadingScreen';
 
 // Helper function to create a circular texture
 const createCircleTexture = () => {
@@ -73,6 +74,10 @@ const SELECTED_STAR_COLOR = new THREE.Color(0xff4c26); // Red/Orange for selecte
 const REGION_OUTLINE_COLOR = new THREE.Color(0x00aaff); // Blue for region outlines when DPC is on
 
 function App() {
+  const [loadingProgress, setLoadingProgress] = useState(0);
+  const [loadingStatus, setLoadingStatus] = useState('Initializing...');
+  const [isLoaded, setIsLoaded] = useState(false);
+
   const mountRef = useRef<HTMLDivElement>(null);
   const [mapData, setMapData] = useState<MapData | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -232,10 +237,44 @@ function App() {
   useEffect(() => {
     const loadDatabase = async () => {
       try {
+        setLoadingStatus('Downloading map data...');
         const response = await fetch('/map_data.db');
-        const dbBytes = await response.arrayBuffer();
-        const db = await openDbFromArrayBuffer(dbBytes);
+        if (!response.body) {
+          throw new Error("Failed to get readable stream from response");
+        }
+        const contentLength = response.headers.get('content-length');
+        const totalSize = contentLength ? parseInt(contentLength, 10) : 0;
+        let loadedSize = 0;
 
+        const reader = response.body.getReader();
+        const chunks: Uint8Array[] = [];
+        
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) {
+            break;
+          }
+          chunks.push(value);
+          loadedSize += value.length;
+          if (totalSize > 0) {
+            const progress = (loadedSize / totalSize) * 100;
+            setLoadingProgress(progress);
+          }
+        }
+
+        const dbBytes = new Uint8Array(loadedSize);
+        let offset = 0;
+        for (const chunk of chunks) {
+          dbBytes.set(chunk, offset);
+          offset += chunk.length;
+        }
+        
+        setLoadingStatus('Initializing database...');
+        setLoadingProgress(100); // Show 100% for download
+        
+        const db = await openDbFromArrayBuffer(dbBytes.buffer);
+
+        setLoadingStatus('Processing systems...');
         // Query the database
         const systemsRes = db.exec("SELECT * FROM systems WHERE hidden = 0");
         const stargatesRes = db.exec("SELECT * FROM stargates");
@@ -268,6 +307,7 @@ function App() {
             });
         }
 
+        setLoadingStatus('Processing stargates...');
         const stargates: { [key: string]: Stargate } = {};
         if (stargatesRes.length > 0) {
             stargatesRes[0].values.forEach((row: SqlValue[]) => {
@@ -286,6 +326,7 @@ function App() {
             });
         }
         
+        setLoadingStatus('Processing regions...');
         const regions: { [key: string]: RegionRow } = {};
         if (regionsRes.length > 0) {
             regionsRes[0].values.forEach((row: SqlValue[]) => {
@@ -301,6 +342,7 @@ function App() {
             });
         }
 
+        setLoadingStatus('Processing constellations...');
         const constellations: { [key: string]: ConstellationRow } = {};
         if (constellationsRes.length > 0) {
             constellationsRes[0].values.forEach((row: SqlValue[]) => {
@@ -316,6 +358,7 @@ function App() {
             });
         }
 
+        setLoadingStatus('Finalizing...');
         setMapData({ solar_systems, stargates, regions, constellations });
 
         // Calculate min/max planets once data is loaded
@@ -324,9 +367,12 @@ function App() {
         const initialMaxPlanets = planetCounts.length > 0 ? Math.max(...planetCounts) : 0;
         setMinPlanets(initialMinPlanets);
         setMaxPlanets(initialMaxPlanets);
+        
+        setIsLoaded(true);
 
       } catch (error) {
         console.error('Error loading map data:', error);
+        setLoadingStatus('Error loading map data. Please check the console.');
       }
     };
 
@@ -343,6 +389,7 @@ function App() {
 
   // Initialize Scene
   useEffect(() => {
+    if (!isLoaded) return; // Don't initialize scene until loaded
     const currentMount = mountRef.current;
     if (!currentMount) return;
 
@@ -421,10 +468,12 @@ function App() {
       window.removeEventListener('resize', handleResize);
       controls.dispose();
       rendererRef.current?.dispose();
-      currentMount.removeChild(rendererRef.current!.domElement);
+      if (rendererRef.current) {
+        currentMount.removeChild(rendererRef.current!.domElement);
+      }
       currentMount.removeChild(labelRenderer.domElement); // New: Clean up label renderer DOM
     };
-  }, [ringTexture]);
+  }, [isLoaded, ringTexture]);
 
   // Create and update starfield and stargates
   useEffect(() => {
@@ -733,6 +782,7 @@ function App() {
 
   // Handle Pointer Events
   useEffect(() => {
+    if (!isLoaded) return;
     const currentRenderer = rendererRef.current;
     if (!currentRenderer) return;
 
@@ -861,7 +911,7 @@ function App() {
       currentRenderer.domElement.removeEventListener('pointerdown', onPointerDown);
       currentRenderer.domElement.removeEventListener('pointerup', onPointerUp);
     };
-    }, [hoveredSystem, isDraggingRef, mouseDownPosRef, mouseDownTimeRef, createSystemLabelElement, selectSystem]);
+    }, [isLoaded, hoveredSystem, isDraggingRef, mouseDownPosRef, mouseDownTimeRef, createSystemLabelElement, selectSystem]);
 
   const handleSearch = (event: React.KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'Enter' && mapData) {
@@ -877,6 +927,10 @@ function App() {
       }
     }
   };
+
+  if (!isLoaded) {
+    return <LoadingScreen progress={loadingProgress} status={loadingStatus} />;
+  }
 
   return (
     <>
