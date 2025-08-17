@@ -5,7 +5,7 @@
 .p2p-routing-panel {
   padding: 10px;
   margin-top: 5px;
-  background-color: rgba(25, 25, 25, 0.7); /* Slightly different background to stand out */
+  background-color: rgba(25, 25, 25, 0.7);
   border: 1px solid #555;
   border-radius: 4px;
   display: flex;
@@ -59,20 +59,22 @@
   padding-top: 10px;
 }
 
-.p2p-note-textarea {
-  width: 100%;
-  background-color: #111;
-  color: #ddd;
-  border: 1px solid #555;
-  border-radius: 3px;
-  font-family: monospace;
+.route-summary p {
+  margin: 2px 0;
   font-size: 0.9em;
+  display: flex;
+  justify-content: space-between;
+}
+
+.route-summary p span {
+  font-weight: bold;
+  color: #00aaff;
 }
 
 .p2p-copy-buttons {
   display: flex;
   gap: 5px;
-  margin-top: 5px;
+  margin-top: 10px;
 }
 
 .p2p-copy-button {
