@@ -1069,12 +1069,12 @@ function App() {
     };
     }, [isLoaded, hoveredSystem, isDraggingRef, mouseDownPosRef, mouseDownTimeRef, createSystemLabelElement, selectSystem, isPlanetCountActive, showDistance, highlightedSystem]);
 
-  const handleSearch = (event: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleSearch = (event: React.KeyboardEvent<HTMLInputElement>, systemNameFromSelection?: string) => {
     if (event.key === 'Enter' && mapData) {
-      const query = searchQuery.toLowerCase();
-      const foundSystem = Object.values(mapData.solar_systems).find(
-        (system) => system.name.toLowerCase() === query
-      );
+      const query = (systemNameFromSelection || searchQuery).toLowerCase().trim();
+        const foundSystem = Object.values(mapData.solar_systems).find(
+          (system) => system.name.toLowerCase().trim() === query
+        );
       if (foundSystem) {
         selectSystem(foundSystem);
       } else {
@@ -1098,7 +1098,7 @@ function App() {
             onChange={setSearchQuery}
             onSelect={(selected) => {
               setSearchQuery(selected);
-              handleSearch({ key: 'Enter' } as React.KeyboardEvent<HTMLInputElement>);
+              handleSearch({ key: 'Enter' } as React.KeyboardEvent<HTMLInputElement>, selected);
             }}
             dataSource={mapData ? Object.values(mapData.solar_systems).map(s => s.name) : []}
           />
