@@ -85,6 +85,7 @@ function App() {
   const [hoveredSystem, setHoveredSystem] = useState<SolarSystem | null>(null);
   const [isRegionHighlighterActive, setIsRegionHighlighterActive] = useState(false);
   const [isPlanetCountActive, setIsPlanetCountActive] = useState(false);
+  const [showDistance, setShowDistance] = useState(false);
   const [minPlanets, setMinPlanets] = useState(0);
   const [maxPlanets, setMaxPlanets] = useState(0);
 
@@ -181,7 +182,7 @@ function App() {
   }, [isPlanetCountActive]);
 
   // Helper to set label text
-  const setLabelText = (obj: CSS2DObject, name: string, planets?: number) => {
+  const setLabelText = useCallback((obj: CSS2DObject, name: string, planets?: number) => {
     const inner = (obj.element as HTMLElement).querySelector('.system-label') as HTMLElement | null;
     if (inner) {
       inner.textContent = name;
@@ -192,7 +193,7 @@ function App() {
         inner.appendChild(planetCountSpan);
       }
     }
-  };
+  }, [isPlanetCountActive]);
 
   // Helper to get planet count color
   const getPlanetCountColor = useCallback((planets: number, minPlanets: number, maxPlanets: number): THREE.Color => {
@@ -852,6 +853,27 @@ function App() {
             setLabelText(hoverLabelObj.current, newHoveredSystem.name, newHoveredSystem.planets);
             hoverLabelObj.current.position.set(0, 0, 0); // Reset offset
           }
+          
+          const labelElement = (hoverLabelObj.current.element as HTMLElement).querySelector('.system-label');
+          if (labelElement) {
+            let labelText = newHoveredSystem.name;
+            if (isPlanetCountActive) {
+              labelText += ` (${newHoveredSystem.planets} planets)`;
+            }
+        
+            if (showDistance && highlightedSystem) {
+              const p1 = newHoveredSystem.position;
+              const p2 = highlightedSystem.position;
+              const distance = Math.sqrt(
+                Math.pow(p2.x - p1.x, 2) +
+                Math.pow(p2.y - p1.y, 2) +
+                Math.pow(p2.z - p1.z, 2)
+              );
+              labelText += ` | ${distance.toFixed(2)} LY`;
+            }
+            labelElement.textContent = labelText;
+          }
+
           hoverLabelObj.current.visible = true;
 
         } else {
@@ -911,7 +933,7 @@ function App() {
       currentRenderer.domElement.removeEventListener('pointerdown', onPointerDown);
       currentRenderer.domElement.removeEventListener('pointerup', onPointerUp);
     };
-    }, [isLoaded, hoveredSystem, isDraggingRef, mouseDownPosRef, mouseDownTimeRef, createSystemLabelElement, selectSystem]);
+    }, [isLoaded, hoveredSystem, isDraggingRef, mouseDownPosRef, mouseDownTimeRef, createSystemLabelElement, selectSystem, isPlanetCountActive, showDistance, highlightedSystem]);
 
   const handleSearch = (event: React.KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'Enter' && mapData) {
@@ -967,6 +989,16 @@ function App() {
               }}
             />
             Display Planet Counts
+          </label>
+        </div>
+        <div style={{ marginTop: '10px' }}>
+          <label>
+            <input
+              type="checkbox"
+              checked={showDistance}
+              onChange={(e) => setShowDistance(e.target.checked)}
+            />
+            Show Distance
           </label>
         </div>
         {isPlanetCountActive && generatePlanetCountLegend()}
