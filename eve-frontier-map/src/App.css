@@ -8,17 +8,29 @@ body {
   height: 100vh;
 }
 
-  --label-offset-px: 10px;  /* adjust here */
-
-.system-label-wrapper {
+  .system-label-wrapper {
+  /* This wrapper is the Three.js anchor point (at the star's center) */
+  position: relative; /* Establishes a positioning context for the child label */
   width: 0;
   height: 0;
-  overflow: visible;       /* allow child to render outside the 0×0 anchor */
+  overflow: visible;
   pointer-events: none;
   user-select: none;
 }
 
 .system-label {
+  /* This is the visible label element */
+  position: absolute; /* Positioned relative to the wrapper */
+  transform: translateY(-50%); /* Vertically center the label on the star's position */
+
+  /*
+    Horizontally position the label's LEFT edge at a fixed distance
+    from the star's RIGHT edge.
+    left = (star's radius) + (desired gap)
+    left = (10px / 2) + 15px = 20px
+  */
+  left: 20px;
+
   font-family: "Fira Mono","Roboto Mono","IBM Plex Mono","Cousine","Consolas",monospace;
   font-weight: 700;
   letter-spacing: 0.02em;
@@ -27,12 +39,11 @@ body {
   font-size: 18px; /* 75% of 24px, as per request */
   border: 1.5px solid var(--selection-orange, #FF7A00);
   border-radius: 6px;
-  padding: 2px 6px;                             /* tight padding */
-  background: #000; /* Black interior fill */
+  padding: 2px 6px;
+  background: #000;
   text-shadow: 0 1px 0 #000, 0 0 6px rgba(255,255,255,.12);
   white-space: nowrap;
   user-select: none;
-  transform: translateX(65px);
 }
 .system-label--selected {
   /* identical style; class exists only to allow future tweaks if needed */

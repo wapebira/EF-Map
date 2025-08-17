@@ -59,6 +59,7 @@ def create_database_schema(cursor):
             security_status REAL,
             star_class TEXT,
             hidden BOOLEAN,
+            planet_count INTEGER,  -- Added this line
             FOREIGN KEY(constellation_id) REFERENCES constellations(id),
             FOREIGN KEY(region_id) REFERENCES regions(id)
         )
@@ -184,14 +185,12 @@ def create_map_data():
         sx, sy, sz = cx / scale_factor, cy / scale_factor, cz / scale_factor
         X, Y, Z = rot_rx_minus_90(sx, sy, sz)
 
-        # Get system name from system_names table
-        cursor.execute("SELECT name FROM system_names WHERE id = ?", (system_id,))
-        result = cursor.fetchone()
-        system_name = result[0] if result else system_data.get('name')
+        # Directly use system_data.get('name')
+        system_name = system_data.get('name')
 
         cursor.execute("""
-            INSERT OR REPLACE INTO systems (id, name, constellation_id, region_id, center_x, center_y, center_z, position_x, position_y, position_z, security_class, security_status, star_class, hidden)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO systems (id, name, constellation_id, region_id, center_x, center_y, center_z, position_x, position_y, position_z, security_class, security_status, star_class, hidden, planet_count)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             system_id,
             system_name,
@@ -202,7 +201,8 @@ def create_map_data():
             system_data.get('securityClass'),
             system_data.get('securityStatus'),
             system_data.get('starClass'),
-            False
+            False,
+            len(system_data.get('celestials', {}).get('planetIds', [])) # Get total planet count
         ))
 
         if 'navigation' in system_data and 'neighbours' in system_data['navigation'] and system_data['navigation']['neighbours']:
