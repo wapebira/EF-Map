@@ -21,6 +21,13 @@ interface MapData {
   stargates: { [key: string]: Stargate };
 }
 
+interface RouteSummary {
+  stargateJumps: number;
+  shipJumps: number;
+  totalDistance: number;
+  shipJumpDistance: number;
+}
+
 const MAX_NOTE_LENGTH = 1500;
 
 const getDistance = (a: SolarSystem, b: SolarSystem): number => {
@@ -29,6 +36,42 @@ const getDistance = (a: SolarSystem, b: SolarSystem): number => {
     Math.pow(a.position.y - b.position.y, 2) +
     Math.pow(a.position.z - b.position.z, 2)
   );
+};
+
+const calculateRouteSummary = (path: string[], mapData: MapData): RouteSummary => {
+  const summary: RouteSummary = {
+    stargateJumps: 0,
+    shipJumps: 0,
+    totalDistance: 0,
+    shipJumpDistance: 0,
+  };
+
+  const systemsByName: Map<string, SolarSystem> = new Map(Object.values(mapData.solar_systems).map(s => [s.name.toLowerCase(), s]));
+  const pathSystems = path.map(name => systemsByName.get(name.toLowerCase())).filter(Boolean) as SolarSystem[];
+
+  if (pathSystems.length < 2) return summary;
+
+  for (let i = 0; i < pathSystems.length - 1; i++) {
+    const startSystem = pathSystems[i];
+    const endSystem = pathSystems[i + 1];
+
+    const distance = getDistance(startSystem, endSystem);
+    summary.totalDistance += distance;
+
+    const isStargate = Object.values(mapData.stargates).some(g => 
+        (g.source_system_id === startSystem.id && g.destination_system_id === endSystem.id) ||
+        (g.source_system_id === endSystem.id && g.destination_system_id === startSystem.id)
+    );
+
+    if (isStargate) {
+      summary.stargateJumps++;
+    } else {
+      summary.shipJumps++;
+      summary.shipJumpDistance += distance;
+    }
+  }
+
+  return summary;
 };
 
 const formatRouteToNotes = (path: string[], mapData: MapData): string[] => {
@@ -155,16 +198,20 @@ const P2PRouting = ({ onCalculateRoute, isCalculating, routeResult, mapData, sys
   const [optimizeFor, setOptimizeFor] = useState<'fuel' | 'jumps'>('fuel');
 
   const [notePages, setNotePages] = useState<string[]>([]);
+  const [summary, setSummary] = useState<RouteSummary | null>(null);
   const [activeNotePage, setActiveNotePage] = useState(0);
   const [copyButtonText, setCopyButtonText] = useState('Copy');
 
   useEffect(() => {
     if (routeResult?.path && mapData) {
       const notes = formatRouteToNotes(routeResult.path, mapData);
+      const routeSummary = calculateRouteSummary(routeResult.path, mapData);
       setNotePages(notes);
+      setSummary(routeSummary);
       setActiveNotePage(0);
     } else {
       setNotePages([]);
+      setSummary(null);
     }
   }, [routeResult, mapData]);
 
@@ -251,6 +298,17 @@ const P2PRouting = ({ onCalculateRoute, isCalculating, routeResult, mapData, sys
           </button>
 
           {routeResult && routeResult.error && <p className="error">Error: {routeResult.error}</p>}
+
+          {summary && (
+            <div className="p2p-results">
+               <div className="route-summary">
+                <p>Total Stargate Jumps: <span>{summary.stargateJumps}</span></p>
+                <p>Total Ship Jumps: <span>{summary.shipJumps}</span></p>
+                <p>Total Distance: <span>{summary.totalDistance.toFixed(2)} LY</span></p>
+                <p>Ship Jump Distance: <span>{summary.shipJumpDistance.toFixed(2)} LY</span></p>
+              </div>
+            </div>
+          )}
 
           {notePages.length > 0 && (
             <div className="p2p-results">
