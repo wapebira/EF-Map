@@ -1,0 +1,94 @@
+.p2p-routing-container {
+  margin-top: 10px;
+}
+
+.p2p-routing-panel {
+  padding: 10px;
+  margin-top: 5px;
+  background-color: rgba(25, 25, 25, 0.7); /* Slightly different background to stand out */
+  border: 1px solid #555;
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.p2p-input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.p2p-input-group label {
+  font-size: 0.9em;
+  color: #ccc;
+}
+
+.p2p-input-group input,
+.p2p-input-group select {
+  padding: 5px;
+  background-color: #111;
+  border: 1px solid #555;
+  color: white;
+  border-radius: 3px;
+}
+
+.p2p-calculate-button {
+  padding: 8px;
+  background-color: #00aaff;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  text-align: center;
+  font-weight: bold;
+}
+
+.p2p-calculate-button:hover {
+  background-color: #0088cc;
+}
+
+.p2p-calculate-button:disabled {
+  background-color: #555;
+  cursor: not-allowed;
+}
+
+.p2p-results {
+  margin-top: 10px;
+  border-top: 1px solid #555;
+  padding-top: 10px;
+}
+
+.p2p-note-textarea {
+  width: 100%;
+  background-color: #111;
+  color: #ddd;
+  border: 1px solid #555;
+  border-radius: 3px;
+  font-family: monospace;
+  font-size: 0.9em;
+}
+
+.p2p-copy-buttons {
+  display: flex;
+  gap: 5px;
+  margin-top: 5px;
+}
+
+.p2p-copy-button {
+  flex-grow: 1;
+  padding: 5px;
+  background-color: #335577;
+  border: 1px solid #7799bb;
+  color: white;
+  cursor: pointer;
+}
+
+.p2p-copy-button.active {
+  background-color: #00aaff;
+}
+
+.error {
+  color: #ff4c26;
+  font-weight: bold;
+}

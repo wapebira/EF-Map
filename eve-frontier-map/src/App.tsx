@@ -7,6 +7,8 @@ import RegionHighlighterModule from './modules/RegionHighlighter';
 import { openDbFromArrayBuffer } from "./lib/sql";
 import type { SystemRow, StargateRow, RegionRow, ConstellationRow } from "./types/db";
 import LoadingScreen from './components/LoadingScreen';
+import P2PRouting from './components/P2PRouting/P2PRouting';
+import AutoCompleteInput from './components/AutoCompleteInput/AutoCompleteInput';
 
 // Helper function to create a circular texture
 const createCircleTexture = () => {
@@ -89,6 +91,11 @@ function App() {
   const [minPlanets, setMinPlanets] = useState(0);
   const [maxPlanets, setMaxPlanets] = useState(0);
 
+  // State for P2P Routing
+  const routingWorkerRef = useRef<Worker | null>(null);
+  const [isCalculatingRoute, setIsCalculatingRoute] = useState(false);
+  const [routeResult, setRouteResult] = useState<{ path: string[] | null; error?: string } | null>(null);
+
   // New state for labels
   const hoverLabelObj = useRef<CSS2DObject | null>(null);
   const selectedLabelObj = useRef<CSS2DObject | null>(null);
@@ -101,6 +108,7 @@ function App() {
   const starFieldRef = useRef<THREE.Points | null>(null);
   const hoverPointRef = useRef<THREE.Points | null>(null);
   const stargateLinesRef = useRef<THREE.LineSegments | null>(null);
+  const routeLinesRef = useRef<THREE.Group | null>(null); // New ref for route lines
   const visibleSystemsRef = useRef<SolarSystem[]>([]);
   const animationRef = useRef({
     isAnimating: false,
@@ -158,6 +166,14 @@ function App() {
 
   const stargateMaterial = useMemo(() => new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.4, depthWrite: false }), []);
 
+  const getTransformedPosition = useCallback((position: { x: number; y: number; z: number }) => {
+    return {
+      x: position.x,
+      y: position.z,
+      z: position.y * -1,
+    };
+  }, []);
+
   // Helper to create label elements
   const createSystemLabelElement = useCallback((name: string, isPersistent = false, planets?: number): HTMLDivElement => {
     const wrapper = document.createElement('div');          // This becomes CSS2DObject.element
@@ -194,6 +210,94 @@ function App() {
       }
     }
   }, [isPlanetCountActive]);
+
+  const selectSystem = useCallback((system: SolarSystem) => {
+    // Set the highlighted system for camera animation and the main rendering effect
+    setHighlightedSystem(system);
+
+    // Clear previous persistent label
+    if (selectedLabelObj.current && selectedLabelObj.current.parent) {
+      selectedLabelObj.current.parent.remove(selectedLabelObj.current);
+      if (sceneRef.current && selectedLabelObj.current.parent instanceof THREE.Object3D) {
+        sceneRef.current.remove(selectedLabelObj.current.parent);
+      }
+    }
+
+    // Create a new object to parent the label to (at the system's position)
+    const newSelectedLabelParent = new THREE.Object3D();
+    const transformedPos = getTransformedPosition(system.position);
+    newSelectedLabelParent.position.set(transformedPos.x, transformedPos.y, transformedPos.z);
+    sceneRef.current?.add(newSelectedLabelParent);
+
+    // Create or update the label
+    if (selectedLabelObj.current === null) {
+      const el = createSystemLabelElement(system.name, true);
+      selectedLabelObj.current = new CSS2DObject(el);
+      selectedLabelObj.current.position.set(0, 0, 0);
+      newSelectedLabelParent.add(selectedLabelObj.current);
+    }
+    else {
+      setLabelText(selectedLabelObj.current, system.name);
+      selectedLabelObj.current.position.set(0, 0, 0);
+      newSelectedLabelParent.add(selectedLabelObj.current);
+    }
+    selectedLabelObj.current.visible = true;
+
+  }, [createSystemLabelElement, setLabelText, getTransformedPosition]);
+
+  // Initialize and manage the routing worker
+  useEffect(() => {
+    // Create a new worker
+    const worker = new Worker(new URL('./utils/routing_worker.ts', import.meta.url), {
+      type: 'module',
+    });
+    routingWorkerRef.current = worker;
+
+    // Listen for messages from the worker
+    worker.onmessage = (e) => {
+      const { path, error } = e.data;
+      setIsCalculatingRoute(false);
+      if (error) {
+        alert(`Routing Error: ${error}`);
+        setRouteResult({ path: null, error });
+        return;
+      }
+      setRouteResult({ path, error: undefined });
+
+      // On successful route, center the view on the starting system
+      if (path && path.length > 0 && mapData) {
+        const systemsByName = Object.fromEntries(Object.values(mapData.solar_systems).map(s => [s.name.toLowerCase(), s]));
+        const startSystem = systemsByName[path[0].toLowerCase()];
+        if (startSystem) {
+          selectSystem(startSystem);
+        }
+      }
+    };
+
+    // Terminate the worker on cleanup
+    return () => {
+      worker.terminate();
+    };
+  }, [mapData, selectSystem]);
+
+  const calculateRoute = useCallback((fromSystemName: string, toSystemName: string, maxJumpDistance: number, optimizeFor: 'fuel' | 'jumps') => {
+    if (!mapData) {
+      alert('Map data is not loaded yet.');
+      return;
+    }
+
+    setIsCalculatingRoute(true);
+    setRouteResult(null);
+
+    routingWorkerRef.current?.postMessage({
+      systems: mapData.solar_systems,
+      stargates: mapData.stargates,
+      fromSystemName,
+      toSystemName,
+      maxJumpDistance,
+      optimizeFor,
+    });
+  }, [mapData]);
 
   // Helper to get planet count color
   const getPlanetCountColor = useCallback((planets: number, minPlanets: number, maxPlanets: number): THREE.Color => {
@@ -378,14 +482,6 @@ function App() {
     };
 
     loadDatabase();
-  }, []);
-
-  const getTransformedPosition = useCallback((position: { x: number; y: number; z: number }) => {
-    return {
-      x: position.x,
-      y: position.z,
-      z: position.y * -1,
-    };
   }, []);
 
   // Initialize Scene
@@ -697,6 +793,78 @@ function App() {
     ringTexture,
   ]);
 
+  // Draw Route Lines
+  useEffect(() => {
+    if (!sceneRef.current || !mapData) return;
+
+    // Clear previous route lines
+    if (routeLinesRef.current) {
+      sceneRef.current.remove(routeLinesRef.current);
+      routeLinesRef.current.children.forEach((child: any) => {
+        child.geometry?.dispose();
+        child.material?.dispose();
+      });
+      routeLinesRef.current = null;
+    }
+
+    if (routeResult && routeResult.path) {
+      const systemsByName = Object.fromEntries(Object.values(mapData.solar_systems).map(s => [s.name.toLowerCase(), s]));
+      const pathSystems = routeResult.path.map(name => systemsByName[name.toLowerCase()]).filter(Boolean);
+
+      if (pathSystems.length < 2) return;
+
+      const routeGroup = new THREE.Group();
+      routeLinesRef.current = routeGroup;
+
+      for (let i = 0; i < pathSystems.length - 1; i++) {
+        const startSystem = pathSystems[i];
+        const endSystem = pathSystems[i + 1];
+
+        const startPos = getTransformedPosition(startSystem.position);
+        const endPos = getTransformedPosition(endSystem.position);
+        const startVec = new THREE.Vector3(startPos.x, startPos.y, startPos.z);
+        const endVec = new THREE.Vector3(endPos.x, endPos.y, endPos.z);
+
+        // Check if a stargate exists between these two systems
+        const isStargateJump = Object.values(mapData.stargates).some(gate => 
+          (gate.source_system_id === startSystem.id && gate.destination_system_id === endSystem.id) ||
+          (gate.source_system_id === endSystem.id && gate.destination_system_id === startSystem.id)
+        );
+
+        if (isStargateJump) {
+          const geometry = new THREE.BufferGeometry().setFromPoints([startVec, endVec]);
+          const material = new THREE.LineBasicMaterial({ color: 0xff0000, linewidth: 4, transparent: true, opacity: 0.9, depthWrite: false });
+          const line = new THREE.Line(geometry, material);
+          routeGroup.add(line);
+        } else {
+          // It's a direct ship jump, draw a curved line
+          const midPoint = new THREE.Vector3().addVectors(startVec, endVec).multiplyScalar(0.5);
+          const dist = startVec.distanceTo(endVec);
+          const controlPointOffset = new THREE.Vector3(0, dist * 0.15, 0); // Adjust height of curve
+          const controlPoint = new THREE.Vector3().addVectors(midPoint, controlPointOffset);
+
+          const curve = new THREE.QuadraticBezierCurve3(startVec, controlPoint, endVec);
+          const points = curve.getPoints(50);
+          const geometry = new THREE.BufferGeometry().setFromPoints(points);
+          const material = new THREE.LineDashedMaterial({ 
+            color: 0xff0000, 
+            linewidth: 4,
+            dashSize: 50, 
+            gapSize: 20, 
+            transparent: true, 
+            opacity: 0.9, 
+            depthWrite: false 
+          });
+          const line = new THREE.Line(geometry, material);
+          line.computeLineDistances(); // Required for dashed lines
+          routeGroup.add(line);
+        }
+      }
+      sceneRef.current.add(routeGroup);
+    }
+
+  }, [routeResult, mapData, getTransformedPosition]);
+
   // Handle camera animation
   useEffect(() => {
     if (!highlightedSystem || !controlsRef.current || !cameraRef.current) return;
@@ -746,40 +914,6 @@ function App() {
       }
     }
   }, [hoveredSystem, getTransformedPosition, pointsMaterial]);
-
-  const selectSystem = useCallback((system: SolarSystem) => {
-    // Set the highlighted system for camera animation and the main rendering effect
-    setHighlightedSystem(system);
-
-    // Clear previous persistent label
-    if (selectedLabelObj.current && selectedLabelObj.current.parent) {
-      selectedLabelObj.current.parent.remove(selectedLabelObj.current);
-      if (sceneRef.current && selectedLabelObj.current.parent instanceof THREE.Object3D) {
-        sceneRef.current.remove(selectedLabelObj.current.parent);
-      }
-    }
-
-    // Create a new object to parent the label to (at the system's position)
-    const newSelectedLabelParent = new THREE.Object3D();
-    const transformedPos = getTransformedPosition(system.position);
-    newSelectedLabelParent.position.set(transformedPos.x, transformedPos.y, transformedPos.z);
-    sceneRef.current?.add(newSelectedLabelParent);
-
-    // Create or update the label
-    if (selectedLabelObj.current === null) {
-      const el = createSystemLabelElement(system.name, true);
-      selectedLabelObj.current = new CSS2DObject(el);
-      selectedLabelObj.current.position.set(0, 0, 0);
-      newSelectedLabelParent.add(selectedLabelObj.current);
-    }
-    else {
-      setLabelText(selectedLabelObj.current, system.name);
-      selectedLabelObj.current.position.set(0, 0, 0);
-      newSelectedLabelParent.add(selectedLabelObj.current);
-    }
-    selectedLabelObj.current.visible = true;
-
-  }, [createSystemLabelElement, setLabelText, getTransformedPosition]);
 
   // Handle Pointer Events
   useEffect(() => {
@@ -958,13 +1092,15 @@ function App() {
     <>
       <div style={{ position: 'absolute', top: 10, left: 10, zIndex: 1, color: 'white', backgroundColor: 'rgba(0,0,0,0.5)', padding: '10px', borderRadius: '5px' }}>
         <div>
-          <input
-            type="text"
+          <AutoCompleteInput
             placeholder="Search for a system..."
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            onKeyDown={handleSearch}
-            style={{ padding: '5px' }}
+            onChange={setSearchQuery}
+            onSelect={(selected) => {
+              setSearchQuery(selected);
+              handleSearch({ key: 'Enter' } as React.KeyboardEvent<HTMLInputElement>);
+            }}
+            dataSource={mapData ? Object.values(mapData.solar_systems).map(s => s.name) : []}
           />
         </div>
         <div style={{ marginTop: '10px' }}>
@@ -1001,6 +1137,13 @@ function App() {
             Show Distance
           </label>
         </div>
+        <P2PRouting 
+          onCalculateRoute={calculateRoute} 
+          isCalculating={isCalculatingRoute} 
+          routeResult={routeResult} 
+          mapData={mapData}
+          systemNames={mapData ? Object.values(mapData.solar_systems).map(s => s.name) : []}
+        />
         {isPlanetCountActive && generatePlanetCountLegend()}
       </div>
       <div ref={mountRef} style={{ width: '100vw', height: '100vh' }} />
