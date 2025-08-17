@@ -7,6 +7,7 @@ export interface SystemRow {
   y: number;
   z: number;
   hidden: boolean;
+  planet_count: number;
 }
 
 export interface StargateRow {

@@ -191,7 +191,11 @@ function App() {
 
   // Helper to get planet count color
   const getPlanetCountColor = useCallback((planets: number, minPlanets: number, maxPlanets: number): THREE.Color => {
-    if (maxPlanets === minPlanets) return new THREE.Color().setHSL(0.5, 1.0, 0.5); // Default if all counts are same
+    if (maxPlanets === minPlanets) {
+      // If all planet counts are the same (e.g., all 0), or initial state
+      // return DEFAULT_STAR_COLOR instead of a specific HSL color.
+      return DEFAULT_STAR_COLOR;
+    }
     const normalized = (planets - minPlanets) / (maxPlanets - minPlanets);
     return new THREE.Color().setHSL(normalized * 0.33, 1.0, 0.5); // Red to Green
   }, []);
@@ -313,6 +317,13 @@ function App() {
         }
 
         setMapData({ solar_systems, stargates, regions, constellations });
+
+        // Calculate min/max planets once data is loaded
+        const planetCounts = Object.values(solar_systems).map(s => s.planets);
+        const initialMinPlanets = planetCounts.length > 0 ? Math.min(...planetCounts) : 0;
+        const initialMaxPlanets = planetCounts.length > 0 ? Math.max(...planetCounts) : 0;
+        setMinPlanets(initialMinPlanets);
+        setMaxPlanets(initialMaxPlanets);
 
       } catch (error) {
         console.error('Error loading map data:', error);
@@ -496,7 +507,8 @@ function App() {
         starFieldRef.current!,
         stargateLinesRef.current,
         highlightedSystem, // Pass for consistency, though not used for star color reset
-        visibleSystemsRef.current
+        visibleSystemsRef.current,
+        isPlanetCountActive
       );
 
       // Remove selected star halo
@@ -541,12 +553,7 @@ function App() {
     cleanupVisuals();
 
     // --- Step 1: Base Layer (Planet Count or White, with Region-specific DPC) ---
-    const planetCounts = visibleSystemsRef.current.map(s => s.planets);
-    const currentMinPlanets = planetCounts.length > 0 ? Math.min(...planetCounts) : 0;
-    const currentMaxPlanets = planetCounts.length > 0 ? Math.max(...planetCounts) : 0;
     
-    if (minPlanets !== currentMinPlanets) setMinPlanets(currentMinPlanets);
-    if (maxPlanets !== currentMaxPlanets) setMaxPlanets(currentMaxPlanets);
 
     let systemsInHighlightedRegion: Set<number> | null = null;
     if (isRegionHighlighterActive && highlightedSystem) {

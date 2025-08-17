@@ -31,13 +31,15 @@ interface Module {
     starField: THREE.Points,
     stargateLines: THREE.LineSegments | null,
     highlightedSystem: SolarSystem | null,
-    visibleSystems: SolarSystem[] // New parameter
+    visibleSystems: SolarSystem[],
+    isPlanetCountActive: boolean
   ) => void;
   cleanup: (
     starField: THREE.Points,
     stargateLines: THREE.LineSegments | null,
     highlightedSystem: SolarSystem | null,
-    visibleSystems: SolarSystem[]
+    visibleSystems: SolarSystem[],
+    isPlanetCountActive: boolean
   ) => void;
 }
 
@@ -53,7 +55,7 @@ const RegionHighlighterModule: Module = {
   id: 'region-highlighter',
   name: 'Region Highlighter',
 
-  init: (_scene, _mapData, starField, stargateLines, highlightedSystem, visibleSystems) => {
+  init: (_scene, _mapData, starField, stargateLines, highlightedSystem, visibleSystems, isPlanetCountActive) => {
     if (!starField) {
       return;
     }
@@ -90,7 +92,10 @@ const RegionHighlighterModule: Module = {
         // Highlight star
         const index = visibleSystems.findIndex(s => s.id === system.id);
         if (index !== -1) {
-          HIGHLIGHT_COLOR_STARS.toArray(starColors.array, index * 3);
+          // Only apply highlight color if DPC is NOT active
+          if (!isPlanetCountActive) {
+            HIGHLIGHT_COLOR_STARS.toArray(starColors.array, index * 3);
+          }
         } else {
         }
       }
@@ -118,8 +123,10 @@ const RegionHighlighterModule: Module = {
     starColors.needsUpdate = true;
   },
 
-  cleanup: (starField, stargateLines, highlightedSystem, visibleSystems) => {
-    if (starField && originalStarColors) {
+  cleanup: (starField, stargateLines, highlightedSystem, visibleSystems, isPlanetCountActive) => {
+    // Only reset star colors if DPC is NOT active.
+    // If DPC is active, App.tsx's useLayoutEffect will handle re-coloring.
+    if (!isPlanetCountActive && starField && originalStarColors) {
       const starColors = (starField.geometry as THREE.BufferGeometry).attributes.color as THREE.BufferAttribute;
       // Only reset if starColors.array is still valid
       if (starColors && starColors.array) {
