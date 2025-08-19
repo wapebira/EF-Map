@@ -52,4 +52,18 @@ body {
   white-space: nowrap;
   user-select: none;
 }
+
+/* Small persistent EF Map logo bottom-right */
+.ef-small-logo {
+  position: fixed;
+  right: 12px;
+  bottom: 12px;
+  width: 48px;
+  height: 48px;
+  opacity: 0.9;
+  z-index: 3000;
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.6);
+  cursor: default;
+}
 /* .system-label--selected intentionally left unstyled - uses same styles as .system-label */

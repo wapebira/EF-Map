@@ -4,6 +4,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import './App.css';
 import RegionHighlighterModule, { setRegionHighlightColors } from './modules/RegionHighlighter';
+import logo from './assets/logo/logo.png';
 import { openDbFromArrayBuffer } from "./lib/sql";
 import type { SystemRow, StargateRow, RegionRow, ConstellationRow } from "./types/db";
 import LoadingScreen from './components/LoadingScreen';
@@ -1500,6 +1501,8 @@ function App() {
         </label>
       </div>
       <div ref={mountRef} style={{ width: '100vw', height: '100vh' }} />
+  {/* Small persistent logo in the bottom-right */}
+  <img src={logo} alt="EF Map" className="ef-small-logo" />
     </>
   );
 }
