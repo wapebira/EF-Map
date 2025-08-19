@@ -1,0 +1,112 @@
+.p2p-routing-container {
+  margin-top: 10px;
+}
+
+.p2p-routing-panel {
+  padding: 10px;
+  margin-top: 5px;
+  background-color: rgba(25, 25, 25, 0.7);
+  border: 1px solid #555;
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.p2p-input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  /* Ensure inputs have the same right inset as other panels */
+  width: 100%;
+}
+
+.p2p-input-group label {
+  font-size: 0.9em;
+  color: #ccc;
+}
+
+.p2p-input-group input,
+.p2p-input-group select {
+  padding: 5px;
+  background-color: #111;
+  border: 1px solid #555;
+  color: white;
+  border-radius: 3px;
+  box-sizing: border-box;
+}
+
+.p2p-calculate-button {
+  padding: 8px;
+  background-color: var(--accent);
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  text-align: center;
+  font-weight: bold;
+}
+
+.p2p-stop-button {
+  padding: 8px;
+  background-color: var(--accent);
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  text-align: center;
+  font-weight: bold;
+  margin-top: 6px;
+}
+
+.p2p-calculate-button:hover {
+  /* Keep hover color tied to the current accent so it doesn't flip when accent is orange */
+  background-color: var(--accent);
+}
+
+.p2p-calculate-button:disabled {
+  background-color: #555;
+  cursor: not-allowed;
+}
+
+.p2p-results {
+  margin-top: 10px;
+  border-top: 1px solid #555;
+  padding-top: 10px;
+}
+
+.route-summary p {
+  margin: 2px 0;
+  font-size: 0.9em;
+  display: flex;
+  justify-content: space-between;
+}
+
+.route-summary p span {
+  font-weight: bold;
+  color: var(--accent);
+}
+
+.p2p-copy-buttons {
+  display: flex;
+  gap: 5px;
+  margin-top: 10px;
+}
+
+.p2p-copy-button {
+  flex-grow: 1;
+  padding: 5px;
+  background-color: rgba(0,0,0,0.25);
+  border: 1px solid rgba(0,170,255,0.25);
+  color: white;
+  cursor: pointer;
+}
+
+.p2p-copy-button.active {
+  background-color: var(--accent);
+}
+
+.error {
+  color: #ff4c26;
+  font-weight: bold;
+}

@@ -3,10 +3,12 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import './App.css';
-import RegionHighlighterModule from './modules/RegionHighlighter';
+import RegionHighlighterModule, { setRegionHighlightColors } from './modules/RegionHighlighter';
 import { openDbFromArrayBuffer } from "./lib/sql";
 import type { SystemRow, StargateRow, RegionRow, ConstellationRow } from "./types/db";
 import LoadingScreen from './components/LoadingScreen';
+import P2PRouting from './components/P2PRouting/P2PRouting';
+import AutoCompleteInput from './components/AutoCompleteInput/AutoCompleteInput';
 
 // Helper function to create a circular texture
 const createCircleTexture = () => {
@@ -70,10 +72,12 @@ type SqlValue = number | string | Uint8Array | null;
 
 // Define colors for selection and base
 const DEFAULT_STAR_COLOR = new THREE.Color(0xffffff);
-const SELECTED_STAR_COLOR = new THREE.Color(0xff4c26); // Red/Orange for selected star when DPC is off
-const REGION_OUTLINE_COLOR = new THREE.Color(0x00aaff); // Blue for region outlines when DPC is on
+const SELECTED_STAR_COLOR = new THREE.Color(0x00aaff); // Blue for selected star when DPC is off
+const REGION_OUTLINE_COLOR = new THREE.Color(0x00aaff); // Shared blue for region outlines
 
 function App() {
+  // Default to orange accent; the toggle will flip to blue
+  const [accentIsBlue, setAccentIsBlue] = useState(false);
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [loadingStatus, setLoadingStatus] = useState('Initializing...');
   const [isLoaded, setIsLoaded] = useState(false);
@@ -89,6 +93,12 @@ function App() {
   const [minPlanets, setMinPlanets] = useState(0);
   const [maxPlanets, setMaxPlanets] = useState(0);
 
+  // State for P2P Routing
+  const routingWorkerRef = useRef<Worker | null>(null);
+  const [isCalculatingRoute, setIsCalculatingRoute] = useState(false);
+  const [routeResult, setRouteResult] = useState<{ path: string[] | null; error?: string } | null>(null);
+  const [routeProgress, setRouteProgress] = useState<{ explored: number; frontier: number; elapsedMs: number; message: string } | null>(null);
+
   // New state for labels
   const hoverLabelObj = useRef<CSS2DObject | null>(null);
   const selectedLabelObj = useRef<CSS2DObject | null>(null);
@@ -101,6 +111,7 @@ function App() {
   const starFieldRef = useRef<THREE.Points | null>(null);
   const hoverPointRef = useRef<THREE.Points | null>(null);
   const stargateLinesRef = useRef<THREE.LineSegments | null>(null);
+  const routeLinesRef = useRef<THREE.Group | null>(null); // New ref for route lines
   const visibleSystemsRef = useRef<SolarSystem[]>([]);
   const animationRef = useRef({
     isAnimating: false,
@@ -111,6 +122,9 @@ function App() {
     endTarget: new THREE.Vector3(),
     duration: 500, // ms
   });
+
+  // Updaters that run each frame (used for route pulse animations)
+  const routeAnimUpdatersRef = useRef<Array<() => void>>([]);
 
   // New refs for managing overlays
   const selectedStarHaloRef = useRef<THREE.Points | null>(null);
@@ -158,6 +172,14 @@ function App() {
 
   const stargateMaterial = useMemo(() => new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.4, depthWrite: false }), []);
 
+  const getTransformedPosition = useCallback((position: { x: number; y: number; z: number }) => {
+    return {
+      x: position.x,
+      y: position.z,
+      z: position.y * -1,
+    };
+  }, []);
+
   // Helper to create label elements
   const createSystemLabelElement = useCallback((name: string, isPersistent = false, planets?: number): HTMLDivElement => {
     const wrapper = document.createElement('div');          // This becomes CSS2DObject.element
@@ -181,6 +203,62 @@ function App() {
     return wrapper;
   }, [isPlanetCountActive]);
 
+  // Theme toggle effect: update CSS variable and three.js color constants
+  useEffect(() => {
+    const root = document.documentElement;
+    root.style.setProperty('--accent', accentIsBlue ? 'var(--selection-blue)' : 'var(--selection-orange)');
+    // Update runtime three.js colors used by the app
+  const accentHex = accentIsBlue ? 0x00aaff : 0xff4c26;
+    // Update hover material if exists
+    if (hoverPointRef.current) {
+      (hoverPointRef.current.material as THREE.PointsMaterial).color.set(accentHex);
+    }
+  // Update region highlighter runtime colors
+  try { setRegionHighlightColors(accentHex); } catch (e) { /* ignore */ }
+    // Update selected star color and region outline color constants
+    // ... App-level constants are module-scoped; update star colors directly when rendering/updating scenes
+    // Reapply region highlight and stargate colors if active
+    try {
+      if (isRegionHighlighterActive && highlightedSystem && mapData && stargateLinesRef.current && starFieldRef.current) {
+        // Re-run init to recolor buffers
+        RegionHighlighterModule.init(
+          sceneRef.current!,
+          mapData,
+          starFieldRef.current,
+          stargateLinesRef.current,
+          highlightedSystem,
+          visibleSystemsRef.current,
+          isPlanetCountActive
+        );
+      } else if (starFieldRef.current) {
+        // If no region highlight, ensure selected star keeps the accent color
+        const starColorsAttr = (starFieldRef.current.geometry as THREE.BufferGeometry).attributes.color as THREE.BufferAttribute;
+        if (highlightedSystem && !isPlanetCountActive) {
+          const highlightedIndex = visibleSystemsRef.current.findIndex(s => s.id === highlightedSystem.id);
+          if (highlightedIndex !== -1) {
+            const c = new THREE.Color(accentHex);
+            c.toArray(starColorsAttr.array as Float32Array, highlightedIndex * 3);
+            starColorsAttr.needsUpdate = true;
+          }
+        }
+        // Update stargate colors if present
+        if (stargateLinesRef.current) {
+          const stargateColors = (stargateLinesRef.current.geometry as THREE.BufferGeometry).attributes.color as THREE.BufferAttribute;
+          if (stargateColors && stargateColors.array) {
+            // When no region is highlighted, reset to original grey for all gates
+            const defaultGate = new THREE.Color(0x444444);
+            for (let i = 0; i < stargateColors.array.length; i += 3) {
+              defaultGate.toArray(stargateColors.array as Float32Array, i);
+            }
+            stargateColors.needsUpdate = true;
+          }
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+  }, [accentIsBlue]);
+
   // Helper to set label text
   const setLabelText = useCallback((obj: CSS2DObject, name: string, planets?: number) => {
     const inner = (obj.element as HTMLElement).querySelector('.system-label') as HTMLElement | null;
@@ -194,6 +272,167 @@ function App() {
       }
     }
   }, [isPlanetCountActive]);
+
+  const selectSystem = useCallback((system: SolarSystem) => {
+    // Set the highlighted system for camera animation and the main rendering effect
+    setHighlightedSystem(system);
+
+    // Clear previous persistent label
+    if (selectedLabelObj.current && selectedLabelObj.current.parent) {
+      selectedLabelObj.current.parent.remove(selectedLabelObj.current);
+      if (sceneRef.current && selectedLabelObj.current.parent instanceof THREE.Object3D) {
+        sceneRef.current.remove(selectedLabelObj.current.parent);
+      }
+    }
+
+    // Create a new object to parent the label to (at the system's position)
+    const newSelectedLabelParent = new THREE.Object3D();
+    const transformedPos = getTransformedPosition(system.position);
+    newSelectedLabelParent.position.set(transformedPos.x, transformedPos.y, transformedPos.z);
+    sceneRef.current?.add(newSelectedLabelParent);
+
+    // Create or update the label
+    if (selectedLabelObj.current === null) {
+      const el = createSystemLabelElement(system.name, true);
+      selectedLabelObj.current = new CSS2DObject(el);
+      selectedLabelObj.current.position.set(0, 0, 0);
+      newSelectedLabelParent.add(selectedLabelObj.current);
+    }
+    else {
+      setLabelText(selectedLabelObj.current, system.name);
+      selectedLabelObj.current.position.set(0, 0, 0);
+      newSelectedLabelParent.add(selectedLabelObj.current);
+    }
+    selectedLabelObj.current.visible = true;
+
+  }, [createSystemLabelElement, setLabelText, getTransformedPosition]);
+
+  // Initialize and manage the routing worker
+  useEffect(() => {
+    // Helper to create a worker and wire its message handler. We recreate when mapData or selectSystem changes.
+    const createWorker = () => {
+      const worker = new Worker(new URL('./utils/routing_worker.ts', import.meta.url), { type: 'module' });
+      routingWorkerRef.current = worker;
+
+      worker.onmessage = (e) => {
+        const data = e.data;
+        if (data && data.type === 'progress') {
+          setRouteProgress({ explored: data.explored ?? 0, frontier: data.frontier ?? 0, elapsedMs: data.elapsedMs ?? 0, message: data.message ?? '' });
+          return;
+        }
+        const { path, error } = data;
+        setIsCalculatingRoute(false);
+        // compute and store elapsed time if we started one
+        if (routeCalcStartRef.current) {
+          const elapsed = Date.now() - routeCalcStartRef.current;
+          setRouteCalcTimeMs(elapsed);
+          routeCalcStartRef.current = null;
+        }
+        setRouteProgress(null);
+        if (error) {
+          alert(`Routing Error: ${error}`);
+          setRouteResult({ path: null, error });
+          return;
+        }
+        setRouteResult({ path, error: undefined });
+
+        // On successful route, center the view on the starting system
+        if (path && path.length > 0 && mapData) {
+          const systemsByName = Object.fromEntries(Object.values(mapData.solar_systems).map(s => [s.name.toLowerCase(), s]));
+          const startSystem = systemsByName[path[0].toLowerCase()];
+          if (startSystem) {
+            selectSystem(startSystem);
+          }
+        }
+      };
+
+      return worker;
+    };
+
+    const worker = createWorker();
+
+    // Terminate the worker on cleanup
+    return () => {
+      worker.terminate();
+      routingWorkerRef.current = null;
+    };
+  }, [mapData, selectSystem]);
+
+  // Track route calculation start time and elapsed time
+  const routeCalcStartRef = useRef<number | null>(null);
+  const [routeCalcTimeMs, setRouteCalcTimeMs] = useState<number | null>(null);
+
+  // Stop / cancel the current calculation: terminate worker and recreate a fresh one
+  const stopCalculation = useCallback(() => {
+    if (routingWorkerRef.current) {
+      try {
+        routingWorkerRef.current.terminate();
+      } catch (e) {
+        // ignore
+      }
+      routingWorkerRef.current = null;
+    }
+    setIsCalculatingRoute(false);
+    setRouteProgress(null);
+    routeCalcStartRef.current = null;
+    setRouteCalcTimeMs(null);
+
+    // Recreate worker so the UI can run new calculations later
+    const worker = new Worker(new URL('./utils/routing_worker.ts', import.meta.url), { type: 'module' });
+    routingWorkerRef.current = worker;
+    // wire the same handler as above
+    worker.onmessage = (e) => {
+      const data = e.data;
+      if (data && data.type === 'progress') {
+        setRouteProgress({ explored: data.explored ?? 0, frontier: data.frontier ?? 0, elapsedMs: data.elapsedMs ?? 0, message: data.message ?? '' });
+        return;
+      }
+      const { path, error } = data;
+      setIsCalculatingRoute(false);
+      if (routeCalcStartRef.current) {
+        const elapsed = Date.now() - routeCalcStartRef.current;
+        setRouteCalcTimeMs(elapsed);
+        routeCalcStartRef.current = null;
+      }
+      setRouteProgress(null);
+      if (error) {
+        alert(`Routing Error: ${error}`);
+        setRouteResult({ path: null, error });
+        return;
+      }
+      setRouteResult({ path, error: undefined });
+
+      if (path && path.length > 0 && mapData) {
+        const systemsByName = Object.fromEntries(Object.values(mapData.solar_systems).map(s => [s.name.toLowerCase(), s]));
+        const startSystem = systemsByName[path[0].toLowerCase()];
+        if (startSystem) {
+          selectSystem(startSystem);
+        }
+      }
+    };
+  }, [mapData, selectSystem]);
+
+  const calculateRoute = useCallback((fromSystemName: string, toSystemName: string, maxJumpDistance: number, optimizeFor: 'fuel' | 'jumps', algorithm: 'astar' | 'dijkstra') => {
+    if (!mapData) {
+      alert('Map data is not loaded yet.');
+      return;
+    }
+
+    setIsCalculatingRoute(true);
+    setRouteResult(null);
+  setRouteCalcTimeMs(null);
+  routeCalcStartRef.current = Date.now();
+
+    routingWorkerRef.current?.postMessage({
+      systems: mapData.solar_systems,
+      stargates: mapData.stargates,
+      fromSystemName,
+      toSystemName,
+      maxJumpDistance,
+      optimizeFor,
+      algorithm,
+    });
+  }, [mapData]);
 
   // Helper to get planet count color
   const getPlanetCountColor = useCallback((planets: number, minPlanets: number, maxPlanets: number): THREE.Color => {
@@ -380,14 +619,6 @@ function App() {
     loadDatabase();
   }, []);
 
-  const getTransformedPosition = useCallback((position: { x: number; y: number; z: number }) => {
-    return {
-      x: position.x,
-      y: position.z,
-      z: position.y * -1,
-    };
-  }, []);
-
   // Initialize Scene
   useEffect(() => {
     if (!isLoaded) return; // Don't initialize scene until loaded
@@ -429,7 +660,7 @@ function App() {
       size: 20, // Default/min size
       sizeAttenuation: false, // Use screen-space sizing
       map: ringTexture,
-      color: 0xff4c26,
+      color: accentIsBlue ? 0x00aaff : 0xff4c26,
       transparent: true,
       alphaTest: 0.5,
     });
@@ -448,6 +679,13 @@ function App() {
         if (progress >= 1) {
           anim.isAnimating = false;
         }
+      }
+      // Run route animation updaters
+      try {
+        const updaters = routeAnimUpdatersRef.current;
+        for (let i = 0; i < updaters.length; i++) updaters[i]();
+      } catch (e) {
+        // ignore
       }
       controls.update();
       rendererRef.current?.render(sceneRef.current!, cameraRef.current!);
@@ -697,6 +935,279 @@ function App() {
     ringTexture,
   ]);
 
+  // Ensure toggling the Highlight Region checkbox applies or removes highlights immediately
+  useEffect(() => {
+    if (!mapData || !starFieldRef.current || !sceneRef.current) return;
+
+    // Apply highlight
+    if (isRegionHighlighterActive && highlightedSystem) {
+      try {
+        RegionHighlighterModule.init(
+          sceneRef.current!,
+          mapData,
+          starFieldRef.current,
+          stargateLinesRef.current,
+          highlightedSystem,
+          visibleSystemsRef.current,
+          isPlanetCountActive
+        );
+
+        // If DPC (planet counts) is on, create region outlines to match the other code path
+        if (isPlanetCountActive) {
+          const targetRegionId = highlightedSystem.region_id;
+          const systemsInRegion = visibleSystemsRef.current.filter(s => s.region_id === targetRegionId);
+
+          if (!regionOutlineGroupRef.current) {
+            regionOutlineGroupRef.current = new THREE.Group();
+            sceneRef.current.add(regionOutlineGroupRef.current);
+          }
+
+          systemsInRegion.forEach(system => {
+            const pos = getTransformedPosition(system.position);
+            const spriteMaterial = new THREE.SpriteMaterial({
+              map: ringTexture,
+              color: REGION_OUTLINE_COLOR,
+              transparent: true,
+              alphaTest: 0.5,
+              sizeAttenuation: false,
+            });
+            const sprite = new THREE.Sprite(spriteMaterial);
+            sprite.position.set(pos.x, pos.y, pos.z);
+            sprite.scale.set(25, 25, 1);
+            regionOutlineGroupRef.current!.add(sprite);
+          });
+        }
+      } catch (e) {
+        // ignore errors from the highlighter
+      }
+      return;
+    }
+
+    // Remove highlight
+    try {
+      RegionHighlighterModule.cleanup(
+        starFieldRef.current!,
+        stargateLinesRef.current,
+        highlightedSystem,
+        visibleSystemsRef.current,
+        isPlanetCountActive
+      );
+    } catch (e) {
+      // ignore
+    }
+
+    // Remove any region outline sprites
+    try {
+      if (regionOutlineGroupRef.current && sceneRef.current) {
+        sceneRef.current.remove(regionOutlineGroupRef.current);
+        regionOutlineGroupRef.current.children.forEach(child => {
+          if (child instanceof THREE.Sprite) {
+            child.geometry.dispose();
+            (child.material as THREE.Material).dispose();
+          }
+        });
+        regionOutlineGroupRef.current = null;
+      }
+    } catch (e) {
+      // ignore
+    }
+
+    // Reset star colors to base (planet count or default)
+    try {
+      const starColorsAttribute = starFieldRef.current.geometry.attributes.color as THREE.BufferAttribute;
+      const tempColors = new Float32Array(starColorsAttribute.array.length);
+      const planetCounts = visibleSystemsRef.current.map(s => s.planets);
+      const minPlanetsLocal = planetCounts.length > 0 ? Math.min(...planetCounts) : 0;
+      const maxPlanetsLocal = planetCounts.length > 0 ? Math.max(...planetCounts) : 0;
+
+      for (let i = 0; i < visibleSystemsRef.current.length; i++) {
+        const system = visibleSystemsRef.current[i];
+        const color = isPlanetCountActive
+          ? getPlanetCountColor(system.planets, minPlanetsLocal, maxPlanetsLocal)
+          : DEFAULT_STAR_COLOR;
+        color.toArray(tempColors, i * 3);
+      }
+      starColorsAttribute.array.set(tempColors);
+      starColorsAttribute.needsUpdate = true;
+    } catch (e) {
+      // ignore
+    }
+
+    // Remove selected halo if present
+    try {
+      if (selectedStarHaloRef.current && sceneRef.current) {
+        sceneRef.current.remove(selectedStarHaloRef.current);
+        selectedStarHaloRef.current.geometry.dispose();
+        (selectedStarHaloRef.current.material as THREE.Material).dispose();
+        selectedStarHaloRef.current = null;
+      }
+    } catch (e) {
+      // ignore
+    }
+
+  }, [isRegionHighlighterActive, highlightedSystem, mapData, isPlanetCountActive, getPlanetCountColor, getTransformedPosition, ringTexture]);
+
+  // Draw Route Lines
+  useEffect(() => {
+    if (!sceneRef.current || !mapData) return;
+
+    // Clear previous route lines
+    if (routeLinesRef.current) {
+      sceneRef.current.remove(routeLinesRef.current);
+      routeLinesRef.current.children.forEach((child: any) => {
+        child.geometry?.dispose();
+        child.material?.dispose();
+      });
+      routeLinesRef.current = null;
+    }
+
+    if (routeResult && routeResult.path) {
+      const systemsByName = Object.fromEntries(Object.values(mapData.solar_systems).map(s => [s.name.toLowerCase(), s]));
+      const pathSystems = routeResult.path.map(name => systemsByName[name.toLowerCase()]).filter(Boolean);
+
+      if (pathSystems.length < 2) return;
+
+      const routeGroup = new THREE.Group();
+      routeLinesRef.current = routeGroup;
+
+  // Determine route color from the current accent CSS variable
+  const accentHex = accentIsBlue ? 0x00aaff : 0xff4c26;
+  // Tube radius for route rendering (world units). Reduce to ~0.375 to make the root much thinner (approximately 1/4 of 1.5)
+  const ROUTE_TUBE_RADIUS = 0.375;
+  const ROUTE_TUBULAR_SEGMENTS = 64;
+
+  // Array to hold pulse spheres for cleanup
+  const pulseSpheres: THREE.Mesh[] = [];
+
+  for (let i = 0; i < pathSystems.length - 1; i++) {
+        const startSystem = pathSystems[i];
+        const endSystem = pathSystems[i + 1];
+
+        const startPos = getTransformedPosition(startSystem.position);
+        const endPos = getTransformedPosition(endSystem.position);
+        const startVec = new THREE.Vector3(startPos.x, startPos.y, startPos.z);
+        const endVec = new THREE.Vector3(endPos.x, endPos.y, endPos.z);
+
+        // Check if a stargate exists between these two systems
+        const isStargateJump = Object.values(mapData.stargates).some(gate => 
+          (gate.source_system_id === startSystem.id && gate.destination_system_id === endSystem.id) ||
+          (gate.source_system_id === endSystem.id && gate.destination_system_id === startSystem.id)
+        );
+
+        // Use the accent color for all route lines
+        if (isStargateJump) {
+          // Create a short straight tube between systems to guarantee thickness across platforms
+          const points = [startVec.clone(), endVec.clone()];
+          const curve = new THREE.CatmullRomCurve3(points);
+          const geometry = new THREE.TubeGeometry(curve, Math.max(8, Math.floor(startVec.distanceTo(endVec) / 10)), ROUTE_TUBE_RADIUS, 8, false);
+          const material = new THREE.MeshBasicMaterial({ color: accentHex, transparent: true, opacity: 0.95, depthWrite: false });
+          const mesh = new THREE.Mesh(geometry, material);
+          mesh.renderOrder = 1;
+          routeGroup.add(mesh);
+          // Pulse sphere for this hop
+          const pulseGeo = new THREE.SphereGeometry(Math.max(ROUTE_TUBE_RADIUS * 0.6, 0.5), 8, 8);
+          const pulseMat = new THREE.MeshBasicMaterial({ color: accentHex, transparent: true, opacity: 1.0 });
+          const pulse = new THREE.Mesh(pulseGeo, pulseMat);
+          pulse.position.copy(startVec);
+          routeGroup.add(pulse);
+          pulseSpheres.push(pulse);
+        } else {
+          // It's a direct ship jump, draw a stronger curved tube
+          const midPoint = new THREE.Vector3().addVectors(startVec, endVec).multiplyScalar(0.5);
+          const dist = startVec.distanceTo(endVec);
+          const controlPointOffset = new THREE.Vector3(0, dist * 0.30, 0);
+          const controlPoint = new THREE.Vector3().addVectors(midPoint, controlPointOffset);
+
+          const curve = new THREE.QuadraticBezierCurve3(startVec, controlPoint, endVec);
+          // Use TubeGeometry directly from the quadratic curve to guarantee consistent thickness
+          const geometry = new THREE.TubeGeometry(curve as any, ROUTE_TUBULAR_SEGMENTS, ROUTE_TUBE_RADIUS, 8, false);
+          const material = new THREE.MeshBasicMaterial({ color: accentHex, transparent: true, opacity: 0.95, depthWrite: false });
+          const mesh = new THREE.Mesh(geometry, material);
+          mesh.renderOrder = 1;
+          routeGroup.add(mesh);
+          // Pulse sphere for this hop
+          const pulseGeo = new THREE.SphereGeometry(Math.max(ROUTE_TUBE_RADIUS * 0.6, 0.5), 8, 8);
+          const pulseMat = new THREE.MeshBasicMaterial({ color: accentHex, transparent: true, opacity: 1.0 });
+          const pulse = new THREE.Mesh(pulseGeo, pulseMat);
+          pulse.position.copy(startVec);
+          routeGroup.add(pulse);
+          pulseSpheres.push(pulse);
+        }
+      }
+      sceneRef.current.add(routeGroup);
+
+      // Register animators for pulses: they travel from start to end in sequence
+      const animators: Array<() => void> = [];
+      pulseSpheres.forEach((pulse, idx) => {
+        const start = pathSystems[idx];
+        const end = pathSystems[idx + 1];
+        const startPos = getTransformedPosition(start.position);
+        const endPos = getTransformedPosition(end.position);
+        const sVec = new THREE.Vector3(startPos.x, startPos.y, startPos.z);
+        const eVec = new THREE.Vector3(endPos.x, endPos.y, endPos.z);
+        const curve = new THREE.QuadraticBezierCurve3(sVec, new THREE.Vector3().addVectors(sVec, eVec).multiplyScalar(0.5).add(new THREE.Vector3(0, sVec.distanceTo(eVec) * 0.25, 0)), eVec);
+        let t = 0;
+        const speed = 0.5 + (idx % 3) * 0.1; // slight variation per hop
+        const updater = () => {
+          t += 0.01 * speed;
+          if (t > 1) t = 0;
+          const pos = curve.getPoint(t);
+          pulse.position.copy(pos);
+          // Simple pulsing scale
+          const scale = 1 + Math.sin(t * Math.PI * 2) * 0.3;
+          pulse.scale.set(scale, scale, scale);
+        };
+        animators.push(updater);
+      });
+      // Attach animators to the global updaters list so they run each frame
+      routeAnimUpdatersRef.current.push(...animators);
+
+      // Ensure cleanup removes these animators and meshes when route is cleared
+      const cleanupRoute = () => {
+        // remove animators
+        animators.forEach(a => {
+          const idx = routeAnimUpdatersRef.current.indexOf(a);
+          if (idx !== -1) routeAnimUpdatersRef.current.splice(idx, 1);
+        });
+        // remove meshes
+        if (routeLinesRef.current) {
+          routeLinesRef.current.traverse(child => {
+            if (child instanceof THREE.Mesh) {
+              child.geometry.dispose();
+              (child.material as THREE.Material).dispose();
+            }
+          });
+          sceneRef.current?.remove(routeLinesRef.current);
+          routeLinesRef.current = null;
+        }
+      };
+
+      // Replace previous cleanup with our route-specific cleanup when effect re-runs
+      // (the effect's return will run earlier cleanup and then our cleanup will be available for next run)
+      // Attach for outer cleanup
+      (routeGroup as any)._cleanup = cleanupRoute;
+    }
+
+  }, [routeResult, mapData, getTransformedPosition]);
+
+  // Recolor route meshes when the accent changes
+  useEffect(() => {
+    if (!sceneRef.current || !routeLinesRef.current) return;
+    const accentHex = accentIsBlue ? 0x00aaff : 0xff4c26;
+    routeLinesRef.current.traverse((child) => {
+      if ((child as THREE.Mesh).material) {
+        const mat = (child as THREE.Mesh).material as THREE.Material | THREE.Material[];
+        if (Array.isArray(mat)) {
+          mat.forEach(m => {
+            if ((m as any).color) (m as any).color.set(accentHex);
+          });
+        } else {
+          if ((mat as any).color) (mat as any).color.set(accentHex);
+        }
+      }
+    });
+  }, [accentIsBlue]);
+
   // Handle camera animation
   useEffect(() => {
     if (!highlightedSystem || !controlsRef.current || !cameraRef.current) return;
@@ -746,40 +1257,6 @@ function App() {
       }
     }
   }, [hoveredSystem, getTransformedPosition, pointsMaterial]);
-
-  const selectSystem = useCallback((system: SolarSystem) => {
-    // Set the highlighted system for camera animation and the main rendering effect
-    setHighlightedSystem(system);
-
-    // Clear previous persistent label
-    if (selectedLabelObj.current && selectedLabelObj.current.parent) {
-      selectedLabelObj.current.parent.remove(selectedLabelObj.current);
-      if (sceneRef.current && selectedLabelObj.current.parent instanceof THREE.Object3D) {
-        sceneRef.current.remove(selectedLabelObj.current.parent);
-      }
-    }
-
-    // Create a new object to parent the label to (at the system's position)
-    const newSelectedLabelParent = new THREE.Object3D();
-    const transformedPos = getTransformedPosition(system.position);
-    newSelectedLabelParent.position.set(transformedPos.x, transformedPos.y, transformedPos.z);
-    sceneRef.current?.add(newSelectedLabelParent);
-
-    // Create or update the label
-    if (selectedLabelObj.current === null) {
-      const el = createSystemLabelElement(system.name, true);
-      selectedLabelObj.current = new CSS2DObject(el);
-      selectedLabelObj.current.position.set(0, 0, 0);
-      newSelectedLabelParent.add(selectedLabelObj.current);
-    }
-    else {
-      setLabelText(selectedLabelObj.current, system.name);
-      selectedLabelObj.current.position.set(0, 0, 0);
-      newSelectedLabelParent.add(selectedLabelObj.current);
-    }
-    selectedLabelObj.current.visible = true;
-
-  }, [createSystemLabelElement, setLabelText, getTransformedPosition]);
 
   // Handle Pointer Events
   useEffect(() => {
@@ -935,12 +1412,12 @@ function App() {
     };
     }, [isLoaded, hoveredSystem, isDraggingRef, mouseDownPosRef, mouseDownTimeRef, createSystemLabelElement, selectSystem, isPlanetCountActive, showDistance, highlightedSystem]);
 
-  const handleSearch = (event: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleSearch = (event: React.KeyboardEvent<HTMLInputElement>, systemNameFromSelection?: string) => {
     if (event.key === 'Enter' && mapData) {
-      const query = searchQuery.toLowerCase();
-      const foundSystem = Object.values(mapData.solar_systems).find(
-        (system) => system.name.toLowerCase() === query
-      );
+      const query = (systemNameFromSelection || searchQuery).toLowerCase().trim();
+        const foundSystem = Object.values(mapData.solar_systems).find(
+          (system) => system.name.toLowerCase().trim() === query
+        );
       if (foundSystem) {
         selectSystem(foundSystem);
       } else {
@@ -958,15 +1435,18 @@ function App() {
     <>
       <div style={{ position: 'absolute', top: 10, left: 10, zIndex: 1, color: 'white', backgroundColor: 'rgba(0,0,0,0.5)', padding: '10px', borderRadius: '5px' }}>
         <div>
-          <input
-            type="text"
+          <AutoCompleteInput
             placeholder="Search for a system..."
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            onKeyDown={handleSearch}
-            style={{ padding: '5px' }}
+            onChange={setSearchQuery}
+            onSelect={(selected) => {
+              setSearchQuery(selected);
+              handleSearch({ key: 'Enter' } as React.KeyboardEvent<HTMLInputElement>, selected);
+            }}
+            dataSource={mapData ? Object.values(mapData.solar_systems).map(s => s.name) : []}
           />
         </div>
+  {/* ...existing controls... (accent toggle removed from here) */}
         <div style={{ marginTop: '10px' }}>
           <label>
             <input
@@ -1001,7 +1481,23 @@ function App() {
             Show Distance
           </label>
         </div>
+        <P2PRouting 
+          onCalculateRoute={calculateRoute}
+          onStopCalculation={stopCalculation}
+          isCalculating={isCalculatingRoute}
+          routeCalcTimeMs={routeCalcTimeMs}
+          routeResult={routeResult}
+          mapData={mapData}
+          systemNames={mapData ? Object.values(mapData.solar_systems).map(s => s.name) : []}
+          progress={routeProgress}
+        />
         {isPlanetCountActive && generatePlanetCountLegend()}
+      </div>
+      <div style={{ position: 'fixed', left: 10, bottom: 10, zIndex: 2000 }}>
+        <label style={{ color: 'white', backgroundColor: 'rgba(0,0,0,0.5)', padding: '6px 8px', borderRadius: '6px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <input type="checkbox" checked={accentIsBlue} onChange={(e) => setAccentIsBlue(e.target.checked)} />
+          <span style={{ fontSize: '12px' }}>Use blue accent</span>
+        </label>
       </div>
       <div ref={mountRef} style={{ width: '100vw', height: '100vh' }} />
     </>

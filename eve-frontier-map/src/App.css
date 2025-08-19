@@ -3,6 +3,13 @@ body {
   overflow: hidden; /* Hide scrollbars */
 }
 
+ :root {
+  --selection-blue: #00aaff;
+  --selection-orange: #ff4c26;
+  /* default to orange */
+  --accent: var(--selection-orange);
+ }
+
 #root {
   width: 100vw;
   height: 100vh;
@@ -37,7 +44,7 @@ body {
   line-height: 1.15;
   color: #BCBCB8;
   font-size: 18px; /* 75% of 24px, as per request */
-  border: 1.5px solid var(--selection-orange, #FF7A00);
+  border: 1.5px solid var(--accent, #00aaff);
   border-radius: 6px;
   padding: 2px 6px;
   background: #000;
@@ -45,6 +52,4 @@ body {
   white-space: nowrap;
   user-select: none;
 }
-.system-label--selected {
-  /* identical style; class exists only to allow future tweaks if needed */
-}
+/* .system-label--selected intentionally left unstyled - uses same styles as .system-label */
