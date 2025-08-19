@@ -43,10 +43,10 @@ interface Module {
   ) => void;
 }
 
-const HIGHLIGHT_COLOR_STARS = new THREE.Color(0xff4c26); // Orange for stars
-const HIGHLIGHT_COLOR_GATES = new THREE.Color(0xcc5500); // Darker orange for stargates
+let HIGHLIGHT_COLOR_STARS = new THREE.Color(0x00aaff); // Shared blue for highlighted stars
+let HIGHLIGHT_COLOR_GATES = new THREE.Color(0x00aaff); // Shared blue for stargates in region
 const ORIGINAL_GATE_COLOR = new THREE.Color(0x444444); // Original stargate color
-const SELECTED_STAR_COLOR = new THREE.Color(0xff4c26); // Red for selected star
+const SELECTED_STAR_COLOR = new THREE.Color(0x00aaff); // Blue for selected star
 
 let originalStarColors: Float32Array | null = null;
 let originalStargateColors: Float32Array | null = null;
@@ -158,3 +158,9 @@ const RegionHighlighterModule: Module = {
 };
 
 export default RegionHighlighterModule;
+
+// Allow runtime update of highlight colors
+export const setRegionHighlightColors = (hex: number) => {
+  HIGHLIGHT_COLOR_STARS = new THREE.Color(hex);
+  HIGHLIGHT_COLOR_GATES = new THREE.Color(hex);
+};

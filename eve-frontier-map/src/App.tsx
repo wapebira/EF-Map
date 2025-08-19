@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import './App.css';
-import RegionHighlighterModule from './modules/RegionHighlighter';
+import RegionHighlighterModule, { setRegionHighlightColors } from './modules/RegionHighlighter';
 import { openDbFromArrayBuffer } from "./lib/sql";
 import type { SystemRow, StargateRow, RegionRow, ConstellationRow } from "./types/db";
 import LoadingScreen from './components/LoadingScreen';
@@ -76,6 +76,8 @@ const SELECTED_STAR_COLOR = new THREE.Color(0x00aaff); // Blue for selected star
 const REGION_OUTLINE_COLOR = new THREE.Color(0x00aaff); // Shared blue for region outlines
 
 function App() {
+  // Default to orange accent; the toggle will flip to blue
+  const [accentIsBlue, setAccentIsBlue] = useState(false);
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [loadingStatus, setLoadingStatus] = useState('Initializing...');
   const [isLoaded, setIsLoaded] = useState(false);
@@ -197,6 +199,62 @@ function App() {
 
     return wrapper;
   }, [isPlanetCountActive]);
+
+  // Theme toggle effect: update CSS variable and three.js color constants
+  useEffect(() => {
+    const root = document.documentElement;
+    root.style.setProperty('--accent', accentIsBlue ? 'var(--selection-blue)' : 'var(--selection-orange)');
+    // Update runtime three.js colors used by the app
+  const accentHex = accentIsBlue ? 0x00aaff : 0xff4c26;
+    // Update hover material if exists
+    if (hoverPointRef.current) {
+      (hoverPointRef.current.material as THREE.PointsMaterial).color.set(accentHex);
+    }
+  // Update region highlighter runtime colors
+  try { setRegionHighlightColors(accentHex); } catch (e) { /* ignore */ }
+    // Update selected star color and region outline color constants
+    // ... App-level constants are module-scoped; update star colors directly when rendering/updating scenes
+    // Reapply region highlight and stargate colors if active
+    try {
+      if (isRegionHighlighterActive && highlightedSystem && mapData && stargateLinesRef.current && starFieldRef.current) {
+        // Re-run init to recolor buffers
+        RegionHighlighterModule.init(
+          sceneRef.current!,
+          mapData,
+          starFieldRef.current,
+          stargateLinesRef.current,
+          highlightedSystem,
+          visibleSystemsRef.current,
+          isPlanetCountActive
+        );
+      } else if (starFieldRef.current) {
+        // If no region highlight, ensure selected star keeps the accent color
+        const starColorsAttr = (starFieldRef.current.geometry as THREE.BufferGeometry).attributes.color as THREE.BufferAttribute;
+        if (highlightedSystem && !isPlanetCountActive) {
+          const highlightedIndex = visibleSystemsRef.current.findIndex(s => s.id === highlightedSystem.id);
+          if (highlightedIndex !== -1) {
+            const c = new THREE.Color(accentHex);
+            c.toArray(starColorsAttr.array as Float32Array, highlightedIndex * 3);
+            starColorsAttr.needsUpdate = true;
+          }
+        }
+        // Update stargate colors if present
+        if (stargateLinesRef.current) {
+          const stargateColors = (stargateLinesRef.current.geometry as THREE.BufferGeometry).attributes.color as THREE.BufferAttribute;
+          if (stargateColors && stargateColors.array) {
+            // When no region is highlighted, reset to original grey for all gates
+            const defaultGate = new THREE.Color(0x444444);
+            for (let i = 0; i < stargateColors.array.length; i += 3) {
+              defaultGate.toArray(stargateColors.array as Float32Array, i);
+            }
+            stargateColors.needsUpdate = true;
+          }
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+  }, [accentIsBlue]);
 
   // Helper to set label text
   const setLabelText = useCallback((obj: CSS2DObject, name: string, planets?: number) => {
@@ -599,7 +657,7 @@ function App() {
       size: 20, // Default/min size
       sizeAttenuation: false, // Use screen-space sizing
       map: ringTexture,
-  color: 0x00aaff,
+      color: accentIsBlue ? 0x00aaff : 0xff4c26,
       transparent: true,
       alphaTest: 0.5,
     });
@@ -1177,6 +1235,7 @@ function App() {
             dataSource={mapData ? Object.values(mapData.solar_systems).map(s => s.name) : []}
           />
         </div>
+  {/* ...existing controls... (accent toggle removed from here) */}
         <div style={{ marginTop: '10px' }}>
           <label>
             <input
@@ -1222,6 +1281,12 @@ function App() {
           progress={routeProgress}
         />
         {isPlanetCountActive && generatePlanetCountLegend()}
+      </div>
+      <div style={{ position: 'fixed', left: 10, bottom: 10, zIndex: 2000 }}>
+        <label style={{ color: 'white', backgroundColor: 'rgba(0,0,0,0.5)', padding: '6px 8px', borderRadius: '6px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <input type="checkbox" checked={accentIsBlue} onChange={(e) => setAccentIsBlue(e.target.checked)} />
+          <span style={{ fontSize: '12px' }}>Use blue accent</span>
+        </label>
       </div>
       <div ref={mountRef} style={{ width: '100vw', height: '100vh' }} />
     </>
