@@ -1060,6 +1060,12 @@ function App() {
       const routeGroup = new THREE.Group();
       routeLinesRef.current = routeGroup;
 
+  // Determine route color from the current accent CSS variable
+  const accentHex = accentIsBlue ? 0x00aaff : 0xff4c26;
+  // Tube radius for route rendering (world units). Reduce to ~0.375 to make the root much thinner (approximately 1/4 of 1.5)
+  const ROUTE_TUBE_RADIUS = 0.375;
+  const ROUTE_TUBULAR_SEGMENTS = 64;
+
       for (let i = 0; i < pathSystems.length - 1; i++) {
         const startSystem = pathSystems[i];
         const endSystem = pathSystems[i + 1];
@@ -1075,39 +1081,54 @@ function App() {
           (gate.source_system_id === endSystem.id && gate.destination_system_id === startSystem.id)
         );
 
+        // Use the accent color for all route lines
         if (isStargateJump) {
-          const geometry = new THREE.BufferGeometry().setFromPoints([startVec, endVec]);
-          const material = new THREE.LineBasicMaterial({ color: 0xff0000, linewidth: 4, transparent: true, opacity: 0.9, depthWrite: false });
-          const line = new THREE.Line(geometry, material);
-          routeGroup.add(line);
+          // Create a short straight tube between systems to guarantee thickness across platforms
+          const points = [startVec.clone(), endVec.clone()];
+          const curve = new THREE.CatmullRomCurve3(points);
+          const geometry = new THREE.TubeGeometry(curve, Math.max(8, Math.floor(startVec.distanceTo(endVec) / 10)), ROUTE_TUBE_RADIUS, 8, false);
+          const material = new THREE.MeshBasicMaterial({ color: accentHex, transparent: true, opacity: 0.95, depthWrite: false });
+          const mesh = new THREE.Mesh(geometry, material);
+          mesh.renderOrder = 1;
+          routeGroup.add(mesh);
         } else {
-          // It's a direct ship jump, draw a curved line
+          // It's a direct ship jump, draw a stronger curved tube
           const midPoint = new THREE.Vector3().addVectors(startVec, endVec).multiplyScalar(0.5);
           const dist = startVec.distanceTo(endVec);
-          const controlPointOffset = new THREE.Vector3(0, dist * 0.15, 0); // Adjust height of curve
+          const controlPointOffset = new THREE.Vector3(0, dist * 0.30, 0);
           const controlPoint = new THREE.Vector3().addVectors(midPoint, controlPointOffset);
 
           const curve = new THREE.QuadraticBezierCurve3(startVec, controlPoint, endVec);
-          const points = curve.getPoints(50);
-          const geometry = new THREE.BufferGeometry().setFromPoints(points);
-          const material = new THREE.LineDashedMaterial({ 
-            color: 0xff0000, 
-            linewidth: 4,
-            dashSize: 50, 
-            gapSize: 20, 
-            transparent: true, 
-            opacity: 0.9, 
-            depthWrite: false 
-          });
-          const line = new THREE.Line(geometry, material);
-          line.computeLineDistances(); // Required for dashed lines
-          routeGroup.add(line);
+          // Use TubeGeometry directly from the quadratic curve to guarantee consistent thickness
+          const geometry = new THREE.TubeGeometry(curve as any, ROUTE_TUBULAR_SEGMENTS, ROUTE_TUBE_RADIUS, 8, false);
+          const material = new THREE.MeshBasicMaterial({ color: accentHex, transparent: true, opacity: 0.95, depthWrite: false });
+          const mesh = new THREE.Mesh(geometry, material);
+          mesh.renderOrder = 1;
+          routeGroup.add(mesh);
         }
       }
       sceneRef.current.add(routeGroup);
     }
 
   }, [routeResult, mapData, getTransformedPosition]);
+
+  // Recolor route meshes when the accent changes
+  useEffect(() => {
+    if (!sceneRef.current || !routeLinesRef.current) return;
+    const accentHex = accentIsBlue ? 0x00aaff : 0xff4c26;
+    routeLinesRef.current.traverse((child) => {
+      if ((child as THREE.Mesh).material) {
+        const mat = (child as THREE.Mesh).material as THREE.Material | THREE.Material[];
+        if (Array.isArray(mat)) {
+          mat.forEach(m => {
+            if ((m as any).color) (m as any).color.set(accentHex);
+          });
+        } else {
+          if ((mat as any).color) (mat as any).color.set(accentHex);
+        }
+      }
+    });
+  }, [accentIsBlue]);
 
   // Handle camera animation
   useEffect(() => {
