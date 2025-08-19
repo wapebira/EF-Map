@@ -95,14 +95,14 @@
 .p2p-copy-button {
   flex-grow: 1;
   padding: 5px;
-  background-color: #335577;
-  border: 1px solid #7799bb;
+  background-color: rgba(0,0,0,0.25);
+  border: 1px solid rgba(0,170,255,0.25);
   color: white;
   cursor: pointer;
 }
 
 .p2p-copy-button.active {
-  background-color: #00aaff;
+  background-color: var(--accent);
 }
 
 .error {
