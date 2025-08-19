@@ -123,6 +123,9 @@ function App() {
     duration: 500, // ms
   });
 
+  // Updaters that run each frame (used for route pulse animations)
+  const routeAnimUpdatersRef = useRef<Array<() => void>>([]);
+
   // New refs for managing overlays
   const selectedStarHaloRef = useRef<THREE.Points | null>(null);
   const regionOutlineGroupRef = useRef<THREE.Group | null>(null);
@@ -677,6 +680,13 @@ function App() {
           anim.isAnimating = false;
         }
       }
+      // Run route animation updaters
+      try {
+        const updaters = routeAnimUpdatersRef.current;
+        for (let i = 0; i < updaters.length; i++) updaters[i]();
+      } catch (e) {
+        // ignore
+      }
       controls.update();
       rendererRef.current?.render(sceneRef.current!, cameraRef.current!);
       labelRenderer.render(sceneRef.current!, cameraRef.current!); // Render CSS2DRenderer
@@ -1066,7 +1076,10 @@ function App() {
   const ROUTE_TUBE_RADIUS = 0.375;
   const ROUTE_TUBULAR_SEGMENTS = 64;
 
-      for (let i = 0; i < pathSystems.length - 1; i++) {
+  // Array to hold pulse spheres for cleanup
+  const pulseSpheres: THREE.Mesh[] = [];
+
+  for (let i = 0; i < pathSystems.length - 1; i++) {
         const startSystem = pathSystems[i];
         const endSystem = pathSystems[i + 1];
 
@@ -1091,6 +1104,13 @@ function App() {
           const mesh = new THREE.Mesh(geometry, material);
           mesh.renderOrder = 1;
           routeGroup.add(mesh);
+          // Pulse sphere for this hop
+          const pulseGeo = new THREE.SphereGeometry(Math.max(ROUTE_TUBE_RADIUS * 0.6, 0.5), 8, 8);
+          const pulseMat = new THREE.MeshBasicMaterial({ color: accentHex, transparent: true, opacity: 1.0 });
+          const pulse = new THREE.Mesh(pulseGeo, pulseMat);
+          pulse.position.copy(startVec);
+          routeGroup.add(pulse);
+          pulseSpheres.push(pulse);
         } else {
           // It's a direct ship jump, draw a stronger curved tube
           const midPoint = new THREE.Vector3().addVectors(startVec, endVec).multiplyScalar(0.5);
@@ -1105,9 +1125,67 @@ function App() {
           const mesh = new THREE.Mesh(geometry, material);
           mesh.renderOrder = 1;
           routeGroup.add(mesh);
+          // Pulse sphere for this hop
+          const pulseGeo = new THREE.SphereGeometry(Math.max(ROUTE_TUBE_RADIUS * 0.6, 0.5), 8, 8);
+          const pulseMat = new THREE.MeshBasicMaterial({ color: accentHex, transparent: true, opacity: 1.0 });
+          const pulse = new THREE.Mesh(pulseGeo, pulseMat);
+          pulse.position.copy(startVec);
+          routeGroup.add(pulse);
+          pulseSpheres.push(pulse);
         }
       }
       sceneRef.current.add(routeGroup);
+
+      // Register animators for pulses: they travel from start to end in sequence
+      const animators: Array<() => void> = [];
+      pulseSpheres.forEach((pulse, idx) => {
+        const start = pathSystems[idx];
+        const end = pathSystems[idx + 1];
+        const startPos = getTransformedPosition(start.position);
+        const endPos = getTransformedPosition(end.position);
+        const sVec = new THREE.Vector3(startPos.x, startPos.y, startPos.z);
+        const eVec = new THREE.Vector3(endPos.x, endPos.y, endPos.z);
+        const curve = new THREE.QuadraticBezierCurve3(sVec, new THREE.Vector3().addVectors(sVec, eVec).multiplyScalar(0.5).add(new THREE.Vector3(0, sVec.distanceTo(eVec) * 0.25, 0)), eVec);
+        let t = 0;
+        const speed = 0.5 + (idx % 3) * 0.1; // slight variation per hop
+        const updater = () => {
+          t += 0.01 * speed;
+          if (t > 1) t = 0;
+          const pos = curve.getPoint(t);
+          pulse.position.copy(pos);
+          // Simple pulsing scale
+          const scale = 1 + Math.sin(t * Math.PI * 2) * 0.3;
+          pulse.scale.set(scale, scale, scale);
+        };
+        animators.push(updater);
+      });
+      // Attach animators to the global updaters list so they run each frame
+      routeAnimUpdatersRef.current.push(...animators);
+
+      // Ensure cleanup removes these animators and meshes when route is cleared
+      const cleanupRoute = () => {
+        // remove animators
+        animators.forEach(a => {
+          const idx = routeAnimUpdatersRef.current.indexOf(a);
+          if (idx !== -1) routeAnimUpdatersRef.current.splice(idx, 1);
+        });
+        // remove meshes
+        if (routeLinesRef.current) {
+          routeLinesRef.current.traverse(child => {
+            if (child instanceof THREE.Mesh) {
+              child.geometry.dispose();
+              (child.material as THREE.Material).dispose();
+            }
+          });
+          sceneRef.current?.remove(routeLinesRef.current);
+          routeLinesRef.current = null;
+        }
+      };
+
+      // Replace previous cleanup with our route-specific cleanup when effect re-runs
+      // (the effect's return will run earlier cleanup and then our cleanup will be available for next run)
+      // Attach for outer cleanup
+      (routeGroup as any)._cleanup = cleanupRoute;
     }
 
   }, [routeResult, mapData, getTransformedPosition]);
