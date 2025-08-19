@@ -925,6 +925,118 @@ function App() {
     ringTexture,
   ]);
 
+  // Ensure toggling the Highlight Region checkbox applies or removes highlights immediately
+  useEffect(() => {
+    if (!mapData || !starFieldRef.current || !sceneRef.current) return;
+
+    // Apply highlight
+    if (isRegionHighlighterActive && highlightedSystem) {
+      try {
+        RegionHighlighterModule.init(
+          sceneRef.current!,
+          mapData,
+          starFieldRef.current,
+          stargateLinesRef.current,
+          highlightedSystem,
+          visibleSystemsRef.current,
+          isPlanetCountActive
+        );
+
+        // If DPC (planet counts) is on, create region outlines to match the other code path
+        if (isPlanetCountActive) {
+          const targetRegionId = highlightedSystem.region_id;
+          const systemsInRegion = visibleSystemsRef.current.filter(s => s.region_id === targetRegionId);
+
+          if (!regionOutlineGroupRef.current) {
+            regionOutlineGroupRef.current = new THREE.Group();
+            sceneRef.current.add(regionOutlineGroupRef.current);
+          }
+
+          systemsInRegion.forEach(system => {
+            const pos = getTransformedPosition(system.position);
+            const spriteMaterial = new THREE.SpriteMaterial({
+              map: ringTexture,
+              color: REGION_OUTLINE_COLOR,
+              transparent: true,
+              alphaTest: 0.5,
+              sizeAttenuation: false,
+            });
+            const sprite = new THREE.Sprite(spriteMaterial);
+            sprite.position.set(pos.x, pos.y, pos.z);
+            sprite.scale.set(25, 25, 1);
+            regionOutlineGroupRef.current!.add(sprite);
+          });
+        }
+      } catch (e) {
+        // ignore errors from the highlighter
+      }
+      return;
+    }
+
+    // Remove highlight
+    try {
+      RegionHighlighterModule.cleanup(
+        starFieldRef.current!,
+        stargateLinesRef.current,
+        highlightedSystem,
+        visibleSystemsRef.current,
+        isPlanetCountActive
+      );
+    } catch (e) {
+      // ignore
+    }
+
+    // Remove any region outline sprites
+    try {
+      if (regionOutlineGroupRef.current && sceneRef.current) {
+        sceneRef.current.remove(regionOutlineGroupRef.current);
+        regionOutlineGroupRef.current.children.forEach(child => {
+          if (child instanceof THREE.Sprite) {
+            child.geometry.dispose();
+            (child.material as THREE.Material).dispose();
+          }
+        });
+        regionOutlineGroupRef.current = null;
+      }
+    } catch (e) {
+      // ignore
+    }
+
+    // Reset star colors to base (planet count or default)
+    try {
+      const starColorsAttribute = starFieldRef.current.geometry.attributes.color as THREE.BufferAttribute;
+      const tempColors = new Float32Array(starColorsAttribute.array.length);
+      const planetCounts = visibleSystemsRef.current.map(s => s.planets);
+      const minPlanetsLocal = planetCounts.length > 0 ? Math.min(...planetCounts) : 0;
+      const maxPlanetsLocal = planetCounts.length > 0 ? Math.max(...planetCounts) : 0;
+
+      for (let i = 0; i < visibleSystemsRef.current.length; i++) {
+        const system = visibleSystemsRef.current[i];
+        const color = isPlanetCountActive
+          ? getPlanetCountColor(system.planets, minPlanetsLocal, maxPlanetsLocal)
+          : DEFAULT_STAR_COLOR;
+        color.toArray(tempColors, i * 3);
+      }
+      starColorsAttribute.array.set(tempColors);
+      starColorsAttribute.needsUpdate = true;
+    } catch (e) {
+      // ignore
+    }
+
+    // Remove selected halo if present
+    try {
+      if (selectedStarHaloRef.current && sceneRef.current) {
+        sceneRef.current.remove(selectedStarHaloRef.current);
+        selectedStarHaloRef.current.geometry.dispose();
+        (selectedStarHaloRef.current.material as THREE.Material).dispose();
+        selectedStarHaloRef.current = null;
+      }
+    } catch (e) {
+      // ignore
+    }
+
+  }, [isRegionHighlighterActive, highlightedSystem, mapData, isPlanetCountActive, getPlanetCountColor, getTransformedPosition, ringTexture]);
+
   // Draw Route Lines
   useEffect(() => {
     if (!sceneRef.current || !mapData) return;

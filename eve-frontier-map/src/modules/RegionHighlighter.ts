@@ -65,9 +65,12 @@ const RegionHighlighterModule: Module = {
 
     // Ensure starColors.array exists before trying to use it
     if (starColors && starColors.array) {
-      // Always re-initialize originalStarColors with the current starField's colors
-      // This handles cases where starField might have been re-created or disposed
-      originalStarColors = new Float32Array(starColors.array);
+      // Capture original star colors only once. Re-initializing here risks
+      // capturing already-highlighted colors and prevents cleanup from restoring
+      // the true original colors.
+      if (!originalStarColors) {
+        originalStarColors = new Float32Array(starColors.array);
+      }
     } else {
       return; // Cannot proceed without star colors
     }
@@ -77,7 +80,10 @@ const RegionHighlighterModule: Module = {
       const stargateGeometry = stargateLines.geometry as THREE.BufferGeometry;
       stargateColors = stargateGeometry.attributes.color as THREE.BufferAttribute;
       if (stargateColors && stargateColors.array) {
-        originalStargateColors = new Float32Array(stargateColors.array);
+        // Capture original stargate colors only once for the same reason as stars
+        if (!originalStargateColors) {
+          originalStargateColors = new Float32Array(stargateColors.array);
+        }
       } else {
         // Continue without stargate highlighting if colors are missing
       }
@@ -145,13 +151,20 @@ const RegionHighlighterModule: Module = {
       }
     }
 
-    if (stargateLines && originalStargateColors) {
+    if (stargateLines) {
       const stargateColors = (stargateLines.geometry as THREE.BufferGeometry).attributes.color as THREE.BufferAttribute;
       // Only reset if stargateColors.array is still valid
       if (stargateColors && stargateColors.array) {
-        stargateColors.array.set(originalStargateColors);
+        if (originalStargateColors) {
+          stargateColors.array.set(originalStargateColors);
+        } else {
+          // Fallback: restore to a reasonable default if we never captured originals
+          const defaultGate = ORIGINAL_GATE_COLOR;
+          for (let i = 0; i < stargateColors.array.length; i += 3) {
+            defaultGate.toArray(stargateColors.array as Float32Array, i);
+          }
+        }
         stargateColors.needsUpdate = true;
-      } else {
       }
     }
   },
