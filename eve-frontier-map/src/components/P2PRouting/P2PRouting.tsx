@@ -183,7 +183,7 @@ const formatRouteToNotes = (path: string[], mapData: MapData): string[] => {
 // --- Component Logic ---
 
 interface P2PRoutingProps {
-  onCalculateRoute: (from: string, to: string, jumpDist: number, optimize: 'fuel' | 'jumps') => void;
+  onCalculateRoute: (from: string, to: string, jumpDist: number, optimize: 'fuel' | 'jumps', algorithm: 'astar' | 'dijkstra') => void;
   isCalculating: boolean;
   routeResult: { path: string[] | null; error?: string } | null;
   mapData: MapData | null;
@@ -196,6 +196,7 @@ const P2PRouting = ({ onCalculateRoute, isCalculating, routeResult, mapData, sys
   const [toSystem, setToSystem] = useState('');
   const [jumpDistance, setJumpDistance] = useState('60');
   const [optimizeFor, setOptimizeFor] = useState<'fuel' | 'jumps'>('fuel');
+  const [algorithm, setAlgorithm] = useState<'astar' | 'dijkstra'>('astar');
 
   const [notePages, setNotePages] = useState<string[]>([]);
   const [summary, setSummary] = useState<RouteSummary | null>(null);
@@ -221,7 +222,7 @@ const P2PRouting = ({ onCalculateRoute, isCalculating, routeResult, mapData, sys
       alert('Please enter a valid jump distance.');
       return;
     }
-    onCalculateRoute(fromSystem, toSystem, distance, optimizeFor);
+  onCalculateRoute(fromSystem, toSystem, distance, optimizeFor, algorithm);
   };
 
   const handleCopy = (pageIndex: number) => {
@@ -290,6 +291,18 @@ const P2PRouting = ({ onCalculateRoute, isCalculating, routeResult, mapData, sys
             >
               <option value="fuel">Fuel (Prefer Gates)</option>
               <option value="jumps">Jumps</option>
+            </select>
+          </div>
+
+          <div className="p2p-input-group">
+            <label htmlFor="algorithm-select">Algorithm</label>
+            <select
+              id="algorithm-select"
+              value={algorithm}
+              onChange={(e) => setAlgorithm(e.target.value as 'astar' | 'dijkstra')}
+            >
+              <option value="astar">A* (basic)</option>
+              <option value="dijkstra">Dijkstra (advanced)</option>
             </select>
           </div>
 

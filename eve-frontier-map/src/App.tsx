@@ -280,7 +280,7 @@ function App() {
     };
   }, [mapData, selectSystem]);
 
-  const calculateRoute = useCallback((fromSystemName: string, toSystemName: string, maxJumpDistance: number, optimizeFor: 'fuel' | 'jumps') => {
+  const calculateRoute = useCallback((fromSystemName: string, toSystemName: string, maxJumpDistance: number, optimizeFor: 'fuel' | 'jumps', algorithm: 'astar' | 'dijkstra') => {
     if (!mapData) {
       alert('Map data is not loaded yet.');
       return;
@@ -296,6 +296,7 @@ function App() {
       toSystemName,
       maxJumpDistance,
       optimizeFor,
+      algorithm,
     });
   }, [mapData]);
 
