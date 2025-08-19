@@ -17,6 +17,8 @@
   display: flex;
   flex-direction: column;
   gap: 5px;
+  /* Ensure inputs have the same right inset as other panels */
+  width: 100%;
 }
 
 .p2p-input-group label {
@@ -31,6 +33,7 @@
   border: 1px solid #555;
   color: white;
   border-radius: 3px;
+  box-sizing: border-box;
 }
 
 .p2p-calculate-button {
@@ -42,6 +45,18 @@
   cursor: pointer;
   text-align: center;
   font-weight: bold;
+}
+
+.p2p-stop-button {
+  padding: 8px;
+  background-color: #ff4c26;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  text-align: center;
+  font-weight: bold;
+  margin-top: 6px;
 }
 
 .p2p-calculate-button:hover {

@@ -184,13 +184,16 @@ const formatRouteToNotes = (path: string[], mapData: MapData): string[] => {
 
 interface P2PRoutingProps {
   onCalculateRoute: (from: string, to: string, jumpDist: number, optimize: 'fuel' | 'jumps', algorithm: 'astar' | 'dijkstra') => void;
+  onStopCalculation?: () => void;
   isCalculating: boolean;
   routeResult: { path: string[] | null; error?: string } | null;
   mapData: MapData | null;
   systemNames: string[];
+  progress?: { explored: number; frontier: number; elapsedMs: number; message: string } | null;
+  routeCalcTimeMs?: number | null;
 }
 
-const P2PRouting = ({ onCalculateRoute, isCalculating, routeResult, mapData, systemNames }: P2PRoutingProps) => {
+const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeResult, mapData, systemNames, progress, routeCalcTimeMs }: P2PRoutingProps) => {
   const [isOpen, setIsOpen] = useState(false);
   const [fromSystem, setFromSystem] = useState('');
   const [toSystem, setToSystem] = useState('');
@@ -309,6 +312,20 @@ const P2PRouting = ({ onCalculateRoute, isCalculating, routeResult, mapData, sys
           <button className="p2p-calculate-button" onClick={handleCalculate} disabled={isCalculating}>
             {isCalculating ? 'Calculating...' : 'Calculate Route'}
           </button>
+          {isCalculating && (
+            <button className="p2p-stop-button" onClick={() => { onStopCalculation && onStopCalculation(); }}>
+              Stop
+            </button>
+          )}
+
+          {isCalculating && progress && (
+            <div className="p2p-progress">
+              <div className="p2p-progress-bar" style={{ width: '100%', background: '#222', height: '8px', borderRadius: '4px', overflow: 'hidden', marginTop: '8px' }}>
+                <div style={{ width: `${Math.min(100, (progress.explored / (progress.explored + progress.frontier + 1)) * 100).toFixed(0)}%`, background: '#4caf50', height: '100%' }} />
+              </div>
+              <div style={{ marginTop: '6px', fontSize: '12px', color: '#ddd' }}>{progress.message} • frontier: {progress.frontier} • elapsed: {(progress.elapsedMs/1000).toFixed(1)}s</div>
+            </div>
+          )}
 
           {routeResult && routeResult.error && <p className="error">Error: {routeResult.error}</p>}
 
@@ -319,6 +336,9 @@ const P2PRouting = ({ onCalculateRoute, isCalculating, routeResult, mapData, sys
                 <p>Total Ship Jumps: <span>{summary.shipJumps}</span></p>
                 <p>Total Distance: <span>{summary.totalDistance.toFixed(2)} LY</span></p>
                 <p>Ship Jump Distance: <span>{summary.shipJumpDistance.toFixed(2)} LY</span></p>
+                {routeCalcTimeMs !== null && routeCalcTimeMs !== undefined && (
+                  <p>Calculation Time: <span>{(routeCalcTimeMs/1000).toFixed(2)} s</span></p>
+                )}
               </div>
             </div>
           )}

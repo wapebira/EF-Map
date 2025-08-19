@@ -95,6 +95,7 @@ function App() {
   const routingWorkerRef = useRef<Worker | null>(null);
   const [isCalculatingRoute, setIsCalculatingRoute] = useState(false);
   const [routeResult, setRouteResult] = useState<{ path: string[] | null; error?: string } | null>(null);
+  const [routeProgress, setRouteProgress] = useState<{ explored: number; frontier: number; elapsedMs: number; message: string } | null>(null);
 
   // New state for labels
   const hoverLabelObj = useRef<CSS2DObject | null>(null);
@@ -247,16 +248,92 @@ function App() {
 
   // Initialize and manage the routing worker
   useEffect(() => {
-    // Create a new worker
-    const worker = new Worker(new URL('./utils/routing_worker.ts', import.meta.url), {
-      type: 'module',
-    });
-    routingWorkerRef.current = worker;
+    // Helper to create a worker and wire its message handler. We recreate when mapData or selectSystem changes.
+    const createWorker = () => {
+      const worker = new Worker(new URL('./utils/routing_worker.ts', import.meta.url), { type: 'module' });
+      routingWorkerRef.current = worker;
 
-    // Listen for messages from the worker
+      worker.onmessage = (e) => {
+        const data = e.data;
+        if (data && data.type === 'progress') {
+          setRouteProgress({ explored: data.explored ?? 0, frontier: data.frontier ?? 0, elapsedMs: data.elapsedMs ?? 0, message: data.message ?? '' });
+          return;
+        }
+        const { path, error } = data;
+        setIsCalculatingRoute(false);
+        // compute and store elapsed time if we started one
+        if (routeCalcStartRef.current) {
+          const elapsed = Date.now() - routeCalcStartRef.current;
+          setRouteCalcTimeMs(elapsed);
+          routeCalcStartRef.current = null;
+        }
+        setRouteProgress(null);
+        if (error) {
+          alert(`Routing Error: ${error}`);
+          setRouteResult({ path: null, error });
+          return;
+        }
+        setRouteResult({ path, error: undefined });
+
+        // On successful route, center the view on the starting system
+        if (path && path.length > 0 && mapData) {
+          const systemsByName = Object.fromEntries(Object.values(mapData.solar_systems).map(s => [s.name.toLowerCase(), s]));
+          const startSystem = systemsByName[path[0].toLowerCase()];
+          if (startSystem) {
+            selectSystem(startSystem);
+          }
+        }
+      };
+
+      return worker;
+    };
+
+    const worker = createWorker();
+
+    // Terminate the worker on cleanup
+    return () => {
+      worker.terminate();
+      routingWorkerRef.current = null;
+    };
+  }, [mapData, selectSystem]);
+
+  // Track route calculation start time and elapsed time
+  const routeCalcStartRef = useRef<number | null>(null);
+  const [routeCalcTimeMs, setRouteCalcTimeMs] = useState<number | null>(null);
+
+  // Stop / cancel the current calculation: terminate worker and recreate a fresh one
+  const stopCalculation = useCallback(() => {
+    if (routingWorkerRef.current) {
+      try {
+        routingWorkerRef.current.terminate();
+      } catch (e) {
+        // ignore
+      }
+      routingWorkerRef.current = null;
+    }
+    setIsCalculatingRoute(false);
+    setRouteProgress(null);
+    routeCalcStartRef.current = null;
+    setRouteCalcTimeMs(null);
+
+    // Recreate worker so the UI can run new calculations later
+    const worker = new Worker(new URL('./utils/routing_worker.ts', import.meta.url), { type: 'module' });
+    routingWorkerRef.current = worker;
+    // wire the same handler as above
     worker.onmessage = (e) => {
-      const { path, error } = e.data;
+      const data = e.data;
+      if (data && data.type === 'progress') {
+        setRouteProgress({ explored: data.explored ?? 0, frontier: data.frontier ?? 0, elapsedMs: data.elapsedMs ?? 0, message: data.message ?? '' });
+        return;
+      }
+      const { path, error } = data;
       setIsCalculatingRoute(false);
+      if (routeCalcStartRef.current) {
+        const elapsed = Date.now() - routeCalcStartRef.current;
+        setRouteCalcTimeMs(elapsed);
+        routeCalcStartRef.current = null;
+      }
+      setRouteProgress(null);
       if (error) {
         alert(`Routing Error: ${error}`);
         setRouteResult({ path: null, error });
@@ -264,7 +341,6 @@ function App() {
       }
       setRouteResult({ path, error: undefined });
 
-      // On successful route, center the view on the starting system
       if (path && path.length > 0 && mapData) {
         const systemsByName = Object.fromEntries(Object.values(mapData.solar_systems).map(s => [s.name.toLowerCase(), s]));
         const startSystem = systemsByName[path[0].toLowerCase()];
@@ -272,11 +348,6 @@ function App() {
           selectSystem(startSystem);
         }
       }
-    };
-
-    // Terminate the worker on cleanup
-    return () => {
-      worker.terminate();
     };
   }, [mapData, selectSystem]);
 
@@ -288,6 +359,8 @@ function App() {
 
     setIsCalculatingRoute(true);
     setRouteResult(null);
+  setRouteCalcTimeMs(null);
+  routeCalcStartRef.current = Date.now();
 
     routingWorkerRef.current?.postMessage({
       systems: mapData.solar_systems,
@@ -1139,11 +1212,14 @@ function App() {
           </label>
         </div>
         <P2PRouting 
-          onCalculateRoute={calculateRoute} 
-          isCalculating={isCalculatingRoute} 
-          routeResult={routeResult} 
+          onCalculateRoute={calculateRoute}
+          onStopCalculation={stopCalculation}
+          isCalculating={isCalculatingRoute}
+          routeCalcTimeMs={routeCalcTimeMs}
+          routeResult={routeResult}
           mapData={mapData}
           systemNames={mapData ? Object.values(mapData.solar_systems).map(s => s.name) : []}
+          progress={routeProgress}
         />
         {isPlanetCountActive && generatePlanetCountLegend()}
       </div>
