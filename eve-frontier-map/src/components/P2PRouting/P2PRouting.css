@@ -60,7 +60,8 @@
 }
 
 .p2p-calculate-button:hover {
-  background-color: #0088cc;
+  /* Keep hover color tied to the current accent so it doesn't flip when accent is orange */
+  background-color: var(--accent);
 }
 
 .p2p-calculate-button:disabled {
