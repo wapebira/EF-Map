@@ -32,6 +32,9 @@ class PriorityQueue<T> {
   isEmpty(): boolean {
     return this.elements.length === 0;
   }
+  size(): number {
+    return this.elements.length;
+  }
 }
 
 // Helpers
@@ -52,6 +55,49 @@ const reconstructPath = (cameFrom: { [key: number]: number }, current: SolarSyst
   }
   return totalPath;
 };
+// Spatial grid and neighbor cache to speed up neighbor queries.
+const spatialGrids: Map<number, Map<string, SolarSystem[]>> = new Map();
+const neighborCache: Map<string, { system: SolarSystem; cost: number }[]> = new Map();
+
+const buildGrid = (cellSize: number, allSystems: SolarSystem[]) => {
+  const grid = new Map<string, SolarSystem[]>();
+  for (const s of allSystems) {
+    const ix = Math.floor(s.position.x / cellSize);
+    const iy = Math.floor(s.position.y / cellSize);
+    const iz = Math.floor(s.position.z / cellSize);
+    const key = `${ix},${iy},${iz}`;
+    if (!grid.has(key)) grid.set(key, []);
+    grid.get(key)!.push(s);
+  }
+  return grid;
+};
+
+const getCandidatesFromGrid = (system: SolarSystem, grid: Map<string, SolarSystem[]>, cellSize: number, maxJumpDist: number) => {
+  const candidates: SolarSystem[] = [];
+  const r = Math.ceil(maxJumpDist / cellSize);
+  const ix = Math.floor(system.position.x / cellSize);
+  const iy = Math.floor(system.position.y / cellSize);
+  const iz = Math.floor(system.position.z / cellSize);
+  const seen = new Set<number>();
+  for (let dx = -r; dx <= r; dx++) {
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dz = -r; dz <= r; dz++) {
+        const key = `${ix + dx},${iy + dy},${iz + dz}`;
+        const bucket = grid.get(key);
+        if (!bucket) continue;
+        for (const s of bucket) {
+          if (s.id === system.id) continue;
+          if (!seen.has(s.id)) {
+            seen.add(s.id);
+            const d = heuristic(system, s);
+            if (d <= maxJumpDist) candidates.push(s);
+          }
+        }
+      }
+    }
+  }
+  return candidates;
+};
 
 const getNeighbors = (
   system: SolarSystem,
@@ -61,21 +107,32 @@ const getNeighbors = (
   optimizeFor: 'fuel' | 'jumps',
   systemsById: { [id: number]: SolarSystem }
 ): { system: SolarSystem; cost: number }[] => {
+  const cacheKey = `${system.id}:${Math.max(1, Math.floor(maxJumpDist))}:${optimizeFor}`;
+  if (neighborCache.has(cacheKey)) return neighborCache.get(cacheKey)!;
+
   const neighbors: { system: SolarSystem; cost: number }[] = [];
 
+  // Choose a reasonable cell size. Use the requested maxJumpDist to keep neighbor buckets small.
+  const cellSize = Math.max(1, Math.floor(maxJumpDist));
+
+  // Build or reuse a grid for this cellSize
+  let grid = spatialGrids.get(cellSize);
+  if (!grid) {
+    grid = buildGrid(cellSize, allSystems);
+    spatialGrids.set(cellSize, grid);
+  }
+
   if (optimizeFor === 'jumps') {
-    for (const otherSystem of allSystems) {
-      if (system.id === otherSystem.id) continue;
-      const dist = heuristic(system, otherSystem);
-      if (dist <= maxJumpDist) {
-        neighbors.push({ system: otherSystem, cost: 1 });
-      }
+    const candidates = getCandidatesFromGrid(system, grid, cellSize, maxJumpDist);
+    for (const otherSystem of candidates) {
+      neighbors.push({ system: otherSystem, cost: 1 });
     }
+    neighborCache.set(cacheKey, neighbors);
     return neighbors;
   }
 
   if (optimizeFor === 'fuel') {
-    // Add stargate connections
+    // Add stargate connections (these are typically sparse)
     for (const gate of Object.values(stargates)) {
       if (gate.source_system_id === system.id) {
         const destSystem = systemsById[gate.destination_system_id];
@@ -85,16 +142,14 @@ const getNeighbors = (
       }
     }
 
-    // Add direct ship jumps
-    for (const otherSystem of allSystems) {
-      if (system.id === otherSystem.id) continue;
-      const dist = heuristic(system, otherSystem);
-      if (dist <= maxJumpDist) {
-        neighbors.push({ system: otherSystem, cost: 100 });
-      }
+    // Add nearby ship jumps using the spatial grid
+    const candidates = getCandidatesFromGrid(system, grid, cellSize, maxJumpDist);
+    for (const otherSystem of candidates) {
+      neighbors.push({ system: otherSystem, cost: 100 });
     }
   }
 
+  neighborCache.set(cacheKey, neighbors);
   return neighbors;
 };
 
@@ -193,6 +248,9 @@ class MinHeap<T> {
   isEmpty() {
     return this.heap.length === 0;
   }
+  size() {
+    return this.heap.length;
+  }
 }
 
 const findPathDijkstra = (request: RoutingRequest): RoutingResponse => {
@@ -221,6 +279,8 @@ const findPathDijkstra = (request: RoutingRequest): RoutingResponse => {
 
   const allSystemsList = Object.values(systems);
 
+  const startTime = Date.now();
+  let lastEmit = 0;
   while (!heap.isEmpty()) {
     const top = heap.pop()!;
     const current = top.val;
@@ -229,7 +289,7 @@ const findPathDijkstra = (request: RoutingRequest): RoutingResponse => {
 
     if (current.id === endNode.id) return { path: reconstructPath(prev, current, systemsById) };
 
-    const neighbors = getNeighbors(current, allSystemsList, stargates, maxJumpDistance, optimizeFor, systemsById);
+  const neighbors = getNeighbors(current, allSystemsList, stargates, maxJumpDistance, optimizeFor, systemsById);
     for (const neighbor of neighbors) {
       const cost = (() => {
         if (optimizeFor === 'jumps') return neighbor.cost; // 1 per jump
@@ -247,6 +307,19 @@ const findPathDijkstra = (request: RoutingRequest): RoutingResponse => {
         prev[neighbor.system.id] = current.id;
         heap.push(alt, neighbor.system);
       }
+        // Throttled progress update
+        const now = Date.now();
+        if (now - lastEmit >= 200) {
+          lastEmit = now;
+          try {
+            // post a lightweight progress object
+            // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+            // @ts-ignore
+            self.postMessage({ type: 'progress', explored: Object.keys(visited).length, frontier: heap.size(), elapsedMs: now - startTime, message: `Explored ${Object.keys(visited).length} nodes` });
+          } catch (e) {
+            // ignore postMessage errors
+          }
+        }
     }
   }
 
@@ -255,6 +328,13 @@ const findPathDijkstra = (request: RoutingRequest): RoutingResponse => {
 
 // Dispatcher
 const findPath = (request: RoutingRequest): RoutingResponse => {
+  // Invalidate spatial caches if the requested maxJumpDistance would lead to different grid buckets
+  const cellSize = Math.max(1, Math.floor(request.maxJumpDistance));
+  if (!spatialGrids.has(cellSize)) {
+    spatialGrids.clear();
+    neighborCache.clear();
+  }
+
   const algo = request.algorithm ?? 'astar';
   if (algo === 'dijkstra') return findPathDijkstra(request);
   return findPathAstar(request);
