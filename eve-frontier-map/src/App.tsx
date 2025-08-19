@@ -72,8 +72,8 @@ type SqlValue = number | string | Uint8Array | null;
 
 // Define colors for selection and base
 const DEFAULT_STAR_COLOR = new THREE.Color(0xffffff);
-const SELECTED_STAR_COLOR = new THREE.Color(0xff4c26); // Red/Orange for selected star when DPC is off
-const REGION_OUTLINE_COLOR = new THREE.Color(0x00aaff); // Blue for region outlines when DPC is on
+const SELECTED_STAR_COLOR = new THREE.Color(0x00aaff); // Blue for selected star when DPC is off
+const REGION_OUTLINE_COLOR = new THREE.Color(0x00aaff); // Shared blue for region outlines
 
 function App() {
   const [loadingProgress, setLoadingProgress] = useState(0);
@@ -599,7 +599,7 @@ function App() {
       size: 20, // Default/min size
       sizeAttenuation: false, // Use screen-space sizing
       map: ringTexture,
-      color: 0xff4c26,
+  color: 0x00aaff,
       transparent: true,
       alphaTest: 0.5,
     });
