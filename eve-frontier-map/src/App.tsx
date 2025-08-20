@@ -1320,8 +1320,10 @@ function App() {
       mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
       mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
 
-      if (event.buttons & 1) { // Left mouse button is down
-        const currentMousePos = new THREE.Vector2(event.clientX, event.clientY);
+      const currentMousePos = new THREE.Vector2(event.clientX, event.clientY);
+      const anyButtonDown = event.buttons !== 0; // any mouse button depressed
+      // Detect drag for left, middle, or right buttons
+      if (anyButtonDown) {
         if (currentMousePos.distanceTo(mouseDownPosRef.current) > DRAG_THRESHOLD) {
           isDraggingRef.current = true;
         }
@@ -1331,7 +1333,8 @@ function App() {
         return;
       }
 
-      if (!isDraggingRef.current) {
+      // Only perform expensive raycast when no buttons are pressed (pure hover)
+      if (!isDraggingRef.current && !anyButtonDown) {
         raycaster.setFromCamera(mouse, cameraRef.current);
         // Dynamic threshold based on camera distance
         const distance = cameraRef.current.position.distanceTo(controlsRef.current.target);
@@ -1427,7 +1430,7 @@ function App() {
     };
 
     const onPointerDown = (event: PointerEvent) => {
-      if (event.button !== 0) return; // Only care about left mouse button
+      // Track initial position/time for any button to better detect drags (panning/right, middle)
       isDraggingRef.current = false;
       mouseDownPosRef.current.set(event.clientX, event.clientY);
       mouseDownTimeRef.current = Date.now();
