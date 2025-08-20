@@ -116,6 +116,8 @@ function App() {
   const hoverPointRef = useRef<THREE.Points | null>(null);
   const stargateLinesRef = useRef<THREE.LineSegments | null>(null);
   const routeLinesRef = useRef<THREE.Group | null>(null); // New ref for route lines
+  // Track which module produced the currently drawn route ('scout' or 'p2p')
+  const routeSourceRef = useRef<'scout'|'p2p'|null>(null);
   const visibleSystemsRef = useRef<SolarSystem[]>([]);
   const animationRef = useRef({
     isAnimating: false,
@@ -451,7 +453,26 @@ function App() {
     // If a scout route was displayed, clear it so P2P route takes visual precedence
     if (scoutRouteResult) {
       setScoutRouteResult(null);
-  setScoutInvalidateToken(t=> t+1); // force scout component to clear internal workers/state
+      setScoutInvalidateToken(t=> t+1); // force scout component to clear internal workers/state
+      // Proactively remove any currently drawn scout route lines & animators before P2P draws
+      if(routeSourceRef.current === 'scout') {
+        try {
+          // Clear route meshes
+          if (routeLinesRef.current && sceneRef.current) {
+            routeLinesRef.current.traverse(child => {
+              if (child instanceof THREE.Mesh) {
+                child.geometry.dispose();
+                (child.material as THREE.Material).dispose();
+              }
+            });
+            sceneRef.current.remove(routeLinesRef.current);
+            routeLinesRef.current = null;
+          }
+          // Reset any pulse animators
+          routeAnimUpdatersRef.current = [];
+        } catch(e) { /* ignore */ }
+      }
+      routeSourceRef.current = null;
     }
 
     setIsCalculatingRoute(true);
@@ -1097,7 +1118,7 @@ function App() {
       routeLinesRef.current = null;
     }
 
-    const activePath = scoutRouteResult?.path || routeResult?.path;
+  const activePath = scoutRouteResult?.path || routeResult?.path;
     if (activePath) {
       const systemsByName = Object.fromEntries(Object.values(mapData.solar_systems).map(s => [s.name.toLowerCase(), s]));
       const pathSystems = activePath.map(name => systemsByName[name.toLowerCase()]).filter(Boolean);
@@ -1105,7 +1126,9 @@ function App() {
       if (pathSystems.length < 2) return;
 
       const routeGroup = new THREE.Group();
-      routeLinesRef.current = routeGroup;
+  routeLinesRef.current = routeGroup;
+  // Record source for later clearing decisions
+  routeSourceRef.current = scoutRouteResult?.path ? 'scout' : 'p2p';
 
   // Determine route color from the current accent CSS variable
   const accentHex = accentIsBlue ? 0x00aaff : 0xff4c26;
@@ -1197,7 +1220,8 @@ function App() {
         animators.push(updater);
       });
       // Attach animators to the global updaters list so they run each frame
-      routeAnimUpdatersRef.current.push(...animators);
+  // Replace any existing animators to avoid stale pulses from previous routes
+  routeAnimUpdatersRef.current = [...animators];
 
       // Ensure cleanup removes these animators and meshes when route is cleared
       const cleanupRoute = () => {
