@@ -322,8 +322,34 @@ self.onmessage = (e:MessageEvent<InMsg>) => {
       post({ type:'baselineError', reason:`Unreachable systems with current ship range (${maxShipRange} LY). Minimum required ~${connectivity.minRequired.toFixed(2)} LY`, minRequiredShipRange: connectivity.minRequired, generation: msg.generation });
       return;
     }
-  const { path:nnPath, unreachable } = nearestNeighbor(msg.start, msg.systems, msg.returnToStart, connectivity.reachable, !!msg.debug);
+    let { path:nnPath, unreachable } = nearestNeighbor(msg.start, msg.systems, msg.returnToStart, connectivity.reachable, !!msg.debug);
     if(unreachable){ post({ type:'baselineError', reason:'Unreachable systems with current ship range / gate network', generation: msg.generation }); return; }
+    // Closure salvage: if returnToStart requested and last->start edge is infeasible, try to duplicate an earlier anchor that can close.
+    if(msg.returnToStart && nnPath.length>=2){
+  const startName = nnPath[0];
+      const lastName = nnPath[nnPath.length-1];
+      if(lastName === startName && nnPath.length>2){
+        // Already closed; ensure feasibility of closing edge (second-to-last -> start)
+        const penultName = nnPath[nnPath.length-2];
+        const a=systemsByName[penultName], b=systemsByName[startName];
+        if(a && b){
+          const ev=evaluateEdge(a,b);
+          if(!( (ev.chooseShip && ev.shipDistance<=maxShipRange+1e-6) || (!ev.chooseShip && ev.gateDistance!==null) )){
+            // Find alternative anchor able to close
+            let alt:string|undefined;
+            for(let i=nnPath.length-2;i>0;i--){ const cand=nnPath[i]; if(cand===startName) continue; const sA=systemsByName[cand]; const sB=systemsByName[startName]; if(!sA||!sB) continue; const ev2=evaluateEdge(sA,sB); if(ev2.gateDistance!==null || (ev2.chooseShip && ev2.shipDistance<=maxShipRange+1e-6)){ alt=cand; break; } }
+            if(alt){
+              // Remove existing closing start and append alt then start
+              nnPath.pop(); // remove start
+              nnPath.push(alt); nnPath.push(startName);
+              if(msg.debug) post({ type:'progress', message:`[DEBUG] Closure salvage: switched closing anchor to ${alt}` });
+            } else {
+              if(msg.debug) post({ type:'progress', message:`[DEBUG] Closure failure: cannot find feasible anchor to return to start` });
+            }
+          }
+        }
+      }
+    }
   const refinedPre = twoOpt(nnPath, msg.returnToStart, 250, !!msg.debug);
     let refined = refinedPre;
     let refinedCost = computePathCost(refined, msg.returnToStart);
