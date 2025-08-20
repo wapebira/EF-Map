@@ -34,6 +34,8 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	const [isCalculating, setIsCalculating] = useState(false);
 	const [championPath, setChampionPath] = useState<string[]|null>(null);
 	const [championDistance, setChampionDistance] = useState<number|null>(null);
+	// Track baseline distance separately for improvement % display
+	const baselineDistanceRef = useRef<number|null>(null);
 	const [datasetChanged, setDatasetChanged] = useState(false);
 	const championPathRef = useRef<string[]|null>(null);
 	// Track last baseline return-to-start setting to know when to recompute
@@ -174,6 +176,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		championPathRef.current = path;
 		const distVal = computeRouteDistance(path);
 		setChampionDistance(distVal);
+		baselineDistanceRef.current = distVal; // store baseline distance for improvement stats
 		log(`Baseline distance: ${distVal.toFixed(2)} LY over ${path.length} systems`);
 		try { onBaselineRoute && onBaselineRoute(path); } catch(e) { /* ignore */ }
 		// End baseline phase so user can immediately continue or copy
@@ -320,6 +323,26 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		navigator.clipboard.writeText(text).then(()=> { setCopyButtonText('Copied!'); setTimeout(()=> setCopyButtonText('Copy'),1500); });
 	};
 
+	const copyRouteDetailed = () => {
+		if(!championPath) return;
+		let lines:string[] = [];
+		let total=0;
+		for(let i=0;i<championPath.length;i++){
+			if(i<championPath.length-1){
+				const seg = computeSystemDistance(championPath[i], championPath[i+1]);
+				total += seg;
+				lines.push(`${i+1}. ${championPath[i]} -> ${championPath[i+1]}  ${seg.toFixed(2)} LY`);
+			}else{
+				lines.push(`${i+1}. ${championPath[i]}`);
+			}
+		}
+		lines.push(`Total: ${total.toFixed(2)} LY`);
+		if(returnToStart) lines.push('(Return to Start enabled)');
+		navigator.clipboard.writeText(lines.join('\n')).then(()=> { setCopyButtonText('Copied!'); setTimeout(()=> setCopyButtonText('Copy'),1500); });
+	};
+
+	const improvementPct = baselineDistanceRef.current && championDistance !== null ? ((baselineDistanceRef.current - championDistance)/baselineDistanceRef.current)*100 : 0;
+
 	return (
 		<div className="scout-optimizer-container">
 			<label>
@@ -362,7 +385,15 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 						{championPath && <button className="scout-button" disabled={isCalculating} onClick={runOptimizationPasses}>Continue Optimization</button>}
 						{isCalculating && <button className="scout-button" onClick={stop}>Stop</button>}
 						{championPath && <button className="scout-button" onClick={copyRoute}>{copyButtonText}</button>}
+						{championPath && <button className="scout-button" onClick={copyRouteDetailed}>Export Detailed</button>}
 					</div>
+					{championPath && (
+						<div className="scout-metrics">
+							<div><strong>Baseline Distance:</strong> {baselineDistanceRef.current?.toFixed(2)} LY</div>
+							<div><strong>Current Champion:</strong> {championDistance?.toFixed(2)} LY {baselineDistanceRef.current && championDistance!==null && championDistance < baselineDistanceRef.current ? `(-${improvementPct.toFixed(2)}%)` : ''}</div>
+							<div><strong>Systems:</strong> {championPath.length}{returnToStart ? ' (includes return)' : ''}</div>
+						</div>
+					)}
 					<div className="scout-status" aria-live="polite">{statusLog.join('\n')}</div>
 				</div>
 			)}
