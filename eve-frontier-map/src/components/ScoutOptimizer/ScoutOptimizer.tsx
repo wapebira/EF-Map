@@ -45,6 +45,9 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	// Track previous selection parameter values for reason logging
 	const prevParamsRef = useRef({ startSystem:'', radius:'', useRegion:false, gateReachableOnly:false });
 	const [copyButtonText, setCopyButtonText] = useState('Copy');
+	// Note export (paged like P2P)
+	const [notePages, setNotePages] = useState<string[]>([]);
+	const [activeNotePage, setActiveNotePage] = useState(0);
 	const workersRef = useRef<Worker[]>([]);
 	const systemsForRunRef = useRef<string[]>([]);
 	const baselineDoneRef = useRef(false);
@@ -317,28 +320,119 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		return total;
 	},[computeSystemDistance]);
 
-	const copyRoute = () => {
-		if(!championPath) return;
-		const text = championPath.join('\n');
-		navigator.clipboard.writeText(text).then(()=> { setCopyButtonText('Copied!'); setTimeout(()=> setCopyButtonText('Copy'),1500); });
-	};
+	// --- Scout Note Formatting (mirrors P2P with loop-back segmentation) ---
+	const MAX_NOTE_LENGTH = 1500;
+	const formatRouteToNotes = useCallback((path: string[], data: MapData): string[] => {
+		if(path.length < 2) return [];
+		const systemsByName: Map<string, SolarSystem> = new Map(Object.values(data.solar_systems).map(s => [s.name.toLowerCase(), s]));
+		const pathSystems = path.map(n => systemsByName.get(n.toLowerCase())).filter(Boolean) as SolarSystem[];
+		if(pathSystems.length < 2) return [];
 
-	const copyRouteDetailed = () => {
-		if(!championPath) return;
-		let lines:string[] = [];
-		let total=0;
-		for(let i=0;i<championPath.length;i++){
-			if(i<championPath.length-1){
-				const seg = computeSystemDistance(championPath[i], championPath[i+1]);
-				total += seg;
-				lines.push(`${i+1}. ${championPath[i]} -> ${championPath[i+1]}  ${seg.toFixed(2)} LY`);
+		// Precompute gate adjacency lookup for faster gate checks
+		const gates = Object.values(data.stargates);
+		const gatePairs = new Set<string>();
+		for(const g of gates){ gatePairs.add(g.source_system_id+":"+g.destination_system_id); gatePairs.add(g.destination_system_id+":"+g.source_system_id); }
+		const isGate = (a:SolarSystem,b:SolarSystem)=> gatePairs.has(a.id+":"+b.id);
+
+		const gateSystemIds = new Set<number>(); gates.forEach(g=>{ gateSystemIds.add(g.source_system_id); gateSystemIds.add(g.destination_system_id); });
+		const getSystemLink = (system: SolarSystem): string => {
+			const hasGates = gateSystemIds.has(system.id);
+			const isHighlighted = system.planets === 1 && !hasGates;
+			return `<a href="showinfo:5//${system.id}">${system.name}${isHighlighted ? '*' : ''}</a>`;
+		};
+
+		// Build condensed segments with loop-back splitting
+		type Segment = { type:'GATE'; count:number; from:SolarSystem; to:SolarSystem } | { type:'JUMP'; distance:number; from:SolarSystem; to:SolarSystem };
+		const segments: Segment[] = [];
+		let i=0;
+		while(i < pathSystems.length - 1){
+			const start = pathSystems[i];
+			const next = pathSystems[i+1];
+			if(isGate(start,next)){
+				// Accumulate gate run
+				const run: SolarSystem[] = [start];
+				let j=i+1;
+				while(j < pathSystems.length && isGate(pathSystems[j-1], pathSystems[j])){ run.push(pathSystems[j]); j++; }
+				// run contains systems along consecutive gate edges
+				if(run.length>1){
+					const first = run[0];
+					const last = run[run.length-1];
+					if(first.id === last.id && run.length > 2){
+						// Potential loop-back, attempt symmetrical split apex
+						const L = run.length - 1; // hops
+						let symmetric = true;
+						for(let k=1;k<=Math.floor(L/2);k++){ if(run[k].id !== run[L-k].id){ symmetric=false; break; } }
+						if(symmetric){
+							const apexIdx = Math.floor(L/2);
+							const apex = run[apexIdx];
+							segments.push({ type:'GATE', count: apexIdx, from:first, to:apex });
+							segments.push({ type:'GATE', count: apexIdx, from:apex, to:last });
+						}else{
+							// Fallback: emit individual edges to avoid collapsing to same system
+							for(let k=0;k<run.length-1;k++){
+								segments.push({ type:'GATE', count:1, from:run[k], to:run[k+1] });
+							}
+						}
+					}else{
+						segments.push({ type:'GATE', count: run.length-1, from: first, to: last });
+					}
+					i = j-1; // position at last system of run
+				}else{
+					segments.push({ type:'GATE', count:1, from:start, to:next });
+					i++;
+				}
 			}else{
-				lines.push(`${i+1}. ${championPath[i]}`);
+				// Ship jump
+				const distance = Math.sqrt(
+					Math.pow(start.position.x - next.position.x,2)+
+					Math.pow(start.position.y - next.position.y,2)+
+					Math.pow(start.position.z - next.position.z,2)
+				);
+				segments.push({ type:'JUMP', distance, from:start, to:next });
+				i++;
 			}
 		}
-		lines.push(`Total: ${total.toFixed(2)} LY`);
-		if(returnToStart) lines.push('(Return to Start enabled)');
-		navigator.clipboard.writeText(lines.join('\n')).then(()=> { setCopyButtonText('Copied!'); setTimeout(()=> setCopyButtonText('Copy'),1500); });
+
+		const from = pathSystems[0];
+		const to = pathSystems[pathSystems.length-1];
+		const legend = `Gate: (x)→ SmartGate: []→ Jump: ly→ | * = 1 Planet, No Gates\n`;
+
+		const pages: string[] = [];
+		let pageNum = 1;
+		let currentBody = getSystemLink(from);
+		for(const seg of segments){
+			const separator = seg.type==='GATE' ? ` (${seg.count})→ ` : ` ${seg.distance.toFixed(2)}→ `;
+			const nextLink = getSystemLink(seg.to);
+			const nextPiece = separator + nextLink;
+			const headerBase = `${from.name} → ${to.name}`;
+			const pageHeader = `${headerBase} (Page ${pageNum})\n` + legend;
+			if(pageHeader.length + currentBody.length + nextPiece.length > MAX_NOTE_LENGTH){
+				const finalHeader = `${headerBase}${pages.length>0?` (Page ${pageNum})`:''}\n` + legend;
+				pages.push(finalHeader + currentBody);
+				pageNum++;
+				currentBody = getSystemLink(seg.from) + nextPiece; // restart with segment start
+			}else{
+				currentBody += nextPiece;
+			}
+		}
+		const finalHeader = `${from.name} → ${to.name}${pages.length>0?` (Page ${pageNum})`:''}\n` + legend;
+		pages.push(finalHeader + currentBody);
+		if(pages.length===1){ pages[0]=pages[0].replace(' (Page 1)',''); }
+		return pages;
+	},[]);
+
+	useEffect(()=>{
+		if(championPath && mapData){
+			setNotePages(formatRouteToNotes(championPath, mapData));
+			setActiveNotePage(0);
+		}else{
+			setNotePages([]);
+		}
+	},[championPath, mapData, formatRouteToNotes]);
+
+	const handleCopyPage = (idx:number) => {
+		if(!notePages[idx]) return;
+		navigator.clipboard.writeText(notePages[idx]).then(()=> { setCopyButtonText('Copied!'); setTimeout(()=> setCopyButtonText('Copy'),1500); });
 	};
 
 	const improvementPct = baselineDistanceRef.current && championDistance !== null ? ((baselineDistanceRef.current - championDistance)/baselineDistanceRef.current)*100 : 0;
@@ -384,9 +478,20 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 						{!championPath && <button className="scout-button" disabled={isCalculating} onClick={startCalculation}>Calculate Route</button>}
 						{championPath && <button className="scout-button" disabled={isCalculating} onClick={runOptimizationPasses}>Continue Optimization</button>}
 						{isCalculating && <button className="scout-button" onClick={stop}>Stop</button>}
-						{championPath && <button className="scout-button" onClick={copyRoute}>{copyButtonText}</button>}
-						{championPath && <button className="scout-button" onClick={copyRouteDetailed}>Export Detailed</button>}
+						{/* Copy buttons now rendered below with pagination */}
 					</div>
+					{notePages.length>0 && (
+						<div className="p2p-results">
+							<h4>Route Note{notePages.length>1?` (Page ${activeNotePage+1}/${notePages.length})`:''}</h4>
+							<div className="p2p-copy-buttons">
+								{notePages.map((_,idx)=>(
+									<button key={idx} onClick={()=>{ setActiveNotePage(idx); handleCopyPage(idx); }} className={`p2p-copy-button ${activeNotePage===idx?'active':''}`}>
+										{copyButtonText} {notePages.length>1?`${idx+1}/${notePages.length}`:''}
+									</button>
+								))}
+							</div>
+						</div>
+					)}
 					{championPath && (
 						<div className="scout-metrics">
 							<div><strong>Baseline Distance:</strong> {baselineDistanceRef.current?.toFixed(2)} LY</div>
