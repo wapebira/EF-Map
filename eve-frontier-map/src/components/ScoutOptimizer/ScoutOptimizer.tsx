@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useRef, useState, useEffect } from 'react';
 import '../P2PRouting/P2PRouting.css';
 import './ScoutOptimizer.css';
 import AutoCompleteInput from '../AutoCompleteInput/AutoCompleteInput';
@@ -29,6 +29,8 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	const [statusLog, setStatusLog] = useState<string[]>([]);
 	const [isCalculating, setIsCalculating] = useState(false);
 	const [championPath, setChampionPath] = useState<string[]|null>(null);
+	// Track last baseline return-to-start setting to know when to recompute
+	const lastReturnToStartRef = useRef(returnToStart);
 	const [copyButtonText, setCopyButtonText] = useState('Copy');
 	const workersRef = useRef<Worker[]>([]);
 	const systemsForRunRef = useRef<string[]>([]);
@@ -123,8 +125,17 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 
 	const handleOptimizeResult = (path:string[]) => {
 		setChampionPath(prev=>{
-			if(!prev) return path;
-			return path.length <= prev.length ? path : prev; // placeholder comparison
+			if(!prev){
+				log(`Initial optimization candidate length: ${path.length}`);
+				return path;
+			}
+			if(path.length < prev.length){
+				log(`Improved champion: ${prev.length} -> ${path.length}`);
+				return path;
+			} else {
+				log(`No improvement (candidate ${path.length}, champion ${prev.length})`);
+				return prev;
+			}
 		});
 		optimizeReceivedRef.current += 1;
 		if(optimizeReceivedRef.current >= optimizeExpectedRef.current) {
@@ -144,6 +155,23 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	};
 
 	const stop = () => { broadcast({ type:'stop' }); setIsCalculating(false); log('Stop requested.'); };
+
+	// Recalculate baseline automatically when Return to Start toggled after baseline computed
+	useEffect(()=>{
+		if(!baselineDoneRef.current) { lastReturnToStartRef.current = returnToStart; return; }
+		if(lastReturnToStartRef.current !== returnToStart && championPath && !isCalculating){
+			log(`Return to Start toggled ${returnToStart ? 'ON' : 'OFF'}; recalculating baseline.`);
+			baselineDoneRef.current = false;
+			setIsCalculating(true);
+			pendingBaselineRef.current = { start: startSystem, systems: systemsForRunRef.current, returnToStart };
+			// If all workers already ready, dispatch immediately
+			if(readyCountRef.current === workersRef.current.length && workersRef.current.length>0){
+				const pb = pendingBaselineRef.current; pendingBaselineRef.current=null;
+				workersRef.current.forEach(w=> w.postMessage({ type:'baseline', ...pb! }));
+			}
+		}
+		lastReturnToStartRef.current = returnToStart;
+	}, [returnToStart, championPath, isCalculating, startSystem]);
 
 	const copyRoute = () => {
 		if(!championPath) return;
