@@ -138,19 +138,38 @@ const nearestNeighbor = (start:string, candidates:string[], returnToStart:boolea
   return { path:route, unreachable: unreachable || route.filter(n=>n!==start).length < candidates.filter(c=>c!==start).length };
 };
 
-// Simple 2-opt
+// Simple 2-opt with feasibility guard (will not accept unreachable candidate)
 const twoOpt = (path:string[], returnToStart:boolean, timeMs:number): string[] => {
   const startTime=Date.now();
   let best=path.slice();
   const effectiveLen = returnToStart ? best.length-1 : best.length;
   const cost = (p:string[])=> computePathCost(p, returnToStart);
   let bestCost = cost(best);
+  // If baseline already unreachable, return early
+  if(!isFinite(bestCost.shipDistance)) return path;
   while(Date.now()-startTime<timeMs){
     let improved=false;
     for(let i=1;i<effectiveLen-2;i++){
       for(let k=i+1;k<effectiveLen-1;k++){
+        // build candidate
         const newPath = best.slice(0,i).concat(best.slice(i,k+1).reverse(), best.slice(k+1));
+        // Quick feasibility check: only edges affected (i-1,i) .. (k,k+1)
+        let feasible=true;
+        const checkEdges: [number,number][] = [];
+        if(i>0) checkEdges.push([i-1,i]);
+        checkEdges.push([i,k]);
+        if(k+1 < best.length) checkEdges.push([k,k+1]);
+        for(const [aIdx,bIdx] of checkEdges){
+          const aName=newPath[aIdx], bName=newPath[bIdx];
+          const a=systemsByName[aName], b=systemsByName[bName];
+          if(!a||!b){ feasible=false; break; }
+          const ev=evaluateEdge(a,b);
+            if(ev.chooseShip){ if(ev.shipDistance>maxShipRange+1e-6){ feasible=false; break; } }
+            else if(ev.gateDistance===null){ feasible=false; break; }
+        }
+        if(!feasible) continue;
         const nc = cost(newPath);
+        if(!isFinite(nc.shipDistance)) continue; // safeguard
         const better = (nc.shipDistance < bestCost.shipDistance) ||
           (nc.shipDistance===bestCost.shipDistance && nc.shipJumps < bestCost.shipJumps) ||
           (nc.shipDistance===bestCost.shipDistance && nc.shipJumps===bestCost.shipJumps && nc.totalDistance < bestCost.totalDistance);
@@ -254,9 +273,14 @@ self.onmessage = (e:MessageEvent<InMsg>) => {
   const { path:nnPath, unreachable } = nearestNeighbor(msg.start, msg.systems, msg.returnToStart, connectivity.reachable);
     if(unreachable){ post({ type:'baselineError', reason:'Unreachable systems with current ship range / gate network', generation: msg.generation }); return; }
     const refinedPre = twoOpt(nnPath, msg.returnToStart, 250);
-    const refinedCost = computePathCost(refinedPre, msg.returnToStart);
-    if(!isFinite(refinedCost.shipDistance)) { post({ type:'baselineError', reason:'Route optimization produced unreachable segment', generation: msg.generation }); return; }
-    const refined = refinedPre;
+    let refined = refinedPre;
+    let refinedCost = computePathCost(refined, msg.returnToStart);
+    if(!isFinite(refinedCost.shipDistance)) {
+      // fallback to original nearest neighbor path if feasible
+      const nnCost = computePathCost(nnPath, msg.returnToStart);
+      if(isFinite(nnCost.shipDistance)) { refined = nnPath; refinedCost = nnCost; }
+      else { post({ type:'baselineError', reason:'Route optimization produced unreachable segment', generation: msg.generation }); return; }
+    }
     // Validation: ensure no ship jumps exceed maxShipRange; if found, try to mark path invalid (will show in UI distance Infinity)
     let invalid=false; let worstOver=0;
     for(let i=0;i<refined.length-1;i++){
