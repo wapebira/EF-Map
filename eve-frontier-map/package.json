@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b",
     "lint": "eslint .",
-    "preview": "vite preview"
+  "preview": "vite preview",
+  "test:scout-cost": "node tools/test_scout_cost.js"
   },
   "dependencies": {
     "@types/three": "^0.179.0",
