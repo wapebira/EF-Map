@@ -32,12 +32,16 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	const [workerCount, setWorkerCount] = useState(()=> Math.max(1,(navigator.hardwareConcurrency||4)-2).toString());
 	const [statusLog, setStatusLog] = useState<string[]>([]);
 	const [isCalculating, setIsCalculating] = useState(false);
+	// Macro path = optimization path (visited target systems order)
 	const [championPath, setChampionPath] = useState<string[]|null>(null);
+	// Display path = macro path expanded into individual gate hops (BFS) so gate segments are shown instead of ship jumps when possible
+	const [championDisplayPath, setChampionDisplayPath] = useState<string[]|null>(null);
 	const [championDistance, setChampionDistance] = useState<number|null>(null);
 	// Track baseline distance separately for improvement % display
 	const baselineDistanceRef = useRef<number|null>(null);
 	const [datasetChanged, setDatasetChanged] = useState(false);
-	const championPathRef = useRef<string[]|null>(null);
+	const championPathRef = useRef<string[]|null>(null); // macro path ref
+	const championDisplayPathRef = useRef<string[]|null>(null);
 	// Track last baseline return-to-start setting to know when to recompute
 	const lastReturnToStartRef = useRef(returnToStart);
 	// Track last system selection signature
@@ -172,16 +176,56 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		}
 	};
 
+	// Expand macro path into gate-level sequence using BFS; inserts intermediate gate systems so renderer/export treat them as gate hops
+	const expandPathToGateSequence = useCallback((path:string[]):string[]=>{
+		if(!mapData) return path;
+		const nameToSystem: {[n:string]:SolarSystem} = Object.values(mapData.solar_systems).reduce((acc,s)=>{ acc[s.name.toLowerCase()]=s; return acc; },{} as {[n:string]:SolarSystem});
+		const bfs = (a:SolarSystem,b:SolarSystem):SolarSystem[]|null => {
+			if(a.id===b.id) return [a];
+			const q:number[][]=[[a.id]]; const seen=new Set<number>([a.id]);
+			while(q.length){
+				const cur=q.shift()!; const last=cur[cur.length-1];
+				if(last===b.id){ return cur.map(id=> mapData.solar_systems[id.toString()]).filter(Boolean); }
+				for(const nxt of gatesBySource[last]||[]){ if(!seen.has(nxt)){ seen.add(nxt); q.push([...cur,nxt]); } }
+			}
+			return null;
+		};
+		const expanded:string[] = [];
+		for(let i=0;i<path.length-1;i++){
+			const a = nameToSystem[path[i].toLowerCase()];
+			const b = nameToSystem[path[i+1].toLowerCase()];
+			if(!a||!b){ if(expanded.length===0) expanded.push(path[i]); expanded.push(path[i+1]); continue; }
+			const chain = bfs(a,b);
+			if(chain && chain.length>1){
+				// append chain, avoid duplicating first if already last of expanded
+				for(let cIdx=0;cIdx<chain.length;cIdx++){
+					const name = chain[cIdx].name;
+					if(cIdx===0 && expanded.length && expanded[expanded.length-1]===name) continue;
+					expanded.push(name);
+				}
+			}else{
+				// fallback direct (ship jump)
+				if(expanded.length===0) expanded.push(a.name);
+				expanded.push(b.name);
+			}
+		}
+		if(expanded.length===0 && path.length){ return path.slice(); }
+		return expanded;
+	},[mapData,gatesBySource]);
+
 	const handleBaselineResult = (path:string[]) => {
 		if(baselineDoneRef.current) return;
 		baselineDoneRef.current=true;
 		setChampionPath(path);
 		championPathRef.current = path;
+		const expanded = expandPathToGateSequence(path);
+		setChampionDisplayPath(expanded);
+		championDisplayPathRef.current = expanded;
 		const distVal = computeRouteDistance(path);
 		setChampionDistance(distVal);
 		baselineDistanceRef.current = distVal; // store baseline distance for improvement stats
 		log(`Baseline distance: ${distVal.toFixed(2)} LY over ${path.length} systems`);
-		try { onBaselineRoute && onBaselineRoute(path); } catch(e) { /* ignore */ }
+		try { onBaselineRoute && onBaselineRoute(expanded); } catch(e) { /* ignore */ }
 		// End baseline phase so user can immediately continue or copy
 		setIsCalculating(false);
 		log('Baseline complete. You can Continue Optimization to refine the route.');
@@ -194,6 +238,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 				setChampionDistance(candDist);
 				log(`Initial optimization candidate distance: ${candDist.toFixed(2)} LY (${path.length} systems)`);
 				championPathRef.current = path;
+				const expanded = expandPathToGateSequence(path); setChampionDisplayPath(expanded); championDisplayPathRef.current = expanded;
 				return path;
 			}
 			const currentDist = championDistance ?? computeRouteDistance(prev);
@@ -201,6 +246,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 				setChampionDistance(candDist);
 				log(`Improved champion distance: ${currentDist.toFixed(2)} -> ${candDist.toFixed(2)} LY`);
 				championPathRef.current = path;
+				const expanded = expandPathToGateSequence(path); setChampionDisplayPath(expanded); championDisplayPathRef.current = expanded;
 				return path;
 			} else {
 				log(`No improvement (candidate ${candDist.toFixed(2)} LY, champion ${currentDist.toFixed(2)} LY)`);
@@ -212,7 +258,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 			setIsCalculating(false);
 			log('Optimization pass complete. You may run additional passes.');
 			// Emit final optimized route after async state settles
-			setTimeout(()=>{ if(onOptimizedRoute && championPathRef.current) { try { onOptimizedRoute(championPathRef.current); } catch(e){/* ignore */} } },0);
+			setTimeout(()=>{ if(onOptimizedRoute && championDisplayPathRef.current) { try { onOptimizedRoute(championDisplayPathRef.current); } catch(e){/* ignore */} } },0);
 		}
 	};
 
@@ -275,6 +321,8 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 			log(`System set changed (${reasons.join(', ')||'parameters changed'}). Previous route invalidated.`);
 			setChampionPath(null);
 			championPathRef.current = null;
+			setChampionDisplayPath(null);
+			championDisplayPathRef.current = null;
 			setChampionDistance(null);
 			baselineDoneRef.current=false;
 			setDatasetChanged(true);
@@ -422,13 +470,13 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	},[]);
 
 	useEffect(()=>{
-		if(championPath && mapData){
-			setNotePages(formatRouteToNotes(championPath, mapData));
+		if(championDisplayPath && mapData){
+			setNotePages(formatRouteToNotes(championDisplayPath, mapData));
 			setActiveNotePage(0);
 		}else{
 			setNotePages([]);
 		}
-	},[championPath, mapData, formatRouteToNotes]);
+	},[championDisplayPath, mapData, formatRouteToNotes]);
 
 	const handleCopyPage = (idx:number) => {
 		if(!notePages[idx]) return;
@@ -497,6 +545,9 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 							<div><strong>Baseline Distance:</strong> {baselineDistanceRef.current?.toFixed(2)} LY</div>
 							<div><strong>Current Champion:</strong> {championDistance?.toFixed(2)} LY {baselineDistanceRef.current && championDistance!==null && championDistance < baselineDistanceRef.current ? `(-${improvementPct.toFixed(2)}%)` : ''}</div>
 							<div><strong>Systems:</strong> {championPath.length}{returnToStart ? ' (includes return)' : ''}</div>
+							{championDisplayPath && championDisplayPath.length !== championPath.length && (
+								<div><strong>Gate Hops (expanded):</strong> {championDisplayPath.length}</div>
+							)}
 						</div>
 					)}
 					<div className="scout-status" aria-live="polite">{statusLog.join('\n')}</div>
