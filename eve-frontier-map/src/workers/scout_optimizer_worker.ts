@@ -99,10 +99,12 @@ const nearestNeighbor = (start:string, candidates:string[], returnToStart:boolea
   let unreachable=false;
   while(remaining.size){
     let bestChoice: { name:string; cost:PathCost } | null = null;
-  for(const name of remaining){
+    // Greedy extension from current tail only (classic NN variant)
+    const tail = systemsByName[route[route.length-1]];
+    for(const name of remaining){
       const trial = route.concat(name);
       const cost = computePathCost(trial, false);
-      if(!isFinite(cost.shipDistance)) continue; // skip unreachable extension under current range
+      if(!isFinite(cost.shipDistance)) continue; // extension infeasible under current constraints
       if(bestChoice===null){ bestChoice={name, cost}; continue; }
       const bc = bestChoice.cost;
       if( cost.shipDistance < bc.shipDistance ||
@@ -112,27 +114,39 @@ const nearestNeighbor = (start:string, candidates:string[], returnToStart:boolea
       }
     }
     if(!bestChoice){
-      // If connectivity pre-check said route is possible, try a brute-force bridge: pick any remaining system reachable by a direct ship jump from any node in current route.
+      // Bridging phase: find a remaining system within ship range of CURRENT tail only.
+      // (Previous logic allowed bridging via any earlier node, creating unreachable tail->new edges.)
       if(connectivityGuaranteed){
-        let bridged=false; let bridgeName:string|undefined; let bridgeDist=Infinity;
-        outer: for(const name of remaining){
-          const sysB = systemsByName[name]; if(!sysB) continue;
-          for(let i=route.length-1;i>=0;i--){
-            const sysA = systemsByName[route[i]]; if(!sysA) continue;
-            const d=dist(sysA, sysB);
-            if(d <= maxShipRange+1e-6){ bridged=true; bridgeName=name; bridgeDist=d; break outer; }
-          }
+        let bridgeName: string | undefined; let bridgeDist=Infinity;
+        for(const name of remaining){
+          const sysB = systemsByName[name]; if(!sysB || !tail) continue;
+          const d = dist(tail, sysB);
+          if(d <= maxShipRange+1e-6){ bridgeName=name; bridgeDist=d; break; }
         }
-        if(bridged && bridgeName){
+        if(bridgeName){
           if(debug) post({ type:'progress', message:`[DEBUG] Bridging components via ship jump ${bridgeDist.toFixed(2)} LY to ${bridgeName}` });
           route.push(bridgeName); remaining.delete(bridgeName); continue;
+        } else if(debug) {
+          // Diagnostic: was there a system reachable from SOME earlier node but not tail? (indicates ordering issue)
+          let altCandidate: {name:string; via:string; d:number} | null = null;
+          for(const name of remaining){
+            const sysB = systemsByName[name]; if(!sysB) continue;
+            for(let i=0;i<route.length;i++){
+              const sysA = systemsByName[route[i]]; if(!sysA) continue;
+              const d = dist(sysA, sysB);
+              if(d <= maxShipRange+1e-6){ altCandidate={name, via:route[i], d}; break; }
+            }
+            if(altCandidate) break;
+          }
+          if(altCandidate){
+            post({ type:'progress', message:`[DEBUG] Ordering block: ${altCandidate.name} reachable from earlier ${altCandidate.via} at ${altCandidate.d.toFixed(2)} LY but not from tail ${route[route.length-1]}` });
+          }
         }
       }
-      // Attempt reposition to start (once) before failing
+      // Attempt single reposition to start to change tail context before declaring unreachable
       if(route[route.length-1] !== start){ route.push(start); continue; }
       unreachable=true; break;
-    }
-    else if(debug){
+    } else if(debug){
       post({ type:'progress', message:`[DEBUG] NN append ${bestChoice.name} cost(shipDist=${bestChoice.cost.shipDistance.toFixed(2)}, shipJumps=${bestChoice.cost.shipJumps}, total=${bestChoice.cost.totalDistance.toFixed(2)})` });
     }
     route.push(bestChoice.name); remaining.delete(bestChoice.name);
