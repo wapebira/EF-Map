@@ -5,8 +5,8 @@ interface Position { x:number; y:number; z:number }
 interface System { id:number; name:string; position:Position }
 interface Gate { source_system_id:number; destination_system_id:number }
 interface InitMessage { type:'init'; systems: { [name:string]: System }; stargates: { [id:string]: Gate }; }
-interface BaselineMessage { type:'baseline'; start:string; systems:string[]; returnToStart:boolean }
-interface OptimizeMessage { type:'optimize'; path:string[]; passes:number; timePerPassSec:number; returnToStart:boolean }
+interface BaselineMessage { type:'baseline'; start:string; systems:string[]; returnToStart:boolean; generation?:number }
+interface OptimizeMessage { type:'optimize'; path:string[]; passes:number; timePerPassSec:number; returnToStart:boolean; generation?:number }
 interface StopMessage { type:'stop' }
 
 type InMsg = InitMessage | BaselineMessage | OptimizeMessage | StopMessage;
@@ -128,11 +128,11 @@ self.onmessage = (e:MessageEvent<InMsg>) => {
     if(!systemsByName[msg.start]) { post({ type:'baselineResult', path:[msg.start] }); return; }
     const route = nearestNeighbor(msg.start, msg.systems, msg.returnToStart);
     const refined = twoOpt(route, msg.returnToStart, 250);
-    post({ type:'baselineResult', path: refined });
+    post({ type:'baselineResult', path: refined, generation: msg.generation });
   } else if(msg.type==='optimize'){
     stopping=false;
     const champion = iterativeImprove(msg.path, msg.passes, msg.timePerPassSec, msg.returnToStart, (m)=>post({ type:'progress', message:m }));
-    post({ type:'optimizeResult', path: champion });
+    post({ type:'optimizeResult', path: champion, generation: msg.generation });
   } else if(msg.type==='stop'){
     stopping=true; post({ type:'stopped' });
   }
