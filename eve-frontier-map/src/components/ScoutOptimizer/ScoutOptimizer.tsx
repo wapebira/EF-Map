@@ -30,8 +30,13 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	const [isCalculating, setIsCalculating] = useState(false);
 	const [championPath, setChampionPath] = useState<string[]|null>(null);
 	const [championDistance, setChampionDistance] = useState<number|null>(null);
+	const [datasetChanged, setDatasetChanged] = useState(false);
 	// Track last baseline return-to-start setting to know when to recompute
 	const lastReturnToStartRef = useRef(returnToStart);
+	// Track last system selection signature
+	const systemSignatureRef = useRef<string>('');
+	// Track previous selection parameter values for reason logging
+	const prevParamsRef = useRef({ startSystem:'', radius:'', useRegion:false, gateReachableOnly:false });
 	const [copyButtonText, setCopyButtonText] = useState('Copy');
 	const workersRef = useRef<Worker[]>([]);
 	const systemsForRunRef = useRef<string[]>([]);
@@ -118,6 +123,9 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		const collected = collectSystems();
 		if(!collected.length){ alert('No systems collected (check start system / radius / region).'); return; }
 		systemsForRunRef.current = collected;
+		const signature = collected.slice().sort().join('|');
+		systemSignatureRef.current = signature;
+		setDatasetChanged(false);
 		ensureWorkers();
 		setIsCalculating(true);
 		baselineDoneRef.current=false;
@@ -209,6 +217,29 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [useRegion, gateReachableOnly, startSystem, radius, open]);
 
+	// Detect dataset changes after a baseline/optimization has been produced
+	useEffect(()=>{
+		if(!championPath || isCalculating) return; // nothing to invalidate or currently recalculating
+		const newList = collectSystems();
+		const newSig = newList.slice().sort().join('|');
+		if(!newSig) return; // incomplete input
+		if(systemSignatureRef.current && newSig !== systemSignatureRef.current){
+			// Determine reason(s)
+			const prev = prevParamsRef.current;
+			const reasons:string[] = [];
+			if(prev.startSystem !== startSystem) reasons.push('start system');
+			if(prev.radius !== radius) reasons.push('radius');
+			if(prev.useRegion !== useRegion) reasons.push('region/radius mode');
+			if(prev.gateReachableOnly !== gateReachableOnly) reasons.push('gate-reachable filter');
+			log(`System set changed (${reasons.join(', ')||'parameters changed'}). Previous route invalidated.`);
+			setChampionPath(null);
+			setChampionDistance(null);
+			baselineDoneRef.current=false;
+			setDatasetChanged(true);
+		}
+		prevParamsRef.current = { startSystem, radius, useRegion, gateReachableOnly };
+	}, [startSystem, radius, useRegion, gateReachableOnly, collectSystems, championPath, isCalculating, log]);
+
 	// ---- Distance utilities (gate-aware) ----
 	const systemCacheByName = useRef<{[n:string]:SolarSystem}>({});
 	useEffect(()=>{
@@ -288,6 +319,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 					</div>
 					{systemsWarning && <div className="scout-warning">Warning: Large system set may impact performance ({collectSystems().length}).</div>}
 					<div className="scout-systems-count">Systems collected: {systemStats.filtered}{gateReachableOnly && systemStats.filtered!==systemStats.all ? ` (filtered from ${systemStats.all})` : ''}</div>
+					{datasetChanged && !championPath && !isCalculating && <div className="scout-warning">System selection changed. Please Calculate Route again.</div>}
 					<div className="scout-actions">
 						{!championPath && <button className="scout-button" disabled={isCalculating} onClick={startCalculation}>Calculate Route</button>}
 						{championPath && <button className="scout-button" disabled={isCalculating} onClick={runOptimizationPasses}>Continue Optimization</button>}
