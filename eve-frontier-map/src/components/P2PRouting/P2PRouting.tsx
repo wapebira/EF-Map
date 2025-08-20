@@ -191,6 +191,8 @@ interface P2PRoutingProps {
   systemNames: string[];
   progress?: { explored: number; frontier: number; elapsedMs: number; message: string } | null;
   routeCalcTimeMs?: number | null;
+  open: boolean;
+  onToggle: (open: boolean) => void;
 }
 
 // Minimal neutral custom select (no accent colors) for consistent option highlight across platforms
@@ -243,8 +245,7 @@ const NeutralSelect = <T extends string>({ value, onChange, options, ariaLabel, 
   );
 };
 
-const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeResult, mapData, systemNames, progress, routeCalcTimeMs }: P2PRoutingProps) => {
-  const [isOpen, setIsOpen] = useState(false);
+const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeResult, mapData, systemNames, progress, routeCalcTimeMs, open, onToggle }: P2PRoutingProps) => {
   const [fromSystem, setFromSystem] = useState('');
   const [toSystem, setToSystem] = useState('');
   const [jumpDistance, setJumpDistance] = useState('60');
@@ -295,13 +296,13 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
       <label>
         <input
           type="checkbox"
-          checked={isOpen}
-          onChange={(e) => setIsOpen(e.target.checked)}
+          checked={open}
+          onChange={(e) => onToggle(e.target.checked)}
         />
         Point-to-Point Routing
       </label>
 
-      {isOpen && (
+      {open && (
         <div className="p2p-routing-panel">
           <div className="p2p-input-group">
             <label htmlFor="from-system">From</label>

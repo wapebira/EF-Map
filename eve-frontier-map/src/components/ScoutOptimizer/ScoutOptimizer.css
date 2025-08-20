@@ -1,0 +1,36 @@
+.scout-optimizer-container {
+  margin-top: 10px;
+}
+.scout-optimizer-panel {
+  padding: 10px;
+  margin-top: 5px;
+  background-color: rgba(25,25,25,0.7);
+  border: 1px solid #555;
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.scout-input-row {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 100%;
+}
+.scout-optimizer-panel label { font-size: 0.9em; color: #ccc; }
+.scout-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.scout-button {
+  padding: 8px;
+  background-color: var(--accent);
+  color: white;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font-weight: bold;
+}
+.scout-button:disabled { background:#555; cursor: not-allowed; }
+.scout-status { font-size: 0.75rem; color: #bbb; white-space: pre-line; max-height: 120px; overflow-y: auto; border:1px solid #444; padding:6px; background:#0d0d0d; }
+.scout-warning { color:#ffa640; font-size:0.75rem; }
+.scout-copy-buttons { display:flex; gap:5px; flex-wrap:wrap; }
+.scout-copy-buttons button { flex-grow:1; padding:5px; background:rgba(0,0,0,0.25); border:1px solid rgba(0,170,255,0.25); color:white; cursor:pointer; }
+.scout-copy-buttons button.active { background: var(--accent); }

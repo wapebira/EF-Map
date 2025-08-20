@@ -9,6 +9,7 @@ import { openDbFromArrayBuffer } from "./lib/sql";
 import type { SystemRow, StargateRow, RegionRow, ConstellationRow } from "./types/db";
 import LoadingScreen from './components/LoadingScreen';
 import P2PRouting from './components/P2PRouting/P2PRouting';
+import ScoutOptimizer from './components/ScoutOptimizer/ScoutOptimizer';
 import AutoCompleteInput from './components/AutoCompleteInput/AutoCompleteInput';
 
 // Helper function to create a circular texture
@@ -208,6 +209,17 @@ function App() {
   useEffect(() => {
     const root = document.documentElement;
     root.style.setProperty('--accent', accentIsBlue ? 'var(--selection-blue)' : 'var(--selection-orange)');
+    // Tag root for CSS theme-specific rules
+    root.setAttribute('data-accent', accentIsBlue ? 'blue' : 'orange');
+    if (!accentIsBlue) {
+      // Pastel versions for orange mode only
+      root.style.setProperty('--accent-pastel', '#ffb9ab'); // lightened orange
+      root.style.setProperty('--accent-pastel-border', '#ff8665');
+    } else {
+      // Clear / reset so blue mode keeps normal look (browser default focus or existing styling)
+      root.style.setProperty('--accent-pastel', '');
+      root.style.setProperty('--accent-pastel-border', '');
+    }
     // Update runtime three.js colors used by the app
   const accentHex = accentIsBlue ? 0x00aaff : 0xff4c26;
     // Update hover material if exists
@@ -362,6 +374,21 @@ function App() {
   // Track route calculation start time and elapsed time
   const routeCalcStartRef = useRef<number | null>(null);
   const [routeCalcTimeMs, setRouteCalcTimeMs] = useState<number | null>(null);
+
+  // Panel open states (mutually exclusive upcoming with Scout Optimizer)
+  const [p2pOpen, setP2POpen] = useState(false);
+  const [_scoutOpen, _setScoutOpen] = useState(false); // placeholder for future Scout panel
+  const [scoutOpen, setScoutOpenReal] = useState(false);
+  const [returnToStart, setReturnToStart] = useState(false);
+
+  const toggleP2P = (open: boolean) => {
+    setP2POpen(open);
+    if (open) { setScoutOpenReal(false); }
+  };
+  const toggleScout = (open: boolean) => {
+    setScoutOpenReal(open);
+    if (open) { setP2POpen(false); }
+  };
 
   // Stop / cancel the current calculation: terminate worker and recreate a fresh one
   const stopCalculation = useCallback(() => {
@@ -1491,6 +1518,16 @@ function App() {
           mapData={mapData}
           systemNames={mapData ? Object.values(mapData.solar_systems).map(s => s.name) : []}
           progress={routeProgress}
+          open={p2pOpen}
+          onToggle={toggleP2P}
+        />
+        <ScoutOptimizer
+          open={scoutOpen}
+          onToggle={toggleScout}
+          mapData={mapData}
+          systemNames={mapData ? Object.values(mapData.solar_systems).map(s => s.name) : []}
+          returnToStart={returnToStart}
+          onReturnToStartChange={setReturnToStart}
         />
         {isPlanetCountActive && generatePlanetCountLegend()}
       </div>
