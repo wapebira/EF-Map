@@ -93,7 +93,7 @@ const computePathCost = (path:string[], returnToStart:boolean): PathCost => {
 const systemsById = new Map<number,System>();
 
 // Nearest Neighbor baseline
-const nearestNeighbor = (start:string, candidates:string[], returnToStart:boolean): { path:string[]; unreachable:boolean } => {
+const nearestNeighbor = (start:string, candidates:string[], returnToStart:boolean, connectivityGuaranteed:boolean): { path:string[]; unreachable:boolean } => {
   const remaining = new Set(candidates.filter(c=>c!==start));
   const route=[start];
   let unreachable=false;
@@ -102,10 +102,9 @@ const nearestNeighbor = (start:string, candidates:string[], returnToStart:boolea
     for(const name of remaining){
       const trial = route.concat(name);
       const cost = computePathCost(trial, false);
-      if(!isFinite(cost.shipDistance)) continue; // skip unreachable extension
+      if(!isFinite(cost.shipDistance)) continue; // skip unreachable extension under current range
       if(bestChoice===null){ bestChoice={name, cost}; continue; }
       const bc = bestChoice.cost;
-      // Lexicographic compare: shipDistance, shipJumps, totalDistance
       if( cost.shipDistance < bc.shipDistance ||
           (cost.shipDistance===bc.shipDistance && cost.shipJumps < bc.shipJumps) ||
           (cost.shipDistance===bc.shipDistance && cost.shipJumps===bc.shipJumps && cost.totalDistance < bc.totalDistance) ){
@@ -113,18 +112,30 @@ const nearestNeighbor = (start:string, candidates:string[], returnToStart:boolea
       }
     }
     if(!bestChoice){
-      // Attempt reposition: return to start (allow duplicate) to try bridging other component.
-      if(route[route.length-1] !== start){
-        route.push(start);
-        continue;
-      } else {
-        unreachable=true; break;
+      // If connectivity pre-check said route is possible, try a brute-force bridge: pick any remaining system reachable by a direct ship jump from any node in current route.
+      if(connectivityGuaranteed){
+        let bridged=false; let bridgeName:string|undefined; let bridgeDist=Infinity;
+        outer: for(const name of remaining){
+          const sysB = systemsByName[name]; if(!sysB) continue;
+          for(let i=route.length-1;i>=0;i--){
+            const sysA = systemsByName[route[i]]; if(!sysA) continue;
+            const d=dist(sysA, sysB);
+            if(d <= maxShipRange+1e-6){ bridged=true; bridgeName=name; bridgeDist=d; break outer; }
+          }
+        }
+        if(bridged && bridgeName){
+          post({ type:'progress', message:`Bridging components via ship jump ${bridgeDist.toFixed(2)} LY to ${bridgeName}` });
+          route.push(bridgeName); remaining.delete(bridgeName); continue;
+        }
       }
+      // Attempt reposition to start (once) before failing
+      if(route[route.length-1] !== start){ route.push(start); continue; }
+      unreachable=true; break;
     }
     route.push(bestChoice.name); remaining.delete(bestChoice.name);
   }
   if(returnToStart) route.push(start);
-  return { path:route, unreachable: unreachable || route.length < (candidates.length + (returnToStart?1:0)) };
+  return { path:route, unreachable: unreachable || route.filter(n=>n!==start).length < candidates.filter(c=>c!==start).length };
 };
 
 // Simple 2-opt
@@ -240,7 +251,7 @@ self.onmessage = (e:MessageEvent<InMsg>) => {
       post({ type:'baselineError', reason:`Unreachable systems with current ship range (${maxShipRange} LY). Minimum required ~${connectivity.minRequired.toFixed(2)} LY`, minRequiredShipRange: connectivity.minRequired, generation: msg.generation });
       return;
     }
-    const { path:nnPath, unreachable } = nearestNeighbor(msg.start, msg.systems, msg.returnToStart);
+  const { path:nnPath, unreachable } = nearestNeighbor(msg.start, msg.systems, msg.returnToStart, connectivity.reachable);
     if(unreachable){ post({ type:'baselineError', reason:'Unreachable systems with current ship range / gate network', generation: msg.generation }); return; }
     const refinedPre = twoOpt(nnPath, msg.returnToStart, 250);
     const refinedCost = computePathCost(refinedPre, msg.returnToStart);
