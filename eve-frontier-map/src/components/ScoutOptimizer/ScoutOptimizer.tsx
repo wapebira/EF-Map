@@ -127,7 +127,8 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 					log(`Worker ${i+1} ready`);
 					if(pendingBaselineRef.current && readyCountRef.current === parseInt(workerCount,10)) {
 						const pb = pendingBaselineRef.current; pendingBaselineRef.current=null;
-						workersRef.current.forEach(w2=> w2.postMessage({ type:'baseline', ...pb, generation: generationRef.current }));
+						const baselineParams = { maxShipRange: parseFloat(shipMaxRange)||0, shipTradeDistance: parseFloat(shipTradeDistance)||0, minGateHopsSaved: parseInt(minGateHopsSaved,10)||0 };
+						workersRef.current.forEach(w2=> w2.postMessage({ type:'baseline', ...pb, ...baselineParams, generation: generationRef.current }));
 					}
 				}
 				else if(data.type==='baselineResult') { if(data.generation===undefined || data.generation===generationRef.current) handleBaselineResult(data.path); }
@@ -137,7 +138,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 			};
 			workersRef.current.push(w);
 		}
-	},[workerCount, log]);
+	},[workerCount, log, shipMaxRange, shipTradeDistance, minGateHopsSaved]);
 
 	const broadcast = (msg:unknown) => { workersRef.current.forEach(w=> w.postMessage(msg as any)); };
 
@@ -299,11 +300,12 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 			// If all workers already ready, dispatch immediately
 			if(readyCountRef.current === workersRef.current.length && workersRef.current.length>0){
 				const pb = pendingBaselineRef.current; pendingBaselineRef.current=null;
-				workersRef.current.forEach(w=> w.postMessage({ type:'baseline', ...pb!, generation: generationRef.current }));
+				const baselineParams = { maxShipRange: parseFloat(shipMaxRange)||0, shipTradeDistance: parseFloat(shipTradeDistance)||0, minGateHopsSaved: parseInt(minGateHopsSaved,10)||0 };
+				workersRef.current.forEach(w=> w.postMessage({ type:'baseline', ...pb!, ...baselineParams, generation: generationRef.current }));
 			}
 		}
 		lastReturnToStartRef.current = returnToStart;
-	}, [returnToStart, championPath, isCalculating, startSystem, log]);
+	}, [returnToStart, championPath, isCalculating, startSystem, log, shipMaxRange, shipTradeDistance, minGateHopsSaved]);
 
 	// Log when region vs radius or gateReachableOnly toggles to aid testing
 	useEffect(()=>{
@@ -540,6 +542,17 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	};
 
 	const improvementPct = baselineDistanceRef.current && championDistance !== null ? ((baselineDistanceRef.current - championDistance)/baselineDistanceRef.current)*100 : 0;
+
+	// If ship/gate preference parameters change after a route is computed, recompute ship metrics for display
+	useEffect(()=>{
+		if(championPath){
+			const m = computeShipMetrics(championPath);
+			setChampionShipJumps(m.shipJumps);
+			setChampionShipDistance(m.shipDistance);
+			log(`Ship/gate preference changed. Recomputed ship metrics: ${m.shipJumps} jumps, ${m.shipDistance.toFixed(2)} LY.`);
+		}
+	// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [shipMaxRange, shipTradeDistance, minGateHopsSaved]);
 
 	return (
 		<div className="scout-optimizer-container">
