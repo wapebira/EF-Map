@@ -324,7 +324,7 @@ self.onmessage = (e:MessageEvent<InMsg>) => {
     }
     let { path:nnPath, unreachable } = nearestNeighbor(msg.start, msg.systems, msg.returnToStart, connectivity.reachable, !!msg.debug);
     if(unreachable){ post({ type:'baselineError', reason:'Unreachable systems with current ship range / gate network', generation: msg.generation }); return; }
-    // Closure salvage: if returnToStart requested and last->start edge is infeasible, try to duplicate an earlier anchor that can close.
+  // Closure salvage: if returnToStart requested and last->start edge is infeasible, try to duplicate an earlier anchor that can close.
     if(msg.returnToStart && nnPath.length>=2){
   const startName = nnPath[0];
       const lastName = nnPath[nnPath.length-1];
@@ -334,17 +334,29 @@ self.onmessage = (e:MessageEvent<InMsg>) => {
         const a=systemsByName[penultName], b=systemsByName[startName];
         if(a && b){
           const ev=evaluateEdge(a,b);
-          if(!( (ev.chooseShip && ev.shipDistance<=maxShipRange+1e-6) || (!ev.chooseShip && ev.gateDistance!==null) )){
+          const penultFeasible = (ev.chooseShip && ev.shipDistance<=maxShipRange+1e-6) || (!ev.chooseShip && ev.gateDistance!==null);
+          if(!penultFeasible){
             // Find alternative anchor able to close
-            let alt:string|undefined;
-            for(let i=nnPath.length-2;i>0;i--){ const cand=nnPath[i]; if(cand===startName) continue; const sA=systemsByName[cand]; const sB=systemsByName[startName]; if(!sA||!sB) continue; const ev2=evaluateEdge(sA,sB); if(ev2.gateDistance!==null || (ev2.chooseShip && ev2.shipDistance<=maxShipRange+1e-6)){ alt=cand; break; } }
+            let alt:string|undefined; const diagnostics: string[] = [];
+            for(let i=nnPath.length-2;i>0;i--){
+              const cand=nnPath[i]; if(cand===startName) continue; const sA=systemsByName[cand]; if(!sA||!b) continue;
+              const ev2=evaluateEdge(sA,b);
+              if(ev2.gateDistance!==null || (ev2.chooseShip && ev2.shipDistance<=maxShipRange+1e-6)){ alt=cand; break; }
+              // Collect up to a few nearest distances (ship) for debug
+              const d = dist(sA,b);
+              diagnostics.push(`${cand}:${d.toFixed(2)}`);
+            }
             if(alt){
-              // Remove existing closing start and append alt then start
               nnPath.pop(); // remove start
               nnPath.push(alt); nnPath.push(startName);
               if(msg.debug) post({ type:'progress', message:`[DEBUG] Closure salvage: switched closing anchor to ${alt}` });
             } else {
-              if(msg.debug) post({ type:'progress', message:`[DEBUG] Closure failure: cannot find feasible anchor to return to start` });
+              // No feasible direct closure; report precise baseline error & abort before 2-opt
+              let minShip=Infinity; let nearest:string|undefined;
+              for(let i=1;i<nnPath.length-1;i++){ const cand=nnPath[i]; const sA=systemsByName[cand]; if(!sA||!b) continue; const d=dist(sA,b); if(d<minShip) { minShip=d; nearest=cand; } }
+              if(msg.debug) post({ type:'progress', message:`[DEBUG] Closure failure: cannot return to start. Nearest anchor ${nearest||'??'} at ${isFinite(minShip)?minShip.toFixed(2):'∞'} LY > max ${maxShipRange}. Candidates sampled: ${diagnostics.slice(0,6).join(', ')}` });
+              post({ type:'baselineError', reason:`Cannot return to start within ship range (${maxShipRange} LY). Nearest closing jump needs ${(isFinite(minShip)?minShip:0).toFixed(2)} LY`, generation: msg.generation });
+              return; // abort entire baseline
             }
           }
         }
