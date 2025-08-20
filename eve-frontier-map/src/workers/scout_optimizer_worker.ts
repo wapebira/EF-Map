@@ -112,7 +112,15 @@ const nearestNeighbor = (start:string, candidates:string[], returnToStart:boolea
         bestChoice={name, cost};
       }
     }
-    if(!bestChoice){ unreachable=true; break; }
+    if(!bestChoice){
+      // Attempt reposition: return to start (allow duplicate) to try bridging other component.
+      if(route[route.length-1] !== start){
+        route.push(start);
+        continue;
+      } else {
+        unreachable=true; break;
+      }
+    }
     route.push(bestChoice.name); remaining.delete(bestChoice.name);
   }
   if(returnToStart) route.push(start);

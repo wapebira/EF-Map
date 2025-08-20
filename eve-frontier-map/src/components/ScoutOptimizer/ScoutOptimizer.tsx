@@ -173,6 +173,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		if(!mapData) return;
 		const collected = collectSystems();
 		if(!collected.length){ alert('No systems collected (check start system / radius / region).'); return; }
+		setMinRequiredShipRange(null); // reset previous requirement banner
 		systemsForRunRef.current = collected;
 		const signature = collected.slice().sort().join('|');
 		systemSignatureRef.current = signature;
