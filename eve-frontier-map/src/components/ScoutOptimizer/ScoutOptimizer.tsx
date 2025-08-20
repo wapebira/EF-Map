@@ -33,6 +33,8 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	const workersRef = useRef<Worker[]>([]);
 	const systemsForRunRef = useRef<string[]>([]);
 	const baselineDoneRef = useRef(false);
+	const optimizeExpectedRef = useRef(0);
+	const optimizeReceivedRef = useRef(0);
 	const readyCountRef = useRef(0);
 	const pendingBaselineRef = useRef<{ start:string; systems:string[]; returnToStart:boolean }|null>(null);
 
@@ -114,6 +116,9 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		baselineDoneRef.current=true;
 		setChampionPath(path);
 		log(`Baseline route length: ${path.length}`);
+		// End baseline phase so user can immediately continue or copy
+		setIsCalculating(false);
+		log('Baseline complete. You can Continue Optimization to refine the route.');
 	};
 
 	const handleOptimizeResult = (path:string[]) => {
@@ -121,15 +126,24 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 			if(!prev) return path;
 			return path.length <= prev.length ? path : prev; // placeholder comparison
 		});
+		optimizeReceivedRef.current += 1;
+		if(optimizeReceivedRef.current >= optimizeExpectedRef.current) {
+			setIsCalculating(false);
+			log('Optimization pass complete. You may run additional passes.');
+		}
 	};
 
 	const runOptimizationPasses = () => {
 		if(!championPath){ alert('Baseline not finished yet.'); return; }
 		const p = parseInt(passes,10); const t = parseInt(timePerPass,10);
+		optimizeExpectedRef.current = workersRef.current.length || 1;
+		optimizeReceivedRef.current = 0;
+		setIsCalculating(true);
+		log(`Starting optimization passes: ${p} passes x ${t}s on ${optimizeExpectedRef.current} workers.`);
 		broadcast({ type:'optimize', path: championPath, passes: p, timePerPassSec: t, returnToStart });
 	};
 
-	const stop = () => { broadcast({ type:'stop' }); setIsCalculating(false); };
+	const stop = () => { broadcast({ type:'stop' }); setIsCalculating(false); log('Stop requested.'); };
 
 	const copyRoute = () => {
 		if(!championPath) return;
