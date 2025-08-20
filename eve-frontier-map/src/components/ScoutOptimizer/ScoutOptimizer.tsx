@@ -131,7 +131,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 					if(pendingBaselineRef.current && readyCountRef.current === parseInt(workerCount,10)) {
 						const pb = pendingBaselineRef.current; pendingBaselineRef.current=null;
 						const baselineParams = { maxShipRange: parseFloat(shipMaxRange)||0, shipTradeDistance: parseFloat(shipTradeDistance)||0, minGateHopsSaved: parseInt(minGateHopsSaved,10)||0 };
-						workersRef.current.forEach(w2=> w2.postMessage({ type:'baseline', ...pb, ...baselineParams, generation: generationRef.current }));
+						workersRef.current.forEach(w2=> w2.postMessage({ type:'baseline', ...pb, ...baselineParams, generation: generationRef.current, debug: debugMode }));
 					}
 				}
 				else if(data.type==='baselineResult') { if(data.generation===undefined || data.generation===generationRef.current) handleBaselineResult(data.path); }
@@ -310,7 +310,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 			if(readyCountRef.current === workersRef.current.length && workersRef.current.length>0){
 				const pb = pendingBaselineRef.current; pendingBaselineRef.current=null;
 				const baselineParams = { maxShipRange: parseFloat(shipMaxRange)||0, shipTradeDistance: parseFloat(shipTradeDistance)||0, minGateHopsSaved: parseInt(minGateHopsSaved,10)||0 };
-				workersRef.current.forEach(w=> w.postMessage({ type:'baseline', ...pb!, ...baselineParams, generation: generationRef.current }));
+				workersRef.current.forEach(w=> w.postMessage({ type:'baseline', ...pb!, ...baselineParams, generation: generationRef.current, debug: debugMode }));
 			}
 		}
 		lastReturnToStartRef.current = returnToStart;
