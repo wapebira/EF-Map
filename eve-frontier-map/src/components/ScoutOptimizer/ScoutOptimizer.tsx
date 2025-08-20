@@ -127,8 +127,9 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 
 	// External invalidation: clear any existing route & terminate workers so stale messages don't redraw
 	useEffect(()=>{
+		// ONLY act when the invalidate token itself changes; do not depend on other states
 		if(invalidateToken === undefined) return;
-		if(championPath || isCalculating){
+		if(championPathRef.current || isCalculating){
 			log('Scout route cleared due to external routing action.');
 			generationRef.current += 1; // bump generation to invalidate in-flight worker results
 			setChampionPath(null);
@@ -141,7 +142,8 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 			workersRef.current = [];
 			try { onClearRoute && onClearRoute(); } catch(e){/* ignore */}
 		}
-	}, [invalidateToken, championPath, isCalculating, log, onClearRoute]);
+	// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [invalidateToken]);
 
 	const startCalculation = () => {
 		if(!mapData) return;
