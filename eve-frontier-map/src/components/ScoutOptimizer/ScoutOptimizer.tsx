@@ -29,6 +29,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	const [statusLog, setStatusLog] = useState<string[]>([]);
 	const [isCalculating, setIsCalculating] = useState(false);
 	const [championPath, setChampionPath] = useState<string[]|null>(null);
+	const [championDistance, setChampionDistance] = useState<number|null>(null);
 	// Track last baseline return-to-start setting to know when to recompute
 	const lastReturnToStartRef = useRef(returnToStart);
 	const [copyButtonText, setCopyButtonText] = useState('Copy');
@@ -117,7 +118,9 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		if(baselineDoneRef.current) return;
 		baselineDoneRef.current=true;
 		setChampionPath(path);
-		log(`Baseline route length: ${path.length}`);
+		const distVal = computeRouteDistance(path);
+		setChampionDistance(distVal);
+		log(`Baseline distance: ${distVal.toFixed(2)} LY over ${path.length} systems`);
 		// End baseline phase so user can immediately continue or copy
 		setIsCalculating(false);
 		log('Baseline complete. You can Continue Optimization to refine the route.');
@@ -125,15 +128,19 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 
 	const handleOptimizeResult = (path:string[]) => {
 		setChampionPath(prev=>{
+			const candDist = computeRouteDistance(path);
 			if(!prev){
-				log(`Initial optimization candidate length: ${path.length}`);
+				setChampionDistance(candDist);
+				log(`Initial optimization candidate distance: ${candDist.toFixed(2)} LY (${path.length} systems)`);
 				return path;
 			}
-			if(path.length < prev.length){
-				log(`Improved champion: ${prev.length} -> ${path.length}`);
+			const currentDist = championDistance ?? computeRouteDistance(prev);
+			if(candDist + 1e-6 < currentDist){
+				setChampionDistance(candDist);
+				log(`Improved champion distance: ${currentDist.toFixed(2)} -> ${candDist.toFixed(2)} LY`);
 				return path;
 			} else {
-				log(`No improvement (candidate ${path.length}, champion ${prev.length})`);
+				log(`No improvement (candidate ${candDist.toFixed(2)} LY, champion ${currentDist.toFixed(2)} LY)`);
 				return prev;
 			}
 		});
@@ -172,6 +179,43 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		}
 		lastReturnToStartRef.current = returnToStart;
 	}, [returnToStart, championPath, isCalculating, startSystem]);
+
+	// ---- Distance utilities (gate-aware) ----
+	const systemCacheByName = useRef<{[n:string]:SolarSystem}>({});
+	useEffect(()=>{
+		if(mapData){ systemCacheByName.current = Object.values(mapData.solar_systems).reduce((acc,s)=>{ acc[s.name]=s; return acc; },{} as {[n:string]:SolarSystem}); }
+	},[mapData]);
+
+	// Memoized pair distance (nameA|nameB sorted key)
+	const pairDistanceCache = useRef<Map<string, number>>(new Map());
+	const computeSystemDistance = useCallback((aName:string,bName:string):number=>{
+		if(aName===bName) return 0;
+		const key = aName < bName ? aName+'|'+bName : bName+'|'+aName;
+		const cached = pairDistanceCache.current.get(key); if(cached!==undefined) return cached;
+		const a = systemCacheByName.current[aName]; const b = systemCacheByName.current[bName];
+		if(!a||!b){ pairDistanceCache.current.set(key, Infinity); return Infinity; }
+		// BFS for gate path
+		const start=a.id, goal=b.id;
+		const q:number[][]=[[start]]; const seen=new Set<number>([start]); let best:number|undefined;
+		while(q.length && best===undefined){
+			const path=q.shift()!; const last=path[path.length-1];
+			if(last===goal){
+				let total=0; for(let i=0;i<path.length-1;i++){ const s1=mapData!.solar_systems[path[i].toString()], s2=mapData!.solar_systems[path[i+1].toString()]; if(!s1||!s2){ total=Infinity; break;} const dx=s1.position.x-s2.position.x, dy=s1.position.y-s2.position.y, dz=s1.position.z-s2.position.z; total+=Math.sqrt(dx*dx+dy*dy+dz*dz); }
+				best=total; break;
+			}
+			for(const nxt of gatesBySource[last]||[]){ if(!seen.has(nxt)){ seen.add(nxt); q.push([...path,nxt]); } }
+		}
+		if(best===undefined){ // direct ship jump
+			const dx=a.position.x-b.position.x, dy=a.position.y-b.position.y, dz=a.position.z-b.position.z; best=Math.sqrt(dx*dx+dy*dy+dz*dz);
+		}
+		pairDistanceCache.current.set(key, best!);
+		return best!;
+	},[mapData, gatesBySource]);
+
+	const computeRouteDistance = useCallback((path:string[]):number=>{
+		let total=0; for(let i=0;i<path.length-1;i++){ total+=computeSystemDistance(path[i], path[i+1]); }
+		return total;
+	},[computeSystemDistance]);
 
 	const copyRoute = () => {
 		if(!championPath) return;
