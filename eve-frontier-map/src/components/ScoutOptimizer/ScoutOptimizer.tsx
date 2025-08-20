@@ -69,6 +69,23 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 
 	const systemsWarning = open ? (collectSystems().length > MAX_SYSTEMS_WARNING) : false;
 
+	// Stats helper: counts before/after gateReachable filter (for testing region mode correctness)
+	const collectSystemsStats = useCallback(()=>{
+		if(!mapData) return { all:0, filtered:0 };
+		const start = Object.values(mapData.solar_systems).find(s=> s.name.toLowerCase()===startSystem.toLowerCase());
+		if(!start) return { all:0, filtered:0 };
+		let candidates = Object.values(mapData.solar_systems).filter(s=> useRegion ? (s.region_id===start.region_id) : (()=>{ const r=parseFloat(radius); if(!isFinite(r)||r<=0) return false; const dx=s.position.x-start.position.x, dy=s.position.y-start.position.y, dz=s.position.z-start.position.z; return Math.sqrt(dx*dx+dy*dy+dz*dz)<=r; })());
+		const all = candidates.length;
+		if(gateReachableOnly){
+			const reachable = new Set<number>(); const q=[start.id]; reachable.add(start.id);
+			while(q.length){ const cur=q.shift()!; for(const nxt of gatesBySource[cur]||[]){ if(!reachable.has(nxt)){ reachable.add(nxt); q.push(nxt);} } }
+			candidates = candidates.filter(c=> reachable.has(c.id));
+		}
+		return { all, filtered: candidates.length };
+	},[mapData, startSystem, radius, useRegion, gateReachableOnly, gatesBySource]);
+
+	const systemStats = open ? collectSystemsStats() : { all:0, filtered:0 };
+
 	const ensureWorkers = useCallback(()=>{
 		const desired = parseInt(workerCount,10); if(workersRef.current.length===desired) return;
 		workersRef.current.forEach(w=> w.terminate()); workersRef.current=[];
@@ -180,6 +197,18 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		lastReturnToStartRef.current = returnToStart;
 	}, [returnToStart, championPath, isCalculating, startSystem]);
 
+	// Log when region vs radius or gateReachableOnly toggles to aid testing
+	useEffect(()=>{
+		if(!open) return;
+		const { all, filtered } = systemStats;
+		if(useRegion){
+			log(`Region selection: ${filtered}${gateReachableOnly?` (gate-filtered from ${all})`:''}`);
+		}else{
+			log(`Radius selection: ${filtered}${gateReachableOnly?` (gate-filtered from ${all})`:''}`);
+		}
+	// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [useRegion, gateReachableOnly, startSystem, radius, open]);
+
 	// ---- Distance utilities (gate-aware) ----
 	const systemCacheByName = useRef<{[n:string]:SolarSystem}>({});
 	useEffect(()=>{
@@ -258,6 +287,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 						<label><input type="checkbox" checked={returnToStart} onChange={e=> onReturnToStartChange(e.target.checked)} /> Return to Start</label>
 					</div>
 					{systemsWarning && <div className="scout-warning">Warning: Large system set may impact performance ({collectSystems().length}).</div>}
+					<div className="scout-systems-count">Systems collected: {systemStats.filtered}{gateReachableOnly && systemStats.filtered!==systemStats.all ? ` (filtered from ${systemStats.all})` : ''}</div>
 					<div className="scout-actions">
 						{!championPath && <button className="scout-button" disabled={isCalculating} onClick={startCalculation}>Calculate Route</button>}
 						{championPath && <button className="scout-button" disabled={isCalculating} onClick={runOptimizationPasses}>Continue Optimization</button>}
