@@ -11,7 +11,9 @@ interface StopMessage { type:'stop' }
 
 type InMsg = InitMessage | BaselineMessage | OptimizeMessage | StopMessage;
 
-let systemsData: { [name:string]: System } = {};
+// Source systems keyed by ID string passed from main thread; we'll build name & id maps
+let systemsDataRaw: { [key:string]: System } = {};
+let systemsByName: { [name:string]: System } = {};
 let stargates: Gate[] = [];
 let stopping = false;
 
@@ -54,10 +56,13 @@ const nearestNeighbor = (start:string, candidates:string[], returnToStart:boolea
   const remaining = new Set(candidates.filter(c=>c!==start));
   const route=[start];
   while(remaining.size){
-    const current = systemsData[route[route.length-1]];
+    const current = systemsByName[route[route.length-1]];
+    if(!current) break;
     let best: string | null = null; let bestD=Infinity;
     for(const name of remaining){
-      const d = gateDistanceOrDirect(current, systemsData[name]);
+      const target = systemsByName[name];
+      if(!target) continue;
+      const d = gateDistanceOrDirect(current, target);
       if(d<bestD){ bestD=d; best=name; }
     }
     if(!best) break;
@@ -72,7 +77,7 @@ const twoOpt = (path:string[], returnToStart:boolean, timeMs:number): string[] =
   const startTime=Date.now();
   let best=path.slice();
   const effectiveLen = returnToStart ? best.length-1 : best.length;
-  const cost = (p:string[])=>{ let c=0; for(let i=0;i<effectiveLen-1;i++){ c+=gateDistanceOrDirect(systemsData[p[i]], systemsData[p[i+1]]); } return c; };
+  const cost = (p:string[])=>{ let c=0; for(let i=0;i<effectiveLen-1;i++){ const a=systemsByName[p[i]], b=systemsByName[p[i+1]]; if(!a||!b) return Infinity; c+=gateDistanceOrDirect(a,b); } return c; };
   let bestCost = cost(best);
   while(Date.now()-startTime<timeMs){
     let improved=false;
@@ -102,7 +107,7 @@ const iterativeImprove = (base:string[], passes:number, timePerPassSec:number, r
       working.splice(a,b-a, ...working.slice(a,b).reverse());
     }
     const improved=twoOpt(working, returnToStart, budget);
-    const cost=(path:string[])=>{ let c=0; for(let i=0;i<path.length-1;i++) c+=gateDistanceOrDirect(systemsData[path[i]], systemsData[path[i+1]]); return c; };
+  const cost=(path:string[])=>{ let c=0; for(let i=0;i<path.length-1;i++){ const a=systemsByName[path[i]], b=systemsByName[path[i+1]]; if(!a||!b) return Infinity; c+=gateDistanceOrDirect(a,b); } return c; };
     if(cost(improved) < cost(champion)) champion=improved;
     progressCb(`Pass ${p+1}/${passes}`);
   }
@@ -115,9 +120,12 @@ const post = (data:unknown)=>{ // @ts-ignore
 self.onmessage = (e:MessageEvent<InMsg>) => {
   const msg=e.data;
   if(msg.type==='init'){
-    systemsData = msg.systems; stargates=Object.values(msg.stargates); systemsById.clear(); for(const s of Object.values(msg.systems)) systemsById.set(s.id,s); buildGateAdj(); stopping=false; post({ type:'ready' });
+    systemsDataRaw = msg.systems; systemsByName = {}; stargates=Object.values(msg.stargates); systemsById.clear();
+    for (const sys of Object.values(systemsDataRaw)) { systemsById.set(sys.id, sys); systemsByName[sys.name] = sys; }
+    buildGateAdj(); stopping=false; post({ type:'ready' });
   } else if(msg.type==='baseline'){
     stopping=false;
+    if(!systemsByName[msg.start]) { post({ type:'baselineResult', path:[msg.start] }); return; }
     const route = nearestNeighbor(msg.start, msg.systems, msg.returnToStart);
     const refined = twoOpt(route, msg.returnToStart, 250);
     post({ type:'baselineResult', path: refined });

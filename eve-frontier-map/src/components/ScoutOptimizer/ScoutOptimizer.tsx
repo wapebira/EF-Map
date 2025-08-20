@@ -33,6 +33,8 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	const workersRef = useRef<Worker[]>([]);
 	const systemsForRunRef = useRef<string[]>([]);
 	const baselineDoneRef = useRef(false);
+	const readyCountRef = useRef(0);
+	const pendingBaselineRef = useRef<{ start:string; systems:string[]; returnToStart:boolean }|null>(null);
 
 	const stargatesArray = mapData ? Object.values(mapData.stargates) : [];
 	const gatesBySource: {[id:number]: number[]} = {}; stargatesArray.forEach(g=>{ if(!gatesBySource[g.source_system_id]) gatesBySource[g.source_system_id]=[]; gatesBySource[g.source_system_id].push(g.destination_system_id); if(!gatesBySource[g.destination_system_id]) gatesBySource[g.destination_system_id]=[]; gatesBySource[g.destination_system_id].push(g.source_system_id); });
@@ -65,11 +67,19 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	const ensureWorkers = useCallback(()=>{
 		const desired = parseInt(workerCount,10); if(workersRef.current.length===desired) return;
 		workersRef.current.forEach(w=> w.terminate()); workersRef.current=[];
+		readyCountRef.current = 0;
 		for(let i=0;i<desired;i++){
 			const w = new Worker(new URL('../../workers/scout_optimizer_worker.ts', import.meta.url), { type:'module' });
 			w.onmessage = (e)=>{
 				const data = e.data;
-				if(data.type==='ready') { log(`Worker ${i+1} ready`); }
+				if(data.type==='ready') { 
+					readyCountRef.current += 1;
+					log(`Worker ${i+1} ready`);
+					if(pendingBaselineRef.current && readyCountRef.current === parseInt(workerCount,10)) {
+						const pb = pendingBaselineRef.current; pendingBaselineRef.current=null;
+						workersRef.current.forEach(w2=> w2.postMessage({ type:'baseline', ...pb }));
+					}
+				}
 				else if(data.type==='baselineResult') { handleBaselineResult(data.path); }
 				else if(data.type==='optimizeResult') { handleOptimizeResult(data.path); }
 				else if(data.type==='progress') { log(`Worker ${i+1}: ${data.message}`); }
@@ -91,7 +101,12 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		baselineDoneRef.current=false;
 		log(`Collected ${collected.length} systems.`);
 		broadcast({ type:'init', systems: mapData.solar_systems, stargates: mapData.stargates });
-		setTimeout(()=> broadcast({ type:'baseline', start: startSystem, systems: collected, returnToStart }), 50);
+		pendingBaselineRef.current = { start: startSystem, systems: collected, returnToStart };
+		// If workers already ready (zero restart scenario) fire immediately
+		if(readyCountRef.current === workersRef.current.length && workersRef.current.length>0) {
+			const pb = pendingBaselineRef.current; pendingBaselineRef.current=null;
+			workersRef.current.forEach(w=> w.postMessage({ type:'baseline', ...pb! }));
+		}
 	};
 
 	const handleBaselineResult = (path:string[]) => {
