@@ -29,6 +29,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	const [gateReachableOnly, setGateReachableOnly] = useState(false);
 	const [passes, setPasses] = useState('3');
 	const [timePerPass, setTimePerPass] = useState('5');
+	const [debugMode, setDebugMode] = useState(false);
 	// Minimum required ship range (computed when baseline error received)
 	const [minRequiredShipRange, setMinRequiredShipRange] = useState<number|null>(null);
 	// Ship vs Gate preference inputs
@@ -182,13 +183,13 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		ensureWorkers();
 		setIsCalculating(true);
 		baselineDoneRef.current=false;
-		log(`Collected ${collected.length} systems. Gate pref: ship≤${shipTradeDistance}LY replaces ≥${minGateHopsSaved} gate hops (max ship range ${shipMaxRange}LY).`);
+		log(`Collected ${collected.length} systems. Gate pref: ship≤${shipTradeDistance}LY replaces ≥${minGateHopsSaved} gate hops (max ship range ${shipMaxRange}LY)${debugMode? ' [DEBUG]' : ''}.`);
 		broadcast({ type:'init', systems: mapData.solar_systems, stargates: mapData.stargates });
 		pendingBaselineRef.current = { start: startSystem, systems: collected, returnToStart };
 		// If workers already ready (zero restart scenario) fire immediately
 		if(readyCountRef.current === workersRef.current.length && workersRef.current.length>0) {
 			const pb = pendingBaselineRef.current; pendingBaselineRef.current=null;
-			workersRef.current.forEach(w=> w.postMessage({ type:'baseline', ...pb!, generation: generationRef.current, maxShipRange: parseFloat(shipMaxRange)||0, shipTradeDistance: parseFloat(shipTradeDistance)||0, minGateHopsSaved: parseInt(minGateHopsSaved,10)||0 }));
+			workersRef.current.forEach(w=> w.postMessage({ type:'baseline', ...pb!, generation: generationRef.current, maxShipRange: parseFloat(shipMaxRange)||0, shipTradeDistance: parseFloat(shipTradeDistance)||0, minGateHopsSaved: parseInt(minGateHopsSaved,10)||0, debug: debugMode }));
 		}
 	};
 
@@ -291,7 +292,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		optimizeReceivedRef.current = 0;
 		setIsCalculating(true);
 		log(`Starting optimization passes: ${p} passes x ${t}s on ${optimizeExpectedRef.current} workers.`);
-		broadcast({ type:'optimize', path: championPath, passes: p, timePerPassSec: t, returnToStart, generation: generationRef.current, maxShipRange: parseFloat(shipMaxRange)||0, shipTradeDistance: parseFloat(shipTradeDistance)||0, minGateHopsSaved: parseInt(minGateHopsSaved,10)||0 });
+		broadcast({ type:'optimize', path: championPath, passes: p, timePerPassSec: t, returnToStart, generation: generationRef.current, maxShipRange: parseFloat(shipMaxRange)||0, shipTradeDistance: parseFloat(shipTradeDistance)||0, minGateHopsSaved: parseInt(minGateHopsSaved,10)||0, debug: debugMode });
 	};
 
 	const stop = () => { broadcast({ type:'stop' }); setIsCalculating(false); log('Stop requested.'); };
@@ -612,6 +613,9 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 					{minRequiredShipRange!==null && (
 						<div className="scout-warning">Minimum ship range required to connect all systems: {minRequiredShipRange.toFixed(2)} LY</div>
 					)}
+					<div className="scout-input-row">
+						<label><input type="checkbox" checked={debugMode} onChange={e=> setDebugMode(e.target.checked)} /> Debug Mode</label>
+					</div>
 					{datasetChanged && !championPath && !isCalculating && <div className="scout-warning">System selection changed. Please Calculate Route again.</div>}
 					<div className="scout-actions">
 						{!championPath && <button className="scout-button" disabled={isCalculating} onClick={startCalculation}>Calculate Route</button>}

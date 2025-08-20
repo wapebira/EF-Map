@@ -5,8 +5,8 @@ interface Position { x:number; y:number; z:number }
 interface System { id:number; name:string; position:Position }
 interface Gate { source_system_id:number; destination_system_id:number }
 interface InitMessage { type:'init'; systems: { [name:string]: System }; stargates: { [id:string]: Gate }; }
-interface BaselineMessage { type:'baseline'; start:string; systems:string[]; returnToStart:boolean; generation?:number; maxShipRange:number; shipTradeDistance:number; minGateHopsSaved:number }
-interface OptimizeMessage { type:'optimize'; path:string[]; passes:number; timePerPassSec:number; returnToStart:boolean; generation?:number; maxShipRange:number; shipTradeDistance:number; minGateHopsSaved:number }
+interface BaselineMessage { type:'baseline'; start:string; systems:string[]; returnToStart:boolean; generation?:number; maxShipRange:number; shipTradeDistance:number; minGateHopsSaved:number; debug?:boolean }
+interface OptimizeMessage { type:'optimize'; path:string[]; passes:number; timePerPassSec:number; returnToStart:boolean; generation?:number; maxShipRange:number; shipTradeDistance:number; minGateHopsSaved:number; debug?:boolean }
 interface StopMessage { type:'stop' }
 
 type InMsg = InitMessage | BaselineMessage | OptimizeMessage | StopMessage;
@@ -93,13 +93,13 @@ const computePathCost = (path:string[], returnToStart:boolean): PathCost => {
 const systemsById = new Map<number,System>();
 
 // Nearest Neighbor baseline
-const nearestNeighbor = (start:string, candidates:string[], returnToStart:boolean, connectivityGuaranteed:boolean): { path:string[]; unreachable:boolean } => {
+const nearestNeighbor = (start:string, candidates:string[], returnToStart:boolean, connectivityGuaranteed:boolean, debug:boolean): { path:string[]; unreachable:boolean } => {
   const remaining = new Set(candidates.filter(c=>c!==start));
   const route=[start];
   let unreachable=false;
   while(remaining.size){
     let bestChoice: { name:string; cost:PathCost } | null = null;
-    for(const name of remaining){
+  for(const name of remaining){
       const trial = route.concat(name);
       const cost = computePathCost(trial, false);
       if(!isFinite(cost.shipDistance)) continue; // skip unreachable extension under current range
@@ -124,13 +124,16 @@ const nearestNeighbor = (start:string, candidates:string[], returnToStart:boolea
           }
         }
         if(bridged && bridgeName){
-          post({ type:'progress', message:`Bridging components via ship jump ${bridgeDist.toFixed(2)} LY to ${bridgeName}` });
+          if(debug) post({ type:'progress', message:`[DEBUG] Bridging components via ship jump ${bridgeDist.toFixed(2)} LY to ${bridgeName}` });
           route.push(bridgeName); remaining.delete(bridgeName); continue;
         }
       }
       // Attempt reposition to start (once) before failing
       if(route[route.length-1] !== start){ route.push(start); continue; }
       unreachable=true; break;
+    }
+    else if(debug){
+      post({ type:'progress', message:`[DEBUG] NN append ${bestChoice.name} cost(shipDist=${bestChoice.cost.shipDistance.toFixed(2)}, shipJumps=${bestChoice.cost.shipJumps}, total=${bestChoice.cost.totalDistance.toFixed(2)})` });
     }
     route.push(bestChoice.name); remaining.delete(bestChoice.name);
   }
@@ -139,7 +142,7 @@ const nearestNeighbor = (start:string, candidates:string[], returnToStart:boolea
 };
 
 // Simple 2-opt with feasibility guard (will not accept unreachable candidate)
-const twoOpt = (path:string[], returnToStart:boolean, timeMs:number): string[] => {
+const twoOpt = (path:string[], returnToStart:boolean, timeMs:number, debug:boolean): string[] => {
   const startTime=Date.now();
   let best=path.slice();
   const effectiveLen = returnToStart ? best.length-1 : best.length;
@@ -167,13 +170,13 @@ const twoOpt = (path:string[], returnToStart:boolean, timeMs:number): string[] =
             if(ev.chooseShip){ if(ev.shipDistance>maxShipRange+1e-6){ feasible=false; break; } }
             else if(ev.gateDistance===null){ feasible=false; break; }
         }
-        if(!feasible) continue;
+  if(!feasible){ if(debug) post({ type:'progress', message:`[DEBUG] 2-opt reject segment (${i},${k}) infeasible` }); continue; }
         const nc = cost(newPath);
         if(!isFinite(nc.shipDistance)) continue; // safeguard
         const better = (nc.shipDistance < bestCost.shipDistance) ||
           (nc.shipDistance===bestCost.shipDistance && nc.shipJumps < bestCost.shipJumps) ||
           (nc.shipDistance===bestCost.shipDistance && nc.shipJumps===bestCost.shipJumps && nc.totalDistance < bestCost.totalDistance);
-        if(better){ best=newPath; bestCost=nc; improved=true; break; }
+  if(better){ best=newPath; bestCost=nc; improved=true; if(debug) post({ type:'progress', message:`[DEBUG] 2-opt improve (${i},${k}) shipDist=${bestCost.shipDistance.toFixed(2)} shipJumps=${bestCost.shipJumps} total=${bestCost.totalDistance.toFixed(2)}` }); break; }
       }
       if(improved) break;
     }
@@ -183,7 +186,7 @@ const twoOpt = (path:string[], returnToStart:boolean, timeMs:number): string[] =
 };
 
 // Iterative improvement (placeholder: repeated 2-opt shuffles)
-const iterativeImprove = (base:string[], passes:number, timePerPassSec:number, returnToStart:boolean, progressCb:(msg:string)=>void): string[] => {
+const iterativeImprove = (base:string[], passes:number, timePerPassSec:number, returnToStart:boolean, progressCb:(msg:string)=>void, debug:boolean): string[] => {
   let champion = base.slice();
   let championCost = computePathCost(champion, returnToStart);
   for(let p=0;p<passes && !stopping;p++){
@@ -195,12 +198,12 @@ const iterativeImprove = (base:string[], passes:number, timePerPassSec:number, r
       const b=a+1+Math.floor(Math.random()*(working.length-a-2));
       working.splice(a,b-a, ...working.slice(a,b).reverse());
     }
-    const improved=twoOpt(working, returnToStart, budget);
+  const improved=twoOpt(working, returnToStart, budget, debug);
     const improvedCost = computePathCost(improved, returnToStart);
     const better = (improvedCost.shipDistance < championCost.shipDistance) ||
       (improvedCost.shipDistance===championCost.shipDistance && improvedCost.shipJumps < championCost.shipJumps) ||
       (improvedCost.shipDistance===championCost.shipDistance && improvedCost.shipJumps===championCost.shipJumps && improvedCost.totalDistance < championCost.totalDistance);
-    if(better){ champion=improved; championCost=improvedCost; }
+    if(better){ champion=improved; championCost=improvedCost; if(debug) progressCb(`[DEBUG] Pass ${p+1} improvement shipDist=${championCost.shipDistance.toFixed(2)} shipJumps=${championCost.shipJumps} total=${championCost.totalDistance.toFixed(2)}`); }
     progressCb(`Pass ${p+1}/${passes}`);
   }
   return champion;
@@ -270,9 +273,9 @@ self.onmessage = (e:MessageEvent<InMsg>) => {
       post({ type:'baselineError', reason:`Unreachable systems with current ship range (${maxShipRange} LY). Minimum required ~${connectivity.minRequired.toFixed(2)} LY`, minRequiredShipRange: connectivity.minRequired, generation: msg.generation });
       return;
     }
-  const { path:nnPath, unreachable } = nearestNeighbor(msg.start, msg.systems, msg.returnToStart, connectivity.reachable);
+  const { path:nnPath, unreachable } = nearestNeighbor(msg.start, msg.systems, msg.returnToStart, connectivity.reachable, !!msg.debug);
     if(unreachable){ post({ type:'baselineError', reason:'Unreachable systems with current ship range / gate network', generation: msg.generation }); return; }
-    const refinedPre = twoOpt(nnPath, msg.returnToStart, 250);
+  const refinedPre = twoOpt(nnPath, msg.returnToStart, 250, !!msg.debug);
     let refined = refinedPre;
     let refinedCost = computePathCost(refined, msg.returnToStart);
     if(!isFinite(refinedCost.shipDistance)) {
@@ -295,7 +298,7 @@ self.onmessage = (e:MessageEvent<InMsg>) => {
   } else if(msg.type==='optimize'){
     stopping=false;
     maxShipRange = msg.maxShipRange; shipTradeDistance = msg.shipTradeDistance; minGateHopsSaved = msg.minGateHopsSaved;
-    const champion = iterativeImprove(msg.path, msg.passes, msg.timePerPassSec, msg.returnToStart, (m)=>post({ type:'progress', message:m }));
+  const champion = iterativeImprove(msg.path, msg.passes, msg.timePerPassSec, msg.returnToStart, (m)=>post({ type:'progress', message:m }), !!msg.debug);
     post({ type:'optimizeResult', path: champion, generation: msg.generation });
   } else if(msg.type==='stop'){
     stopping=true; post({ type:'stopped' });
