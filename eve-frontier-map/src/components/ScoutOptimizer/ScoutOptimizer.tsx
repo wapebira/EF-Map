@@ -17,11 +17,12 @@ interface ScoutOptimizerProps {
 	onBaselineRoute?:(path:string[])=>void;
 	onOptimizedRoute?:(path:string[])=>void;
 	onClearRoute?:()=>void;
+	invalidateToken?: number; // external invalidation (e.g. P2P route started)
 }
 
 const MAX_SYSTEMS_WARNING = 300;
 
-const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, onReturnToStartChange, onBaselineRoute, onOptimizedRoute, onClearRoute }: ScoutOptimizerProps) => {
+const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, onReturnToStartChange, onBaselineRoute, onOptimizedRoute, onClearRoute, invalidateToken }: ScoutOptimizerProps) => {
 	const [startSystem, setStartSystem] = useState('');
 	const [radius, setRadius] = useState('50');
 	const [useRegion, setUseRegion] = useState(false);
@@ -121,6 +122,23 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	},[workerCount, log]);
 
 	const broadcast = (msg:unknown) => { workersRef.current.forEach(w=> w.postMessage(msg as any)); };
+
+	// External invalidation: clear any existing route & terminate workers so stale messages don't redraw
+	useEffect(()=>{
+		if(invalidateToken === undefined) return;
+		if(championPath || isCalculating){
+			log('Scout route cleared due to external routing action.');
+			setChampionPath(null);
+			championPathRef.current = null;
+			setChampionDistance(null);
+			baselineDoneRef.current = false;
+			pendingBaselineRef.current = null;
+			setIsCalculating(false);
+			workersRef.current.forEach(w=>{ try{ w.terminate(); }catch(e){} });
+			workersRef.current = [];
+			try { onClearRoute && onClearRoute(); } catch(e){/* ignore */}
+		}
+	}, [invalidateToken]);
 
 	const startCalculation = () => {
 		if(!mapData) return;

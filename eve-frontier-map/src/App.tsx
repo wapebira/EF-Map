@@ -100,6 +100,7 @@ function App() {
   const [isCalculatingRoute, setIsCalculatingRoute] = useState(false);
   const [routeResult, setRouteResult] = useState<{ path: string[] | null; error?: string } | null>(null);
   const [scoutRouteResult, setScoutRouteResult] = useState<{ path: string[] | null } | null>(null);
+  const [scoutInvalidateToken, setScoutInvalidateToken] = useState(0);
   const [routeProgress, setRouteProgress] = useState<{ explored: number; frontier: number; elapsedMs: number; message: string } | null>(null);
 
   // New state for labels
@@ -450,6 +451,7 @@ function App() {
     // If a scout route was displayed, clear it so P2P route takes visual precedence
     if (scoutRouteResult) {
       setScoutRouteResult(null);
+  setScoutInvalidateToken(t=> t+1); // force scout component to clear internal workers/state
     }
 
     setIsCalculatingRoute(true);
@@ -1535,6 +1537,7 @@ function App() {
           systemNames={mapData ? Object.values(mapData.solar_systems).map(s => s.name) : []}
           returnToStart={returnToStart}
           onReturnToStartChange={setReturnToStart}
+          invalidateToken={scoutInvalidateToken}
           onBaselineRoute={(path)=>{ 
             setScoutRouteResult({ path }); 
             if(mapData && path.length){
