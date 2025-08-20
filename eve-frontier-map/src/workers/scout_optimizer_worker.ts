@@ -97,20 +97,24 @@ const nearestNeighbor = (start:string, candidates:string[], returnToStart:boolea
   const remaining = new Set(candidates.filter(c=>c!==start));
   const route=[start];
   let unreachable=false;
+  // Track incremental cost so we don't recompute whole path each trial
+  let aggCost: PathCost = { shipDistance:0, shipJumps:0, totalDistance:0 };
   while(remaining.size){
-    let bestChoice: { name:string; cost:PathCost } | null = null;
-    // Greedy extension from current tail only (classic NN variant)
-    const tail = systemsByName[route[route.length-1]];
+    let bestChoice: { name:string; inc:{shipDist:number; shipJumps:number; total:number} } | null = null;
+    const tailName = route[route.length-1];
+    const tail = systemsByName[tailName];
     for(const name of remaining){
-      const trial = route.concat(name);
-      const cost = computePathCost(trial, false);
-      if(!isFinite(cost.shipDistance)) continue; // extension infeasible under current constraints
-      if(bestChoice===null){ bestChoice={name, cost}; continue; }
-      const bc = bestChoice.cost;
-      if( cost.shipDistance < bc.shipDistance ||
-          (cost.shipDistance===bc.shipDistance && cost.shipJumps < bc.shipJumps) ||
-          (cost.shipDistance===bc.shipDistance && cost.shipJumps===bc.shipJumps && cost.totalDistance < bc.totalDistance) ){
-        bestChoice={name, cost};
+      const next = systemsByName[name]; if(!tail || !next) continue;
+      const ev = evaluateEdge(tail, next);
+      if(ev.chooseShip){ if(ev.shipDistance>maxShipRange+1e-6) continue; }
+      else if(ev.gateDistance===null) continue; // unreachable extension
+      const inc = ev.chooseShip ? { shipDist: ev.shipDistance, shipJumps:1, total: ev.shipDistance } : { shipDist:0, shipJumps:0, total: ev.gateDistance! };
+      if(!bestChoice){ bestChoice={ name, inc }; continue; }
+      const bc = bestChoice.inc;
+      if( inc.shipDist < bc.shipDist ||
+          (inc.shipDist===bc.shipDist && inc.shipJumps < bc.shipJumps) ||
+          (inc.shipDist===bc.shipDist && inc.shipJumps===bc.shipJumps && inc.total < bc.total) ){
+        bestChoice={ name, inc };
       }
     }
     if(!bestChoice){
@@ -128,15 +132,21 @@ const nearestNeighbor = (start:string, candidates:string[], returnToStart:boolea
         }
         // Revisit bridging: find earlier anchor that can reach a remaining system, then revisit anchor and append system
         let revisitPlan: { anchor:string; target:string; d:number } | null = null;
-        for(const name of remaining){
-          const sysB = systemsByName[name]; if(!sysB) continue;
-          for(let i=0;i<route.length;i++){
-            const anchor = route[i]; if(anchor === route[route.length-1]) continue; // already tail, tail case handled above
-            const sysA = systemsByName[anchor]; if(!sysA) continue;
-            const d = dist(sysA, sysB);
-            if(d <= maxShipRange+1e-6){ revisitPlan = { anchor, target:name, d }; break; }
+        if(tail){
+          for(const name of remaining){
+            const sysTarget = systemsByName[name]; if(!sysTarget) continue;
+            // Find anchor reachable from tail and that can ship-jump to target
+            for(let i=0;i<route.length;i++){
+              const anchor = route[i]; if(anchor===tailName) continue; // skip tail
+              const sysAnchor = systemsByName[anchor]; if(!sysAnchor) continue;
+              // tail -> anchor must be feasible
+              const evTA = evaluateEdge(tail, sysAnchor);
+              if(evTA.gateDistance===null && (!evTA.chooseShip || evTA.shipDistance>maxShipRange+1e-6)) continue;
+              const dAT = dist(sysAnchor, sysTarget);
+              if(dAT <= maxShipRange+1e-6){ revisitPlan={ anchor, target:name, d:dAT }; break; }
+            }
+            if(revisitPlan) break;
           }
-          if(revisitPlan) break;
         }
         if(revisitPlan){
           if(debug) post({ type:'progress', message:`[DEBUG] Revisit bridge via ${revisitPlan.anchor} -> ship ${revisitPlan.target} (${revisitPlan.d.toFixed(2)} LY)` });
@@ -166,9 +176,15 @@ const nearestNeighbor = (start:string, candidates:string[], returnToStart:boolea
       if(route[route.length-1] !== start){ route.push(start); continue; }
       unreachable=true; break;
     } else if(debug){
-      post({ type:'progress', message:`[DEBUG] NN append ${bestChoice.name} cost(shipDist=${bestChoice.cost.shipDistance.toFixed(2)}, shipJumps=${bestChoice.cost.shipJumps}, total=${bestChoice.cost.totalDistance.toFixed(2)})` });
+      post({ type:'progress', message:`[DEBUG] NN append ${bestChoice.name} inc(shipDist=${bestChoice.inc.shipDist.toFixed(2)}, shipJumps=${bestChoice.inc.shipJumps}, total=${bestChoice.inc.total.toFixed(2)})` });
     }
-    route.push(bestChoice.name); remaining.delete(bestChoice.name);
+    // Apply incremental cost update
+    if(bestChoice){
+      aggCost.shipDistance += bestChoice.inc.shipDist;
+      aggCost.shipJumps += bestChoice.inc.shipJumps;
+      aggCost.totalDistance += bestChoice.inc.total;
+      route.push(bestChoice.name); remaining.delete(bestChoice.name);
+    }
   }
   if(returnToStart) route.push(start);
   return { path:route, unreachable: unreachable || route.filter(n=>n!==start).length < candidates.filter(c=>c!==start).length };
