@@ -99,6 +99,7 @@ function App() {
   const routingWorkerRef = useRef<Worker | null>(null);
   const [isCalculatingRoute, setIsCalculatingRoute] = useState(false);
   const [routeResult, setRouteResult] = useState<{ path: string[] | null; error?: string } | null>(null);
+  const [scoutRouteResult, setScoutRouteResult] = useState<{ path: string[] | null } | null>(null);
   const [routeProgress, setRouteProgress] = useState<{ explored: number; frontier: number; elapsedMs: number; message: string } | null>(null);
 
   // New state for labels
@@ -1075,7 +1076,7 @@ function App() {
 
   }, [isRegionHighlighterActive, highlightedSystem, mapData, isPlanetCountActive, getPlanetCountColor, getTransformedPosition, ringTexture]);
 
-  // Draw Route Lines
+  // Draw Route Lines (supports P2P or Scout route; Scout takes precedence when present)
   useEffect(() => {
     if (!sceneRef.current || !mapData) return;
 
@@ -1089,9 +1090,10 @@ function App() {
       routeLinesRef.current = null;
     }
 
-    if (routeResult && routeResult.path) {
+    const activePath = scoutRouteResult?.path || routeResult?.path;
+    if (activePath) {
       const systemsByName = Object.fromEntries(Object.values(mapData.solar_systems).map(s => [s.name.toLowerCase(), s]));
-      const pathSystems = routeResult.path.map(name => systemsByName[name.toLowerCase()]).filter(Boolean);
+      const pathSystems = activePath.map(name => systemsByName[name.toLowerCase()]).filter(Boolean);
 
       if (pathSystems.length < 2) return;
 
@@ -1216,7 +1218,7 @@ function App() {
       (routeGroup as any)._cleanup = cleanupRoute;
     }
 
-  }, [routeResult, mapData, getTransformedPosition]);
+  }, [routeResult, scoutRouteResult, mapData, getTransformedPosition]);
 
   // Recolor route meshes when the accent changes
   useEffect(() => {
@@ -1528,6 +1530,9 @@ function App() {
           systemNames={mapData ? Object.values(mapData.solar_systems).map(s => s.name) : []}
           returnToStart={returnToStart}
           onReturnToStartChange={setReturnToStart}
+          onBaselineRoute={(path)=>{ setScoutRouteResult({ path }); }}
+          onOptimizedRoute={(path)=>{ setScoutRouteResult({ path }); }}
+          onClearRoute={()=> setScoutRouteResult(null)}
         />
         {isPlanetCountActive && generatePlanetCountLegend()}
       </div>

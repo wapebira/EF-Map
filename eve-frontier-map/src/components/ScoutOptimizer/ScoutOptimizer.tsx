@@ -14,11 +14,14 @@ interface ScoutOptimizerProps {
 	systemNames: string[];
 	returnToStart: boolean;
 	onReturnToStartChange:(v:boolean)=>void;
+	onBaselineRoute?:(path:string[])=>void;
+	onOptimizedRoute?:(path:string[])=>void;
+	onClearRoute?:()=>void;
 }
 
 const MAX_SYSTEMS_WARNING = 300;
 
-const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, onReturnToStartChange }: ScoutOptimizerProps) => {
+const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, onReturnToStartChange, onBaselineRoute, onOptimizedRoute, onClearRoute }: ScoutOptimizerProps) => {
 	const [startSystem, setStartSystem] = useState('');
 	const [radius, setRadius] = useState('50');
 	const [useRegion, setUseRegion] = useState(false);
@@ -31,6 +34,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	const [championPath, setChampionPath] = useState<string[]|null>(null);
 	const [championDistance, setChampionDistance] = useState<number|null>(null);
 	const [datasetChanged, setDatasetChanged] = useState(false);
+	const championPathRef = useRef<string[]|null>(null);
 	// Track last baseline return-to-start setting to know when to recompute
 	const lastReturnToStartRef = useRef(returnToStart);
 	// Track last system selection signature
@@ -143,9 +147,11 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		if(baselineDoneRef.current) return;
 		baselineDoneRef.current=true;
 		setChampionPath(path);
+		championPathRef.current = path;
 		const distVal = computeRouteDistance(path);
 		setChampionDistance(distVal);
 		log(`Baseline distance: ${distVal.toFixed(2)} LY over ${path.length} systems`);
+		try { onBaselineRoute && onBaselineRoute(path); } catch(e) { /* ignore */ }
 		// End baseline phase so user can immediately continue or copy
 		setIsCalculating(false);
 		log('Baseline complete. You can Continue Optimization to refine the route.');
@@ -157,12 +163,14 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 			if(!prev){
 				setChampionDistance(candDist);
 				log(`Initial optimization candidate distance: ${candDist.toFixed(2)} LY (${path.length} systems)`);
+				championPathRef.current = path;
 				return path;
 			}
 			const currentDist = championDistance ?? computeRouteDistance(prev);
 			if(candDist + 1e-6 < currentDist){
 				setChampionDistance(candDist);
 				log(`Improved champion distance: ${currentDist.toFixed(2)} -> ${candDist.toFixed(2)} LY`);
+				championPathRef.current = path;
 				return path;
 			} else {
 				log(`No improvement (candidate ${candDist.toFixed(2)} LY, champion ${currentDist.toFixed(2)} LY)`);
@@ -173,6 +181,8 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		if(optimizeReceivedRef.current >= optimizeExpectedRef.current) {
 			setIsCalculating(false);
 			log('Optimization pass complete. You may run additional passes.');
+			// Emit final optimized route after async state settles
+			setTimeout(()=>{ if(onOptimizedRoute && championPathRef.current) { try { onOptimizedRoute(championPathRef.current); } catch(e){/* ignore */} } },0);
 		}
 	};
 
@@ -233,9 +243,11 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 			if(prev.gateReachableOnly !== gateReachableOnly) reasons.push('gate-reachable filter');
 			log(`System set changed (${reasons.join(', ')||'parameters changed'}). Previous route invalidated.`);
 			setChampionPath(null);
+			championPathRef.current = null;
 			setChampionDistance(null);
 			baselineDoneRef.current=false;
 			setDatasetChanged(true);
+			try { onClearRoute && onClearRoute(); } catch(e){/* ignore */}
 		}
 		prevParamsRef.current = { startSystem, radius, useRegion, gateReachableOnly };
 	}, [startSystem, radius, useRegion, gateReachableOnly, collectSystems, championPath, isCalculating, log]);
