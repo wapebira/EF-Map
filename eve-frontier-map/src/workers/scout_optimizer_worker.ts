@@ -173,7 +173,22 @@ const nearestNeighbor = (start:string, candidates:string[], returnToStart:boolea
         }
       }
       // Attempt single reposition to start to change tail context before declaring unreachable
-      if(route[route.length-1] !== start){ route.push(start); continue; }
+      if(route[route.length-1] !== start){
+        const tailSys = systemsByName[route[route.length-1]]; const startSys = systemsByName[start];
+        let canReposition=false;
+        if(tailSys && startSys){
+          const evTS = evaluateEdge(tailSys, startSys);
+            if(evTS.chooseShip){ if(evTS.shipDistance <= maxShipRange+1e-6) canReposition=true; }
+            else if(evTS.gateDistance!==null) canReposition=true;
+        }
+        if(canReposition){
+          if(debug) post({ type:'progress', message:`[DEBUG] Reposition to start to seek new bridging opportunities` });
+          route.push(start); continue;
+        } else {
+          if(debug) post({ type:'progress', message:`[DEBUG] Reposition blocked: tail ${route[route.length-1]} cannot reach start ${start} (direct ${(tailSys&&startSys?dist(tailSys,startSys).toFixed(2):'?')} LY > ${maxShipRange} and no gate path)` });
+          unreachable=true; break;
+        }
+      }
       unreachable=true; break;
     } else if(debug){
       post({ type:'progress', message:`[DEBUG] NN append ${bestChoice.name} inc(shipDist=${bestChoice.inc.shipDist.toFixed(2)}, shipJumps=${bestChoice.inc.shipJumps}, total=${bestChoice.inc.total.toFixed(2)})` });
