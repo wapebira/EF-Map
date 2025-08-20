@@ -78,9 +78,12 @@ const computePathCost = (path:string[], returnToStart:boolean): PathCost => {
   for(let i=0;i<effLen-1;i++){
     const a=systemsByName[path[i]], b=systemsByName[path[i+1]]; if(!a||!b) continue;
     const ev = evaluateEdge(a,b);
-    if(ev.chooseShip){ shipDistance += ev.shipDistance; shipJumps += 1; totalDistance += ev.shipDistance; }
+    if(ev.chooseShip){
+      if(ev.shipDistance>maxShipRange+1e-6){ return { shipDistance:Infinity, shipJumps:Infinity, totalDistance:Infinity }; }
+      shipDistance += ev.shipDistance; shipJumps += 1; totalDistance += ev.shipDistance;
+    }
     else if(ev.gateDistance!==null){ totalDistance += ev.gateDistance; }
-    else { // unreachable
+    else { // unreachable (no gate path and ship out of range)
       return { shipDistance:Infinity, shipJumps:Infinity, totalDistance:Infinity };
     }
   }
@@ -90,14 +93,16 @@ const computePathCost = (path:string[], returnToStart:boolean): PathCost => {
 const systemsById = new Map<number,System>();
 
 // Nearest Neighbor baseline
-const nearestNeighbor = (start:string, candidates:string[], returnToStart:boolean): string[] => {
+const nearestNeighbor = (start:string, candidates:string[], returnToStart:boolean): { path:string[]; unreachable:boolean } => {
   const remaining = new Set(candidates.filter(c=>c!==start));
   const route=[start];
+  let unreachable=false;
   while(remaining.size){
     let bestChoice: { name:string; cost:PathCost } | null = null;
     for(const name of remaining){
       const trial = route.concat(name);
       const cost = computePathCost(trial, false);
+      if(!isFinite(cost.shipDistance)) continue; // skip unreachable extension
       if(bestChoice===null){ bestChoice={name, cost}; continue; }
       const bc = bestChoice.cost;
       // Lexicographic compare: shipDistance, shipJumps, totalDistance
@@ -107,11 +112,11 @@ const nearestNeighbor = (start:string, candidates:string[], returnToStart:boolea
         bestChoice={name, cost};
       }
     }
-    if(!bestChoice) break;
+    if(!bestChoice){ unreachable=true; break; }
     route.push(bestChoice.name); remaining.delete(bestChoice.name);
   }
   if(returnToStart) route.push(start);
-  return route;
+  return { path:route, unreachable: unreachable || route.length < (candidates.length + (returnToStart?1:0)) };
 };
 
 // Simple 2-opt
@@ -176,8 +181,12 @@ self.onmessage = (e:MessageEvent<InMsg>) => {
     stopping=false;
     maxShipRange = msg.maxShipRange; shipTradeDistance = msg.shipTradeDistance; minGateHopsSaved = msg.minGateHopsSaved;
     if(!systemsByName[msg.start]) { post({ type:'baselineResult', path:[msg.start] }); return; }
-    const route = nearestNeighbor(msg.start, msg.systems, msg.returnToStart);
-    const refined = twoOpt(route, msg.returnToStart, 250);
+    const { path:nnPath, unreachable } = nearestNeighbor(msg.start, msg.systems, msg.returnToStart);
+    if(unreachable){ post({ type:'baselineError', reason:'Unreachable systems with current ship range / gate network', generation: msg.generation }); return; }
+    const refinedPre = twoOpt(nnPath, msg.returnToStart, 250);
+    const refinedCost = computePathCost(refinedPre, msg.returnToStart);
+    if(!isFinite(refinedCost.shipDistance)) { post({ type:'baselineError', reason:'Route optimization produced unreachable segment', generation: msg.generation }); return; }
+    const refined = refinedPre;
     // Validation: ensure no ship jumps exceed maxShipRange; if found, try to mark path invalid (will show in UI distance Infinity)
     let invalid=false; let worstOver=0;
     for(let i=0;i<refined.length-1;i++){

@@ -132,6 +132,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 					}
 				}
 				else if(data.type==='baselineResult') { if(data.generation===undefined || data.generation===generationRef.current) handleBaselineResult(data.path); }
+				else if(data.type==='baselineError') { if(data.generation===undefined || data.generation===generationRef.current){ log(`Baseline error: ${data.reason}`); setIsCalculating(false); } }
 				else if(data.type==='optimizeResult') { if(data.generation===undefined || data.generation===generationRef.current) handleOptimizeResult(data.path); }
 				else if(data.type==='progress') { log(`Worker ${i+1}: ${data.message}`); }
 				else if(data.type==='stopped') { log(`Worker ${i+1} stopped.`); }
