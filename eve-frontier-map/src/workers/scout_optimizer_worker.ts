@@ -171,6 +171,50 @@ const iterativeImprove = (base:string[], passes:number, timePerPassSec:number, r
 const post = (data:unknown)=>{ // @ts-ignore
   self.postMessage(data); };
 
+// Connectivity & minimum required ship range computation.
+// We treat each gate-connected component as a node; ship edges connect systems across components.
+// Minimum required ship range = maximum edge length in MST over component graph (edges weighted by minimal inter-component system distance).
+interface MinRangeResult { reachable:boolean; minRequired:number; }
+const computeMinRequiredShipRange = (selectedNames:string[], _startName:string, maxRange:number): MinRangeResult => {
+  const selectedSystems: System[] = [];
+  for(const nm of selectedNames){ const s=systemsByName[nm]; if(s) selectedSystems.push(s); }
+  const byId = new Map<number,System>(); selectedSystems.forEach(s=> byId.set(s.id,s));
+  // Gather gate components restricted to selected systems
+  const compId = new Map<number, number>(); let compCounter=0;
+  for(const sys of selectedSystems){ if(compId.has(sys.id)) continue; // BFS in gate graph
+    const q=[sys.id]; compId.set(sys.id, compCounter);
+    while(q.length){ const cur=q.shift()!; for(const nxt of gateAdj.get(cur)||[]){ if(byId.has(nxt) && !compId.has(nxt)){ compId.set(nxt, compCounter); q.push(nxt); } } }
+    compCounter++; }
+  const components: number[][] = Array.from({length:compCounter}, ()=>[]);
+  for(const sys of selectedSystems){ components[compId.get(sys.id)!].push(sys.id); }
+  if(components.length<=1) return { reachable:true, minRequired:0 };
+  // Precompute minimal distances between components
+  const compDist: {a:number;b:number;d:number}[] = [];
+  for(let i=0;i<components.length;i++){
+    for(let j=i+1;j<components.length;j++){
+      let best=Infinity;
+      for(const idA of components[i]){
+        const A=systemsById.get(idA)!;
+        for(const idB of components[j]){
+          const B=systemsById.get(idB)!; const d=dist(A,B); if(d<best) best=d;
+        }
+      }
+      compDist.push({a:i,b:j,d:best});
+    }
+  }
+  // Check connectivity under current maxRange
+  const parent = Array.from({length:components.length}, (_,i)=>i);
+  const find=(x:number):number=> parent[x]===x?x:(parent[x]=find(parent[x]));
+  const unite=(a:number,b:number)=>{ a=find(a); b=find(b); if(a!==b) parent[b]=a; };
+  for(const e of compDist){ if(e.d <= maxRange+1e-9) unite(e.a,e.b); }
+  let root=find(0); let connected=true; for(let i=1;i<components.length;i++){ if(find(i)!==root){ connected=false; break; } }
+  // Compute MST maximum edge (Kruskal) for min required ship range
+  compDist.sort((x,y)=> x.d - y.d);
+  for(let i=0;i<components.length;i++) parent[i]=i; let used=0; let maxEdge=0;
+  for(const e of compDist){ if(used===components.length-1) break; if(find(e.a)!==find(e.b)){ unite(e.a,e.b); used++; if(e.d>maxEdge) maxEdge=e.d; } }
+  return { reachable: connected, minRequired: maxEdge };
+};
+
 self.onmessage = (e:MessageEvent<InMsg>) => {
   const msg=e.data;
   if(msg.type==='init'){
@@ -181,6 +225,13 @@ self.onmessage = (e:MessageEvent<InMsg>) => {
     stopping=false;
     maxShipRange = msg.maxShipRange; shipTradeDistance = msg.shipTradeDistance; minGateHopsSaved = msg.minGateHopsSaved;
     if(!systemsByName[msg.start]) { post({ type:'baselineResult', path:[msg.start] }); return; }
+    // Connectivity pre-check
+    const sel = [msg.start, ...msg.systems.filter(s=>s!==msg.start)];
+    const connectivity = computeMinRequiredShipRange(sel, msg.start, maxShipRange);
+    if(!connectivity.reachable){
+      post({ type:'baselineError', reason:`Unreachable systems with current ship range (${maxShipRange} LY). Minimum required ~${connectivity.minRequired.toFixed(2)} LY`, minRequiredShipRange: connectivity.minRequired, generation: msg.generation });
+      return;
+    }
     const { path:nnPath, unreachable } = nearestNeighbor(msg.start, msg.systems, msg.returnToStart);
     if(unreachable){ post({ type:'baselineError', reason:'Unreachable systems with current ship range / gate network', generation: msg.generation }); return; }
     const refinedPre = twoOpt(nnPath, msg.returnToStart, 250);

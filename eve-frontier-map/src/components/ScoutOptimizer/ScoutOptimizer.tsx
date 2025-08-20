@@ -21,6 +21,7 @@ interface ScoutOptimizerProps {
 }
 
 const MAX_SYSTEMS_WARNING = 300;
+const [minRequiredShipRange, setMinRequiredShipRange] = useState<number|null>(null);
 
 const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, onReturnToStartChange, onBaselineRoute, onOptimizedRoute, onClearRoute, invalidateToken }: ScoutOptimizerProps) => {
 	const [startSystem, setStartSystem] = useState('');
@@ -132,7 +133,11 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 					}
 				}
 				else if(data.type==='baselineResult') { if(data.generation===undefined || data.generation===generationRef.current) handleBaselineResult(data.path); }
-				else if(data.type==='baselineError') { if(data.generation===undefined || data.generation===generationRef.current){ log(`Baseline error: ${data.reason}`); setIsCalculating(false); } }
+				else if(data.type==='baselineError') { if(data.generation===undefined || data.generation===generationRef.current){
+					log(`Baseline error: ${data.reason}`);
+					setIsCalculating(false);
+					if(data.minRequiredShipRange!==undefined){ setMinRequiredShipRange(data.minRequiredShipRange); }
+				} }
 				else if(data.type==='optimizeResult') { if(data.generation===undefined || data.generation===generationRef.current) handleOptimizeResult(data.path); }
 				else if(data.type==='progress') { log(`Worker ${i+1}: ${data.message}`); }
 				else if(data.type==='stopped') { log(`Worker ${i+1} stopped.`); }
@@ -602,6 +607,9 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 					</div>
 					{systemsWarning && <div className="scout-warning">Warning: Large system set may impact performance ({collectSystems().length}).</div>}
 					<div className="scout-systems-count">Systems collected: {systemStats.filtered}{gateReachableOnly && systemStats.filtered!==systemStats.all ? ` (filtered from ${systemStats.all})` : ''}</div>
+					{minRequiredShipRange!==null && (
+						<div className="scout-warning">Minimum ship range required to connect all systems: {minRequiredShipRange.toFixed(2)} LY</div>
+					)}
 					{datasetChanged && !championPath && !isCalculating && <div className="scout-warning">System selection changed. Please Calculate Route again.</div>}
 					<div className="scout-actions">
 						{!championPath && <button className="scout-button" disabled={isCalculating} onClick={startCalculation}>Calculate Route</button>}
