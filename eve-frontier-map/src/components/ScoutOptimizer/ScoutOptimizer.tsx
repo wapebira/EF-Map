@@ -389,55 +389,69 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 			return `<a href="showinfo:5//${system.id}">${system.name}${isHighlighted ? '*' : ''}</a>`;
 		};
 
-		// Build condensed segments with loop-back splitting
+		// Build condensed segments with backtracking / loop splitting.
 		type Segment = { type:'GATE'; count:number; from:SolarSystem; to:SolarSystem } | { type:'JUMP'; distance:number; from:SolarSystem; to:SolarSystem };
 		const segments: Segment[] = [];
-		let i=0;
-		while(i < pathSystems.length - 1){
-			const start = pathSystems[i];
-			const next = pathSystems[i+1];
-			if(isGate(start,next)){
-				// Accumulate gate run
-				const run: SolarSystem[] = [start];
-				let j=i+1;
-				while(j < pathSystems.length && isGate(pathSystems[j-1], pathSystems[j])){ run.push(pathSystems[j]); j++; }
-				// run contains systems along consecutive gate edges
-				if(run.length>1){
-					const first = run[0];
-					const last = run[run.length-1];
-					if(first.id === last.id && run.length > 2){
-						// Potential loop-back, attempt symmetrical split apex
-						const L = run.length - 1; // hops
-						let symmetric = true;
-						for(let k=1;k<=Math.floor(L/2);k++){ if(run[k].id !== run[L-k].id){ symmetric=false; break; } }
-						if(symmetric){
-							const apexIdx = Math.floor(L/2);
-							const apex = run[apexIdx];
-							segments.push({ type:'GATE', count: apexIdx, from:first, to:apex });
-							segments.push({ type:'GATE', count: apexIdx, from:apex, to:last });
-						}else{
-							// Fallback: emit individual edges to avoid collapsing to same system
-							for(let k=0;k<run.length-1;k++){
-								segments.push({ type:'GATE', count:1, from:run[k], to:run[k+1] });
-							}
-						}
-					}else{
-						segments.push({ type:'GATE', count: run.length-1, from: first, to: last });
-					}
-					i = j-1; // position at last system of run
-				}else{
-					segments.push({ type:'GATE', count:1, from:start, to:next });
-					i++;
+		let segStartIdx = 0; // start index in pathSystems for current gate run
+		let inGateRun = isGate(pathSystems[0], pathSystems[1]);
+		// Track seen system ids in current run to split when a prior system is revisited (loop) or immediate reversal occurs
+		let seenInRun = new Map<number, number>();
+		if(inGateRun){ seenInRun.set(pathSystems[0].id, 0); }
+		for(let i=0;i<pathSystems.length-1;i++){
+			const a = pathSystems[i];
+			const b = pathSystems[i+1];
+			const gate = isGate(a,b);
+			if(!gate){
+				// finalize any gate run up to i
+				if(inGateRun){
+					const from = pathSystems[segStartIdx];
+					const to = pathSystems[i];
+					const count = i - segStartIdx;
+					if(count>0) segments.push({ type:'GATE', count, from, to });
 				}
-			}else{
-				// Ship jump
+				inGateRun=false; seenInRun.clear();
+				// ship jump as own segment
 				const distance = Math.sqrt(
-					Math.pow(start.position.x - next.position.x,2)+
-					Math.pow(start.position.y - next.position.y,2)+
-					Math.pow(start.position.z - next.position.z,2)
+					Math.pow(a.position.x - b.position.x,2)+
+					Math.pow(a.position.y - b.position.y,2)+
+					Math.pow(a.position.z - b.position.z,2)
 				);
-				segments.push({ type:'JUMP', distance, from:start, to:next });
-				i++;
+				segments.push({ type:'JUMP', distance, from:a, to:b });
+				// next iteration will handle new gate run if any
+				continue;
+			}
+			// gate edge
+			if(!inGateRun){
+				inGateRun=true; segStartIdx=i; seenInRun.clear(); seenInRun.set(a.id, i);
+			}
+			// Detect immediate reversal (a == path[i-1] && b == path[i-1]) => Actually reversal when b.id === pathSystems[i-1]?.id
+			if(i>0 && b.id === pathSystems[i-1].id){
+				// Close previous forward leg: segStartIdx -> a
+				if(i - segStartIdx > 0){
+					segments.push({ type:'GATE', count: i - segStartIdx, from: pathSystems[segStartIdx], to: a });
+				}
+				// Start new run at a (pivot) for back leg
+				segStartIdx = i; seenInRun.clear(); seenInRun.set(a.id, i);
+				continue;
+			}
+			// Detect loop: visiting a system already seen earlier in current run (not current start)
+			if(seenInRun.has(b.id)){
+				// Close run up to a
+				if(i - segStartIdx > 0){
+					segments.push({ type:'GATE', count: i - segStartIdx, from: pathSystems[segStartIdx], to: a });
+				}
+				// Start new run at a
+				segStartIdx = i; seenInRun.clear(); seenInRun.set(a.id, i);
+				continue;
+			}
+			seenInRun.set(b.id, i+1);
+			// end handled after loop
+		}
+		// finalize tail gate run
+		if(inGateRun){
+			const lastIdx = pathSystems.length-1;
+			if(lastIdx - segStartIdx > 0){
+				segments.push({ type:'GATE', count: lastIdx - segStartIdx, from: pathSystems[segStartIdx], to: pathSystems[lastIdx] });
 			}
 		}
 
