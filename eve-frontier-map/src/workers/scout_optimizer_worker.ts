@@ -114,8 +114,7 @@ const nearestNeighbor = (start:string, candidates:string[], returnToStart:boolea
       }
     }
     if(!bestChoice){
-      // Bridging phase: find a remaining system within ship range of CURRENT tail only.
-      // (Previous logic allowed bridging via any earlier node, creating unreachable tail->new edges.)
+      // Bridging phase: try tail direct first
       if(connectivityGuaranteed){
         let bridgeName: string | undefined; let bridgeDist=Infinity;
         for(const name of remaining){
@@ -126,8 +125,28 @@ const nearestNeighbor = (start:string, candidates:string[], returnToStart:boolea
         if(bridgeName){
           if(debug) post({ type:'progress', message:`[DEBUG] Bridging components via ship jump ${bridgeDist.toFixed(2)} LY to ${bridgeName}` });
           route.push(bridgeName); remaining.delete(bridgeName); continue;
-        } else if(debug) {
-          // Diagnostic: was there a system reachable from SOME earlier node but not tail? (indicates ordering issue)
+        }
+        // Revisit bridging: find earlier anchor that can reach a remaining system, then revisit anchor and append system
+        let revisitPlan: { anchor:string; target:string; d:number } | null = null;
+        for(const name of remaining){
+          const sysB = systemsByName[name]; if(!sysB) continue;
+          for(let i=0;i<route.length;i++){
+            const anchor = route[i]; if(anchor === route[route.length-1]) continue; // already tail, tail case handled above
+            const sysA = systemsByName[anchor]; if(!sysA) continue;
+            const d = dist(sysA, sysB);
+            if(d <= maxShipRange+1e-6){ revisitPlan = { anchor, target:name, d }; break; }
+          }
+          if(revisitPlan) break;
+        }
+        if(revisitPlan){
+          if(debug) post({ type:'progress', message:`[DEBUG] Revisit bridge via ${revisitPlan.anchor} -> ship ${revisitPlan.target} (${revisitPlan.d.toFixed(2)} LY)` });
+          // Revisit anchor (duplicate) then add target
+          route.push(revisitPlan.anchor);
+          route.push(revisitPlan.target);
+          remaining.delete(revisitPlan.target);
+          continue;
+        } else if(debug){
+          // Diagnostic ordering block (no plan found)
           let altCandidate: {name:string; via:string; d:number} | null = null;
           for(const name of remaining){
             const sysB = systemsByName[name]; if(!sysB) continue;
