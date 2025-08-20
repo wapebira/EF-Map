@@ -41,6 +41,9 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	// Display path = macro path expanded into individual gate hops (BFS) so gate segments are shown instead of ship jumps when possible
 	const [championDisplayPath, setChampionDisplayPath] = useState<string[]|null>(null);
 	const [championDistance, setChampionDistance] = useState<number|null>(null);
+	// Ship jump metrics for current champion (lexicographic primary criteria)
+	const [championShipJumps, setChampionShipJumps] = useState<number|null>(null);
+	const [championShipDistance, setChampionShipDistance] = useState<number|null>(null);
 	// Track baseline distance separately for improvement % display
 	const baselineDistanceRef = useRef<number|null>(null);
 	const [datasetChanged, setDatasetChanged] = useState(false);
@@ -227,6 +230,10 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		championDisplayPathRef.current = expanded;
 		const distVal = computeRouteDistance(path);
 		setChampionDistance(distVal);
+		// compute ship metrics for baseline
+		const shipMetrics = computeShipMetrics(path);
+		setChampionShipJumps(shipMetrics.shipJumps);
+		setChampionShipDistance(shipMetrics.shipDistance);
 		baselineDistanceRef.current = distVal; // store baseline distance for improvement stats
 		log(`Baseline distance: ${distVal.toFixed(2)} LY over ${path.length} systems`);
 		try { onBaselineRoute && onBaselineRoute(expanded); } catch(e) { /* ignore */ }
@@ -240,6 +247,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 			const candDist = computeRouteDistance(path);
 			if(!prev){
 				setChampionDistance(candDist);
+				const m = computeShipMetrics(path); setChampionShipJumps(m.shipJumps); setChampionShipDistance(m.shipDistance);
 				log(`Initial optimization candidate distance: ${candDist.toFixed(2)} LY (${path.length} systems)`);
 				championPathRef.current = path;
 				const expanded = expandPathToGateSequence(path); setChampionDisplayPath(expanded); championDisplayPathRef.current = expanded;
@@ -248,6 +256,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 			const currentDist = championDistance ?? computeRouteDistance(prev);
 			if(candDist + 1e-6 < currentDist){
 				setChampionDistance(candDist);
+				const m = computeShipMetrics(path); setChampionShipJumps(m.shipJumps); setChampionShipDistance(m.shipDistance);
 				log(`Improved champion distance: ${currentDist.toFixed(2)} -> ${candDist.toFixed(2)} LY`);
 				championPathRef.current = path;
 				const expanded = expandPathToGateSequence(path); setChampionDisplayPath(expanded); championDisplayPathRef.current = expanded;
@@ -371,6 +380,35 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		let total=0; for(let i=0;i<path.length-1;i++){ total+=computeSystemDistance(path[i], path[i+1]); }
 		return total;
 	},[computeSystemDistance]);
+
+	// Ship metrics (ship jump count & total ship jump distance) using current ship/gate trade parameters
+	const computeShipMetrics = useCallback((path:string[]):{ shipJumps:number; shipDistance:number }=>{
+		if(!mapData) return { shipJumps:0, shipDistance:0 };
+		const maxRange = parseFloat(shipMaxRange)||0;
+		const tradeDist = parseFloat(shipTradeDistance)||0;
+		const minHops = parseInt(minGateHopsSaved,10)||0;
+		const nameToSystem: {[n:string]:SolarSystem} = Object.values(mapData.solar_systems).reduce((acc,s)=>{ acc[s.name.toLowerCase()]=s; return acc; },{} as {[n:string]:SolarSystem});
+		let shipJumps=0, shipDistance=0;
+		for(let i=0;i<path.length-1;i++){
+			const a = nameToSystem[path[i].toLowerCase()];
+			const b = nameToSystem[path[i+1].toLowerCase()];
+			if(!a||!b) continue;
+			// BFS gate path to find hops
+			let gateFound = false; let gateHops = 0;
+			const q:number[][]=[[a.id]]; const seen=new Set<number>([a.id]);
+			while(q.length && !gateFound){
+				const chain=q.shift()!; const last=chain[chain.length-1];
+				if(last===b.id){ gateFound=true; gateHops=chain.length-1; break; }
+				for(const nxt of gatesBySource[last]||[]){ if(!seen.has(nxt)){ seen.add(nxt); q.push([...chain,nxt]); } }
+			}
+			const dx=a.position.x-b.position.x, dy=a.position.y-b.position.y, dz=a.position.z-b.position.z; const shipD=Math.sqrt(dx*dx+dy*dy+dz*dz);
+			let chooseShip=false;
+			if(!gateFound){ if(shipD <= maxRange) chooseShip=true; }
+			else { if(shipD <= tradeDist && gateHops >= minHops) chooseShip=true; }
+			if(chooseShip){ shipJumps+=1; shipDistance+=shipD; }
+		}
+		return { shipJumps, shipDistance };
+	},[mapData, shipMaxRange, shipTradeDistance, minGateHopsSaved, gatesBySource]);
 
 	// --- Scout Note Formatting (mirrors P2P with loop-back segmentation) ---
 	const MAX_NOTE_LENGTH = 1500;
@@ -574,6 +612,9 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 							<div><strong>Baseline Distance:</strong> {baselineDistanceRef.current?.toFixed(2)} LY</div>
 							<div><strong>Current Champion:</strong> {championDistance?.toFixed(2)} LY {baselineDistanceRef.current && championDistance!==null && championDistance < baselineDistanceRef.current ? `(-${improvementPct.toFixed(2)}%)` : ''}</div>
 							<div><strong>Systems:</strong> {championPath.length}{returnToStart ? ' (includes return)' : ''}</div>
+							{championShipJumps!==null && championShipDistance!==null && (
+								<div><strong>Ship Jumps:</strong> {championShipJumps} ({championShipDistance.toFixed(2)} LY)</div>
+							)}
 							{championDisplayPath && championDisplayPath.length !== championPath.length && (
 								<div><strong>Gate Hops (expanded):</strong> {championDisplayPath.length}</div>
 							)}
