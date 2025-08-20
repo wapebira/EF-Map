@@ -21,7 +21,6 @@ interface ScoutOptimizerProps {
 }
 
 const MAX_SYSTEMS_WARNING = 300;
-const [minRequiredShipRange, setMinRequiredShipRange] = useState<number|null>(null);
 
 const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, onReturnToStartChange, onBaselineRoute, onOptimizedRoute, onClearRoute, invalidateToken }: ScoutOptimizerProps) => {
 	const [startSystem, setStartSystem] = useState('');
@@ -30,6 +29,8 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	const [gateReachableOnly, setGateReachableOnly] = useState(false);
 	const [passes, setPasses] = useState('3');
 	const [timePerPass, setTimePerPass] = useState('5');
+	// Minimum required ship range (computed when baseline error received)
+	const [minRequiredShipRange, setMinRequiredShipRange] = useState<number|null>(null);
 	// Ship vs Gate preference inputs
 	const [shipMaxRange, setShipMaxRange] = useState('60');
 	const [shipTradeDistance, setShipTradeDistance] = useState('0');
