@@ -63,9 +63,9 @@ const evaluateEdge = (a:System,b:System): EdgeEval => {
   } else {
     // Gate path exists; consider trade rule
     const gateHopsVal = gateHops!;
-    const gateTradeAllowed = shipDistance <= shipTradeDistance && gateHopsVal >= minGateHopsSaved;
-    // Always prefer gate unless trade rule triggers
-    if(gateTradeAllowed) chooseShip=true;
+  const gateTradeAllowed = shipDistance <= shipTradeDistance && shipDistance <= maxShipRange && gateHopsVal >= minGateHopsSaved;
+  // Always prefer gate unless trade rule triggers AND within ship capability
+  if(gateTradeAllowed) chooseShip=true;
   }
   return { gateDistance, gateHops, shipDistance, chooseShip };
 };
@@ -178,6 +178,16 @@ self.onmessage = (e:MessageEvent<InMsg>) => {
     if(!systemsByName[msg.start]) { post({ type:'baselineResult', path:[msg.start] }); return; }
     const route = nearestNeighbor(msg.start, msg.systems, msg.returnToStart);
     const refined = twoOpt(route, msg.returnToStart, 250);
+    // Validation: ensure no ship jumps exceed maxShipRange; if found, try to mark path invalid (will show in UI distance Infinity)
+    let invalid=false; let worstOver=0;
+    for(let i=0;i<refined.length-1;i++){
+      const a=systemsByName[refined[i]], b=systemsByName[refined[i+1]]; if(!a||!b) continue;
+      const ev=evaluateEdge(a,b);
+      if(ev.chooseShip && ev.shipDistance > maxShipRange+1e-6){ invalid=true; if(ev.shipDistance>worstOver) worstOver=ev.shipDistance; }
+    }
+    if(invalid){
+      post({ type:'progress', message:`Baseline contains ship jump over range (${worstOver.toFixed(2)} > ${maxShipRange}). Params may require adjustment.` });
+    }
     post({ type:'baselineResult', path: refined, generation: msg.generation });
   } else if(msg.type==='optimize'){
     stopping=false;
