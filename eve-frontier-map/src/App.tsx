@@ -447,6 +447,11 @@ function App() {
       return;
     }
 
+    // If a scout route was displayed, clear it so P2P route takes visual precedence
+    if (scoutRouteResult) {
+      setScoutRouteResult(null);
+    }
+
     setIsCalculatingRoute(true);
     setRouteResult(null);
   setRouteCalcTimeMs(null);
@@ -1530,8 +1535,20 @@ function App() {
           systemNames={mapData ? Object.values(mapData.solar_systems).map(s => s.name) : []}
           returnToStart={returnToStart}
           onReturnToStartChange={setReturnToStart}
-          onBaselineRoute={(path)=>{ setScoutRouteResult({ path }); }}
-          onOptimizedRoute={(path)=>{ setScoutRouteResult({ path }); }}
+          onBaselineRoute={(path)=>{ 
+            setScoutRouteResult({ path }); 
+            if(mapData && path.length){
+              const first = Object.values(mapData.solar_systems).find(s=> s.name.toLowerCase()===path[0].toLowerCase());
+              if(first){ selectSystem(first); }
+            }
+          }}
+          onOptimizedRoute={(path)=>{ 
+            setScoutRouteResult({ path }); 
+            if(mapData && path.length){
+              const first = Object.values(mapData.solar_systems).find(s=> s.name.toLowerCase()===path[0].toLowerCase());
+              if(first){ selectSystem(first); }
+            }
+          }}
           onClearRoute={()=> setScoutRouteResult(null)}
         />
         {isPlanetCountActive && generatePlanetCountLegend()}
