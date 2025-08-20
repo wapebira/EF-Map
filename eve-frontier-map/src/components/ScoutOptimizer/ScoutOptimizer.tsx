@@ -50,6 +50,8 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	const optimizeReceivedRef = useRef(0);
 	const readyCountRef = useRef(0);
 	const pendingBaselineRef = useRef<{ start:string; systems:string[]; returnToStart:boolean }|null>(null);
+	// Generation token to ignore late worker messages after invalidation or new run
+	const generationRef = useRef(0);
 
 	const stargatesArray = mapData ? Object.values(mapData.stargates) : [];
 	const gatesBySource: {[id:number]: number[]} = {}; stargatesArray.forEach(g=>{ if(!gatesBySource[g.source_system_id]) gatesBySource[g.source_system_id]=[]; gatesBySource[g.source_system_id].push(g.destination_system_id); if(!gatesBySource[g.destination_system_id]) gatesBySource[g.destination_system_id]=[]; gatesBySource[g.destination_system_id].push(g.source_system_id); });
@@ -109,11 +111,11 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 					log(`Worker ${i+1} ready`);
 					if(pendingBaselineRef.current && readyCountRef.current === parseInt(workerCount,10)) {
 						const pb = pendingBaselineRef.current; pendingBaselineRef.current=null;
-						workersRef.current.forEach(w2=> w2.postMessage({ type:'baseline', ...pb }));
+						workersRef.current.forEach(w2=> w2.postMessage({ type:'baseline', ...pb, generation: generationRef.current }));
 					}
 				}
-				else if(data.type==='baselineResult') { handleBaselineResult(data.path); }
-				else if(data.type==='optimizeResult') { handleOptimizeResult(data.path); }
+				else if(data.type==='baselineResult') { if(data.generation===undefined || data.generation===generationRef.current) handleBaselineResult(data.path); }
+				else if(data.type==='optimizeResult') { if(data.generation===undefined || data.generation===generationRef.current) handleOptimizeResult(data.path); }
 				else if(data.type==='progress') { log(`Worker ${i+1}: ${data.message}`); }
 				else if(data.type==='stopped') { log(`Worker ${i+1} stopped.`); }
 			};
@@ -128,6 +130,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		if(invalidateToken === undefined) return;
 		if(championPath || isCalculating){
 			log('Scout route cleared due to external routing action.');
+			generationRef.current += 1; // bump generation to invalidate in-flight worker results
 			setChampionPath(null);
 			championPathRef.current = null;
 			setChampionDistance(null);
@@ -138,7 +141,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 			workersRef.current = [];
 			try { onClearRoute && onClearRoute(); } catch(e){/* ignore */}
 		}
-	}, [invalidateToken]);
+	}, [invalidateToken, championPath, isCalculating, log, onClearRoute]);
 
 	const startCalculation = () => {
 		if(!mapData) return;
@@ -148,6 +151,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		const signature = collected.slice().sort().join('|');
 		systemSignatureRef.current = signature;
 		setDatasetChanged(false);
+		generationRef.current += 1; // new generation for this run
 		ensureWorkers();
 		setIsCalculating(true);
 		baselineDoneRef.current=false;
@@ -157,7 +161,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		// If workers already ready (zero restart scenario) fire immediately
 		if(readyCountRef.current === workersRef.current.length && workersRef.current.length>0) {
 			const pb = pendingBaselineRef.current; pendingBaselineRef.current=null;
-			workersRef.current.forEach(w=> w.postMessage({ type:'baseline', ...pb! }));
+			workersRef.current.forEach(w=> w.postMessage({ type:'baseline', ...pb!, generation: generationRef.current }));
 		}
 	};
 
@@ -211,7 +215,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		optimizeReceivedRef.current = 0;
 		setIsCalculating(true);
 		log(`Starting optimization passes: ${p} passes x ${t}s on ${optimizeExpectedRef.current} workers.`);
-		broadcast({ type:'optimize', path: championPath, passes: p, timePerPassSec: t, returnToStart });
+		broadcast({ type:'optimize', path: championPath, passes: p, timePerPassSec: t, returnToStart, generation: generationRef.current });
 	};
 
 	const stop = () => { broadcast({ type:'stop' }); setIsCalculating(false); log('Stop requested.'); };
@@ -224,14 +228,15 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 			baselineDoneRef.current = false;
 			setIsCalculating(true);
 			pendingBaselineRef.current = { start: startSystem, systems: systemsForRunRef.current, returnToStart };
+			generationRef.current += 1; // invalidate previous generation
 			// If all workers already ready, dispatch immediately
 			if(readyCountRef.current === workersRef.current.length && workersRef.current.length>0){
 				const pb = pendingBaselineRef.current; pendingBaselineRef.current=null;
-				workersRef.current.forEach(w=> w.postMessage({ type:'baseline', ...pb! }));
+				workersRef.current.forEach(w=> w.postMessage({ type:'baseline', ...pb!, generation: generationRef.current }));
 			}
 		}
 		lastReturnToStartRef.current = returnToStart;
-	}, [returnToStart, championPath, isCalculating, startSystem]);
+	}, [returnToStart, championPath, isCalculating, startSystem, log]);
 
 	// Log when region vs radius or gateReachableOnly toggles to aid testing
 	useEffect(()=>{
