@@ -357,7 +357,23 @@ self.onmessage = (e:MessageEvent<InMsg>) => {
       // fallback to original nearest neighbor path if feasible
       const nnCost = computePathCost(nnPath, msg.returnToStart);
       if(isFinite(nnCost.shipDistance)) { refined = nnPath; refinedCost = nnCost; }
-      else { post({ type:'baselineError', reason:'Route optimization produced unreachable segment', generation: msg.generation }); return; }
+      else {
+        // Diagnose unreachable edge
+        let diagMsg='';
+        for(let i=0;i<nnPath.length-1;i++){
+          const aName=nnPath[i], bName=nnPath[i+1];
+          const a=systemsByName[aName], b=systemsByName[bName]; if(!a||!b) continue;
+          const ev=evaluateEdge(a,b);
+          if(ev.gateDistance===null && (!ev.chooseShip || ev.shipDistance>maxShipRange+1e-6)){
+            const d = dist(a,b).toFixed(2);
+            diagMsg = ` Unreachable edge ${aName} -> ${bName} direct=${d}LY (max ${maxShipRange}).`;
+            break;
+          }
+        }
+        post({ type:'progress', message:`[DEBUG] Baseline unreachable diagnostics:${diagMsg||' (no edge found??)'}` });
+        post({ type:'baselineError', reason:'Route optimization produced unreachable segment', generation: msg.generation });
+        return;
+      }
     }
     // Validation: ensure no ship jumps exceed maxShipRange; if found, try to mark path invalid (will show in UI distance Infinity)
     let invalid=false; let worstOver=0;
