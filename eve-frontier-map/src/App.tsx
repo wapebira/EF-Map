@@ -1532,12 +1532,34 @@ function App() {
     <>
   {/* Referral code copy state */}
   {/* ...existing code... */}
-  <HelpPanel accentIsBlue={accentIsBlue} />
+  <div className="ef-top-toolbar">
+    <div className="ef-toolbar-shifting">
+      <button
+        className="share-route-btn"
+        onClick={() => {
+          const path = scoutRouteResult?.path || routeResult?.path;
+          if(!path || path.length < 2){ setShareFeedback('No route'); setTimeout(()=>setShareFeedback(''),1500); return; }
+          if(scoutRouteResult?.path){
+            updateHashForShare({ type:'s', start:path[0], returnToStart:false, path }, true);
+            setShareFeedback('Scout link copied');
+          } else if(routeResult?.path){
+            const p=(lastP2PParamsRef as any).current||{jump:60,optimize:'fuel',algo:'astar'};
+            updateHashForShare({ type:'p', from:path[0], to:path[path.length-1], jump:p.jump, optimize:p.optimize, algo:p.algo, path }, true);
+            setShareFeedback('P2P link copied');
+          }
+          setTimeout(()=> setShareFeedback(''),2500);
+        }}
+        disabled={!(routeResult?.path || scoutRouteResult?.path)}
+        aria-label="Share current route"
+      >
+        Share Route
+        {shareFeedback && <span className="share-feedback">{shareFeedback}</span>}
+      </button>
+      <ReferralBadge />
+    </div>
+    <HelpPanel accentIsBlue={accentIsBlue} />
+  </div>
       <div style={{ position: 'absolute', top: 10, left: 10, zIndex: 1, color: 'white', backgroundColor: 'rgba(0,0,0,0.5)', padding: '10px', borderRadius: '5px' }}>
-        <div style={{display:'flex', gap:8, marginBottom:8}}>
-          <button onClick={() => { const path = scoutRouteResult?.path || routeResult?.path; if(!path||path.length<2){ setShareFeedback('No route'); setTimeout(()=>setShareFeedback(''),1500); return;} if(scoutRouteResult?.path){ updateHashForShare({ type:'s', start:path[0], returnToStart:false, path }, true); setShareFeedback('Scout link copied'); } else if(routeResult?.path){ const p=(lastP2PParamsRef as any).current||{jump:60,optimize:'fuel',algo:'astar'}; updateHashForShare({ type:'p', from:path[0], to:path[path.length-1], jump:p.jump, optimize:p.optimize, algo:p.algo, path }, true); setShareFeedback('P2P link copied'); } setTimeout(()=> setShareFeedback(''),2500); }} disabled={!(routeResult?.path || scoutRouteResult?.path)} style={{padding:'4px 8px', fontSize:'12px'}}>Share Route</button>
-          {shareFeedback && <span style={{fontSize:'12px', opacity:0.8}}>{shareFeedback}</span>}
-        </div>
         <div>
           <AutoCompleteInput
             placeholder="Search for a system..."
@@ -1605,6 +1627,7 @@ function App() {
           returnToStart={returnToStart}
           onReturnToStartChange={setReturnToStart}
           invalidateToken={scoutInvalidateToken}
+          importedRoutePath={scoutRouteResult?.path || null}
           onBaselineRoute={(path)=>{ 
             setScoutRouteResult({ path }); 
             if(mapData && path.length){
@@ -1631,7 +1654,6 @@ function App() {
       </div>
     <div ref={mountRef} style={{ width: '100vw', height: '100vh' }} />
   {/* Small persistent logo and referral code */}
-  <ReferralBadge />
   <img src={logo} alt="EF Map" className="ef-small-logo" />
     </>
   );

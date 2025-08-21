@@ -18,11 +18,12 @@ interface ScoutOptimizerProps {
 	onOptimizedRoute?:(path:string[])=>void;
 	onClearRoute?:()=>void;
 	invalidateToken?: number; // external invalidation (e.g. P2P route started)
+	importedRoutePath?: string[] | null; // path supplied from shared URL (expanded display path)
 }
 
 const MAX_SYSTEMS_WARNING = 300;
 
-const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, onReturnToStartChange, onBaselineRoute, onOptimizedRoute, onClearRoute, invalidateToken }: ScoutOptimizerProps) => {
+const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, onReturnToStartChange, onBaselineRoute, onOptimizedRoute, onClearRoute, invalidateToken, importedRoutePath }: ScoutOptimizerProps) => {
 	const [startSystem, setStartSystem] = useState('');
 	const [radius, setRadius] = useState('50');
 	const [useRegion, setUseRegion] = useState(false);
@@ -30,7 +31,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	// Continuous optimization controls
 	const [maxOptimizeTime, setMaxOptimizeTime] = useState('60');
 	const [stallTimeout, setStallTimeout] = useState('10');
-	const [debugMode, setDebugMode] = useState(false);
+	// Debug mode removed for production build (was used for verbose worker diagnostics)
 	// Minimum required ship range (computed when baseline error received)
 	const [minRequiredShipRange, setMinRequiredShipRange] = useState<number|null>(null);
 	// Ship vs Gate preference inputs
@@ -144,7 +145,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 					if(pendingBaselineRef.current && readyCountRef.current === parseInt(workerCount,10)) {
 						const pb = pendingBaselineRef.current; pendingBaselineRef.current=null;
 						const baselineParams = { maxShipRange: parseFloat(shipMaxRange)||0, shipTradeDistance: parseFloat(shipTradeDistance)||0, minGateHopsSaved: parseInt(minGateHopsSaved,10)||0 };
-						workersRef.current.forEach(w2=> w2.postMessage({ type:'baseline', ...pb, ...baselineParams, generation: generationRef.current, debug: debugMode }));
+						workersRef.current.forEach(w2=> w2.postMessage({ type:'baseline', ...pb, ...baselineParams, generation: generationRef.current }));
 						workerStatusRef.current.forEach(s=>{ s.state='baseline'; s.lastImprovement=Date.now(); });
 					}
 				}
@@ -162,7 +163,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 			workersRef.current.push(w);
 			workerStatusRef.current.push({ state:'idle', lastImprovement: Date.now() });
 		}
-	},[workerCount, log, shipMaxRange, shipTradeDistance, minGateHopsSaved, debugMode]);
+	},[workerCount, log, shipMaxRange, shipTradeDistance, minGateHopsSaved]);
 
 	const broadcast = (msg:unknown) => { workersRef.current.forEach(w=> w.postMessage(msg as any)); };
 
@@ -199,13 +200,13 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		ensureWorkers();
 		setIsCalculating(true);
 		baselineDoneRef.current=false;
-		log(`Collected ${collected.length} systems. Gate pref: ship≤${shipTradeDistance}LY replaces ≥${minGateHopsSaved} gate hops (max ship range ${shipMaxRange}LY)${debugMode? ' [DEBUG]' : ''}.`);
+		log(`Collected ${collected.length} systems. Gate pref: ship≤${shipTradeDistance}LY replaces ≥${minGateHopsSaved} gate hops (max ship range ${shipMaxRange}LY).`);
 		broadcast({ type:'init', systems: mapData.solar_systems, stargates: mapData.stargates });
 		pendingBaselineRef.current = { start: startSystem, systems: collected, returnToStart };
 		// If workers already ready (zero restart scenario) fire immediately
 		if(readyCountRef.current === workersRef.current.length && workersRef.current.length>0) {
 			const pb = pendingBaselineRef.current; pendingBaselineRef.current=null;
-			workersRef.current.forEach(w=> w.postMessage({ type:'baseline', ...pb!, generation: generationRef.current, maxShipRange: parseFloat(shipMaxRange)||0, shipTradeDistance: parseFloat(shipTradeDistance)||0, minGateHopsSaved: parseInt(minGateHopsSaved,10)||0, debug: debugMode }));
+			workersRef.current.forEach(w=> w.postMessage({ type:'baseline', ...pb!, generation: generationRef.current, maxShipRange: parseFloat(shipMaxRange)||0, shipTradeDistance: parseFloat(shipTradeDistance)||0, minGateHopsSaved: parseInt(minGateHopsSaved,10)||0 }));
 		}
 	};
 
@@ -318,7 +319,17 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 
 // removed runOptimizationPasses (replaced by continuous optimization)
 
-	const stop = () => { broadcast({ type:'stop' }); setIsCalculating(false); if(globalMonitorRef.current!==undefined){ clearInterval(globalMonitorRef.current); globalMonitorRef.current=undefined; } log('Stop requested.'); };
+	const stop = () => {
+		// Invalidate any in-flight worker work by bumping generation
+		generationRef.current += 1;
+		// Ask workers to stop and then terminate them to guarantee halt
+		workersRef.current.forEach(w=> { try { w.postMessage({ type:'stop' }); } catch(e){} });
+		setTimeout(() => { workersRef.current.forEach(w=> { try { w.terminate(); } catch(e){} }); workersRef.current=[]; }, 50);
+		workerStatusRef.current.forEach(ws=> ws.state='done');
+		setIsCalculating(false);
+		if(globalMonitorRef.current!==undefined){ clearInterval(globalMonitorRef.current); globalMonitorRef.current=undefined; }
+		log('Stopped.');
+	};
 
 	const startContinuousOptimization = () => {
 		if(!championPath){ alert('Baseline not finished yet.'); return; }
@@ -332,7 +343,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		// Reset worker statuses
 		workerStatusRef.current.forEach(ws=>{ ws.state='running'; ws.lastImprovement=Date.now(); });
 		// Send optimize with stallTimeoutSec=0 so workers never self-terminate; UI orchestrates stalls
-		broadcast({ type:'optimizeContinuous', path: championPath, maxTimeSec: total, stallTimeoutSec: 0, returnToStart, generation: generationRef.current, maxShipRange: parseFloat(shipMaxRange)||0, shipTradeDistance: parseFloat(shipTradeDistance)||0, minGateHopsSaved: parseInt(minGateHopsSaved,10)||0, debug: debugMode });
+		broadcast({ type:'optimizeContinuous', path: championPath, maxTimeSec: total, stallTimeoutSec: 0, returnToStart, generation: generationRef.current, maxShipRange: parseFloat(shipMaxRange)||0, shipTradeDistance: parseFloat(shipTradeDistance)||0, minGateHopsSaved: parseInt(minGateHopsSaved,10)||0 });
 		// Start global monitor interval
 		if(globalMonitorRef.current!==undefined){ clearInterval(globalMonitorRef.current); }
 		globalMonitorRef.current = window.setInterval(()=>{
@@ -358,7 +369,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 							setTimeout(()=>{
 								if(!isCalculating) return;
 								ws.state='running'; ws.lastImprovement=Date.now();
-								workersRef.current[idx].postMessage({ type:'optimizeContinuous', path: diversified, maxTimeSec: total - ((Date.now()-optimizationStartTimeRef.current)/1000), stallTimeoutSec: 0, returnToStart, generation: generationRef.current, maxShipRange: parseFloat(shipMaxRange)||0, shipTradeDistance: parseFloat(shipTradeDistance)||0, minGateHopsSaved: parseInt(minGateHopsSaved,10)||0, debug: debugMode });
+								workersRef.current[idx].postMessage({ type:'optimizeContinuous', path: diversified, maxTimeSec: total - ((Date.now()-optimizationStartTimeRef.current)/1000), stallTimeoutSec: 0, returnToStart, generation: generationRef.current, maxShipRange: parseFloat(shipMaxRange)||0, shipTradeDistance: parseFloat(shipTradeDistance)||0, minGateHopsSaved: parseInt(minGateHopsSaved,10)||0 });
 							}, 50);
 						}
 					}
@@ -374,7 +385,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 							setTimeout(()=>{
 								if(!isCalculating) return;
 								workerStatusRef.current[idx].state='running'; workerStatusRef.current[idx].lastImprovement=Date.now();
-								w.postMessage({ type:'optimizeContinuous', path: diversifyPath(diversifiedGlobal), maxTimeSec: total - ((Date.now()-optimizationStartTimeRef.current)/1000), stallTimeoutSec: 0, returnToStart, generation: generationRef.current, maxShipRange: parseFloat(shipMaxRange)||0, shipTradeDistance: parseFloat(shipTradeDistance)||0, minGateHopsSaved: parseInt(minGateHopsSaved,10)||0, debug: debugMode });
+								w.postMessage({ type:'optimizeContinuous', path: diversifyPath(diversifiedGlobal), maxTimeSec: total - ((Date.now()-optimizationStartTimeRef.current)/1000), stallTimeoutSec: 0, returnToStart, generation: generationRef.current, maxShipRange: parseFloat(shipMaxRange)||0, shipTradeDistance: parseFloat(shipTradeDistance)||0, minGateHopsSaved: parseInt(minGateHopsSaved,10)||0 });
 							}, 50);
 						});
 						lastGlobalImprovementRef.current = Date.now(); // reset to give new attempts time
@@ -409,7 +420,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 			if(readyCountRef.current === workersRef.current.length && workersRef.current.length>0){
 				const pb = pendingBaselineRef.current; pendingBaselineRef.current=null;
 				const baselineParams = { maxShipRange: parseFloat(shipMaxRange)||0, shipTradeDistance: parseFloat(shipTradeDistance)||0, minGateHopsSaved: parseInt(minGateHopsSaved,10)||0 };
-				workersRef.current.forEach(w=> w.postMessage({ type:'baseline', ...pb!, ...baselineParams, generation: generationRef.current, debug: debugMode }));
+				workersRef.current.forEach(w=> w.postMessage({ type:'baseline', ...pb!, ...baselineParams, generation: generationRef.current }));
 			}
 		}
 		lastReturnToStartRef.current = returnToStart;
@@ -644,6 +655,28 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		}
 	},[championDisplayPath, mapData, formatRouteToNotes]);
 
+	// When a route is imported (share link), seed internal state so note pages & copy buttons appear
+	useEffect(()=>{
+		if(importedRoutePath && importedRoutePath.length>1 && mapData){
+			// If no champion yet, treat imported path as champion display path
+			if(!championDisplayPathRef.current){
+				setChampionDisplayPath(importedRoutePath);
+				championDisplayPathRef.current = importedRoutePath;
+				// Use imported route also as macro path (approx) so ship metrics / future optimization possible
+				setChampionPath(importedRoutePath);
+				championPathRef.current = importedRoutePath;
+				const distVal = computeRouteDistance(importedRoutePath);
+				setChampionDistance(distVal);
+				baselineDistanceRef.current = distVal; // treat as baseline for improvement calc if user optimizes further
+				const shipMetrics = computeShipMetrics(importedRoutePath);
+				setChampionShipJumps(shipMetrics.shipJumps);
+				setChampionShipDistance(shipMetrics.shipDistance);
+				setNotePages(formatRouteToNotes(importedRoutePath, mapData));
+				setActiveNotePage(0);
+			}
+		}
+	},[importedRoutePath, mapData, computeRouteDistance, computeShipMetrics, formatRouteToNotes]);
+
 	const handleCopyPage = (idx:number) => {
 		if(!notePages[idx]) return;
 		navigator.clipboard.writeText(notePages[idx]).then(()=> { setCopyButtonText('Copied!'); setTimeout(()=> setCopyButtonText('Copy'),1500); });
@@ -734,9 +767,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 					{minRequiredShipRange!==null && (
 						<div className="scout-warning">Minimum ship range required to connect all systems: {minRequiredShipRange.toFixed(2)} LY</div>
 					)}
-					{(!effectiveHideInputs) && <div className="scout-input-row">
-						<label><input type="checkbox" checked={debugMode} onChange={e=> setDebugMode(e.target.checked)} /> Debug Mode</label>
-					</div>}
+					{/* Debug Mode control removed for production */}
 					{datasetChanged && !championPath && !isCalculating && <div className="scout-warning">System selection changed. Please Calculate Route again.</div>}
 					<div className="scout-actions">
 						{!championPath && <button className="scout-button" disabled={isCalculating} onClick={startCalculation}>Calculate Route</button>}
