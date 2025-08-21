@@ -51,7 +51,23 @@ const sections: SectionDef[] = [
         id: 'dpc-purpose',
         title: 'Purpose',
         content: (
-          <p>Colors stars by their planet count on a green-scale gradient (low = red/orange toward high = green). Use this to locate planet-rich clusters or sparse areas. A legend appears below the panels when active.</p>
+          <p>Colors stars by their planet count on a green-scale gradient (low = red/orange toward high = green). Use this to locate planet-rich clusters or sparse areas. A legend with five dynamic planet-count ranges (bins) appears below the panels when active; each bin has a checkbox so you can selectively emphasize only the ranges you care about (e.g., show just high-density systems).</p>
+        ),
+      },
+      {
+        id: 'dpc-filters',
+        title: 'Legend Range Filters',
+        content: (
+          <div>
+            <p>The legend splits the current min→max planet counts among visible systems into five equally sized numeric ranges (rounded). All five are enabled by default. Unchecking a range causes systems whose planet counts fall inside that range to revert to the neutral white base color (they are de-emphasized, not hidden). This lets you, for example, isolate only the highest-density systems.</p>
+            <ul style={{ paddingLeft: '18px', margin: '6px 0' }}>
+              <li>All bins checked: full gradient across all systems (original behavior).</li>
+              <li>Some bins unchecked: only checked ranges retain their gradient color.</li>
+              <li>All bins unchecked: every star is white (legend still visible so you can re-enable bins quickly).</li>
+              <li>Toggling DPC off and back on resets all bins to checked.</li>
+            </ul>
+            <p style={{ marginTop: '6px' }}><strong>Region Highlight synergy:</strong> When Highlight Region is also ON, the gradient (respecting the enabled bins) is applied only inside the highlighted region; systems outside the region remain white regardless of bin state. Disabled bins stay white everywhere.</p>
+          </div>
         ),
       },
       {
