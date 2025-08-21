@@ -339,9 +339,15 @@ const continuousOptimize = (initial:string[], maxTimeSec:number, stallTimeoutSec
   const stallMs = stallTimeoutSec>0 ? stallTimeoutSec*1000 : 0;
   while(!stopping){
     const now = Date.now();
-    if(maxTimeMs>0 && now-startTime >= maxTimeMs){ post({ type:'optimizeDone', reason:'time budget', generation }); break; }
-    if(stallMs>0 && now-lastImprovementTime >= stallMs){ post({ type:'optimizeDone', reason:'stall timeout', generation }); break; }
-    if(!currentChampionPath){ post({ type:'optimizeDone', reason:'no champion', generation }); break; }
+    if(maxTimeMs>0 && now-startTime >= maxTimeMs){
+      const cc=currentChampionCost||computePathCost(currentChampionPath!, returnToStart);
+      post({ type:'optimizeDone', reason:'time budget', generation, path: currentChampionPath, shipDistance: cc.shipDistance, shipJumps: cc.shipJumps, totalDistance: cc.totalDistance });
+      break; }
+    if(stallMs>0 && now-lastImprovementTime >= stallMs){
+      const cc=currentChampionCost||computePathCost(currentChampionPath!, returnToStart);
+      post({ type:'optimizeDone', reason:'stall timeout', generation, path: currentChampionPath, shipDistance: cc.shipDistance, shipJumps: cc.shipJumps, totalDistance: cc.totalDistance });
+      break; }
+    if(!currentChampionPath){ post({ type:'optimizeDone', reason:'no champion', generation, path: [], shipDistance:Infinity, shipJumps:Infinity, totalDistance:Infinity }); break; }
     // Perform one iteration
     const iter = searchIteration(currentChampionPath, returnToStart, debug);
     if(iter.improved){
@@ -353,7 +359,10 @@ const continuousOptimize = (initial:string[], maxTimeSec:number, stallTimeoutSec
     // Yield to event loop periodically
     if(Date.now()-now > 40){ /* heavy iteration; continue */ }
   }
-  if(stopping){ post({ type:'optimizeDone', reason:'stopped', generation }); }
+  if(stopping){
+    const cc=currentChampionCost && currentChampionPath? currentChampionCost : (currentChampionPath? computePathCost(currentChampionPath, returnToStart): {shipDistance:Infinity, shipJumps:Infinity, totalDistance:Infinity});
+    post({ type:'optimizeDone', reason:'stopped', generation, path: currentChampionPath||[], shipDistance: cc.shipDistance, shipJumps: cc.shipJumps, totalDistance: cc.totalDistance });
+  }
 };
 
 // Connectivity & minimum required ship range computation.
@@ -500,7 +509,7 @@ self.onmessage = (e:MessageEvent<InMsg>) => {
   const champion = iterativeImprove(msg.path, msg.passes, msg.timePerPassSec, msg.returnToStart, (m)=>post({ type:'progress', message:m }), !!msg.debug);
     const cCost = computePathCost(champion, msg.returnToStart);
     post({ type:'optimizeResult', path: champion, shipDistance: cCost.shipDistance, shipJumps: cCost.shipJumps, totalDistance: cCost.totalDistance, generation: msg.generation });
-    post({ type:'optimizeDone', reason:'passes complete', generation: msg.generation });
+  post({ type:'optimizeDone', reason:'passes complete', generation: msg.generation, path: champion, shipDistance: cCost.shipDistance, shipJumps: cCost.shipJumps, totalDistance: cCost.totalDistance });
   } else if(msg.type==='optimizeContinuous') {
     activeGeneration = msg.generation;
     stopping=false;

@@ -64,6 +64,11 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	const [notePages, setNotePages] = useState<string[]>([]);
 	const [activeNotePage, setActiveNotePage] = useState(0);
 	const workersRef = useRef<Worker[]>([]);
+	const workerStatusRef = useRef<{ state:'idle'|'baseline'|'running'|'restarting'|'done'; lastImprovement:number }[]>([]);
+	const lastGlobalImprovementRef = useRef<number>(0);
+	const optimizationStartTimeRef = useRef<number>(0);
+	const globalMonitorRef = useRef<number|undefined>(undefined);
+	const totalMaxTimeSecRef = useRef<number>(0);
 	const systemsForRunRef = useRef<string[]>([]);
 	const baselineDoneRef = useRef(false);
 	// Legacy pass tracking removed (continuous mode)
@@ -120,6 +125,8 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	const ensureWorkers = useCallback(()=>{
 		const desired = parseInt(workerCount,10); if(workersRef.current.length===desired) return;
 		workersRef.current.forEach(w=> w.terminate()); workersRef.current=[];
+		workerStatusRef.current=[]; lastGlobalImprovementRef.current=0;
+		if(globalMonitorRef.current!==undefined){ clearInterval(globalMonitorRef.current); globalMonitorRef.current=undefined; }
 		readyCountRef.current = 0;
 		for(let i=0;i<desired;i++){
 			const w = new Worker(new URL('../../workers/scout_optimizer_worker.ts', import.meta.url), { type:'module' });
@@ -132,6 +139,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 						const pb = pendingBaselineRef.current; pendingBaselineRef.current=null;
 						const baselineParams = { maxShipRange: parseFloat(shipMaxRange)||0, shipTradeDistance: parseFloat(shipTradeDistance)||0, minGateHopsSaved: parseInt(minGateHopsSaved,10)||0 };
 						workersRef.current.forEach(w2=> w2.postMessage({ type:'baseline', ...pb, ...baselineParams, generation: generationRef.current, debug: debugMode }));
+						workerStatusRef.current.forEach(s=>{ s.state='baseline'; s.lastImprovement=Date.now(); });
 					}
 				}
 				else if(data.type==='baselineResult') { if(data.generation===undefined || data.generation===generationRef.current) handleBaselineResult(data.path, data.shipJumps, data.shipDistance); }
@@ -140,14 +148,15 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 					setIsCalculating(false);
 					if(data.minRequiredShipRange!==undefined){ setMinRequiredShipRange(data.minRequiredShipRange); }
 				} }
-				else if(data.type==='optimizeResult') { if(data.generation===undefined || data.generation===generationRef.current) handleOptimizeResult(data.path, data.shipJumps, data.shipDistance); }
-				else if(data.type==='optimizeDone') { if(data.generation===undefined || data.generation===generationRef.current){ setIsCalculating(false); log(`Optimization finished: ${data.reason}`); if(onOptimizedRoute && championDisplayPathRef.current){ try { onOptimizedRoute(championDisplayPathRef.current); } catch(e){/* ignore */} } } }
+				else if(data.type==='optimizeResult') { if(data.generation===undefined || data.generation===generationRef.current) handleOptimizeResult(data.path, data.shipJumps, data.shipDistance, i); }
+				else if(data.type==='optimizeDone') { if(data.generation===undefined || data.generation===generationRef.current){ /* per-worker done handled in future enhancement */ } }
 				else if(data.type==='progress') { log(`Worker ${i+1}: ${data.message}`); }
 				else if(data.type==='stopped') { log(`Worker ${i+1} stopped.`); }
 			};
 			workersRef.current.push(w);
+			workerStatusRef.current.push({ state:'idle', lastImprovement: Date.now() });
 		}
-	},[workerCount, log, shipMaxRange, shipTradeDistance, minGateHopsSaved]);
+	},[workerCount, log, shipMaxRange, shipTradeDistance, minGateHopsSaved, debugMode]);
 
 	const broadcast = (msg:unknown) => { workersRef.current.forEach(w=> w.postMessage(msg as any)); };
 
@@ -258,10 +267,15 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		log('Baseline complete. You can Start Optimization to refine the route.');
 	};
 
-	const handleOptimizeResult = (path:string[], workerShipJumps?:number, workerShipDistance?:number) => {
+	const handleOptimizeResult = (path:string[], workerShipJumps?:number, workerShipDistance?:number, workerIndex?:number) => {
+		if(workerIndex!==undefined){
+			const st = workerStatusRef.current[workerIndex];
+			if(st){ st.lastImprovement = Date.now(); if(st.state!=='running') st.state='running'; }
+		}
 		setChampionPath(prev=>{
 			const candDist = computeRouteDistance(path);
 			if(!prev){
+				if(workerIndex!==undefined) log(`Worker ${workerIndex+1} produced initial candidate.`);
 				setChampionDistance(candDist);
 				if(workerShipJumps!==undefined && workerShipDistance!==undefined){
 					setChampionShipJumps(workerShipJumps); setChampionShipDistance(workerShipDistance);
@@ -271,6 +285,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 				log(`Initial optimization candidate distance: ${candDist.toFixed(2)} LY (${path.length} systems)`);
 				championPathRef.current = path;
 				const expanded = expandPathToGateSequence(path); setChampionDisplayPath(expanded); championDisplayPathRef.current = expanded;
+				lastGlobalImprovementRef.current = Date.now();
 				return path;
 			}
 			const currentDist = championDistance ?? computeRouteDistance(prev);
@@ -281,9 +296,10 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 				} else {
 					const m = computeShipMetrics(path); setChampionShipJumps(m.shipJumps); setChampionShipDistance(m.shipDistance);
 				}
-				log(`Improved champion distance: ${currentDist.toFixed(2)} -> ${candDist.toFixed(2)} LY`);
+				log(`Improved champion${workerIndex!==undefined?` (worker ${workerIndex+1})`:''}: ${currentDist.toFixed(2)} -> ${candDist.toFixed(2)} LY`);
 				championPathRef.current = path;
 				const expanded = expandPathToGateSequence(path); setChampionDisplayPath(expanded); championDisplayPathRef.current = expanded;
+				lastGlobalImprovementRef.current = Date.now();
 				return path;
 			} else {
 				log(`No improvement (candidate ${candDist.toFixed(2)} LY, champion ${currentDist.toFixed(2)} LY)`);
@@ -296,14 +312,81 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 
 // removed runOptimizationPasses (replaced by continuous optimization)
 
-	const stop = () => { broadcast({ type:'stop' }); setIsCalculating(false); log('Stop requested.'); };
+	const stop = () => { broadcast({ type:'stop' }); setIsCalculating(false); if(globalMonitorRef.current!==undefined){ clearInterval(globalMonitorRef.current); globalMonitorRef.current=undefined; } log('Stop requested.'); };
 
 	const startContinuousOptimization = () => {
 		if(!championPath){ alert('Baseline not finished yet.'); return; }
 		const total = parseFloat(maxOptimizeTime)||0; const stall = parseFloat(stallTimeout)||0;
 		setIsCalculating(true);
-		log(`Starting optimization: max ${total||'∞'}s, stall ${stall||'∞'}s on ${workersRef.current.length||1} workers.`);
-		broadcast({ type:'optimizeContinuous', path: championPath, maxTimeSec: total, stallTimeoutSec: stall, returnToStart, generation: generationRef.current, maxShipRange: parseFloat(shipMaxRange)||0, shipTradeDistance: parseFloat(shipTradeDistance)||0, minGateHopsSaved: parseInt(minGateHopsSaved,10)||0, debug: debugMode });
+		log(`Starting optimization: max ${total||'∞'}s, global stall ${stall||'∞'}s on ${workersRef.current.length||1} workers.`);
+		optimizationStartTimeRef.current = Date.now();
+		lastGlobalImprovementRef.current = Date.now();
+		totalMaxTimeSecRef.current = total;
+		// Reset worker statuses
+		workerStatusRef.current.forEach(ws=>{ ws.state='running'; ws.lastImprovement=Date.now(); });
+		// Send optimize with stallTimeoutSec=0 so workers never self-terminate; UI orchestrates stalls
+		broadcast({ type:'optimizeContinuous', path: championPath, maxTimeSec: total, stallTimeoutSec: 0, returnToStart, generation: generationRef.current, maxShipRange: parseFloat(shipMaxRange)||0, shipTradeDistance: parseFloat(shipTradeDistance)||0, minGateHopsSaved: parseInt(minGateHopsSaved,10)||0, debug: debugMode });
+		// Start global monitor interval
+		if(globalMonitorRef.current!==undefined){ clearInterval(globalMonitorRef.current); }
+		globalMonitorRef.current = window.setInterval(()=>{
+			const now = Date.now();
+			// Time budget reached?
+			if(total>0 && (now - optimizationStartTimeRef.current) / 1000 >= total){
+				log('Max optimization time reached. Stopping workers.');
+				stop();
+				if(globalMonitorRef.current!==undefined){ clearInterval(globalMonitorRef.current); globalMonitorRef.current=undefined; }
+				return;
+			}
+			// Per-worker stall restart
+			if(stall>0){
+				workerStatusRef.current.forEach((ws,idx)=>{
+					if(ws.state==='running' && (now - ws.lastImprovement)/1000 >= stall){
+						// Diversify: take current champion and apply a random segment reversal locally before restart
+						if(championPathRef.current){
+							const diversified = diversifyPath(championPathRef.current);
+							ws.state='restarting';
+							log(`Worker ${idx+1} stalled. Diversifying & restarting.`);
+							workersRef.current[idx].postMessage({ type:'stop' }); // ensure old loop halts if any
+							// Relaunch after short timeout to allow stop to process
+							setTimeout(()=>{
+								if(!isCalculating) return;
+								ws.state='running'; ws.lastImprovement=Date.now();
+								workersRef.current[idx].postMessage({ type:'optimizeContinuous', path: diversified, maxTimeSec: total - ((Date.now()-optimizationStartTimeRef.current)/1000), stallTimeoutSec: 0, returnToStart, generation: generationRef.current, maxShipRange: parseFloat(shipMaxRange)||0, shipTradeDistance: parseFloat(shipTradeDistance)||0, minGateHopsSaved: parseInt(minGateHopsSaved,10)||0, debug: debugMode });
+							}, 50);
+						}
+					}
+				});
+				// Global stall detection
+				if((now - lastGlobalImprovementRef.current)/1000 >= stall){
+					if(championPathRef.current){
+						log('Global stall detected. Diversifying all workers.');
+						const diversifiedGlobal = diversifyPath(championPathRef.current);
+						workerStatusRef.current.forEach(ws=>{ ws.state='restarting'; ws.lastImprovement=Date.now(); });
+						workersRef.current.forEach((w,idx)=>{
+							w.postMessage({ type:'stop' });
+							setTimeout(()=>{
+								if(!isCalculating) return;
+								workerStatusRef.current[idx].state='running'; workerStatusRef.current[idx].lastImprovement=Date.now();
+								w.postMessage({ type:'optimizeContinuous', path: diversifyPath(diversifiedGlobal), maxTimeSec: total - ((Date.now()-optimizationStartTimeRef.current)/1000), stallTimeoutSec: 0, returnToStart, generation: generationRef.current, maxShipRange: parseFloat(shipMaxRange)||0, shipTradeDistance: parseFloat(shipTradeDistance)||0, minGateHopsSaved: parseInt(minGateHopsSaved,10)||0, debug: debugMode });
+							}, 50);
+						});
+						lastGlobalImprovementRef.current = Date.now(); // reset to give new attempts time
+					}
+				}
+			}
+		}, 1000);
+	};
+
+	// Diversification helper: random segment reversal clone
+	const diversifyPath = (path:string[]):string[] => {
+		const p = path.slice();
+		if(p.length>6){
+			const a=1+Math.floor(Math.random()*(p.length-4));
+			const b=a+2+Math.floor(Math.random()*(p.length-a-3));
+			const seg=p.slice(a,b).reverse();
+			p.splice(a,b-a,...seg);
+		}
+		return p;
 	};
 
 	// Recalculate baseline automatically when Return to Start toggled after baseline computed
@@ -572,6 +655,11 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [shipMaxRange, shipTradeDistance, minGateHopsSaved]);
 
+	// Cleanup on unmount
+	useEffect(()=>{
+		return ()=>{ if(globalMonitorRef.current!==undefined){ clearInterval(globalMonitorRef.current); globalMonitorRef.current=undefined; } };
+	},[]);
+
 	return (
 		<div className="scout-optimizer-container">
 			<label>
@@ -654,6 +742,14 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 							)}
 							{championDisplayPath && championDisplayPath.length !== championPath.length && (
 								<div><strong>Gate Hops (expanded):</strong> {championDisplayPath.length}</div>
+							)}
+							{isCalculating && workerStatusRef.current.length>0 && (
+								<div style={{marginTop:'6px'}}>
+									<strong>Workers:</strong> {workerStatusRef.current.map((ws,i)=>{
+										const since = ((Date.now()-ws.lastImprovement)/1000).toFixed(1);
+										return `#${i+1} ${ws.state} (${since}s)`;
+									}).join(', ')}
+								</div>
 							)}
 						</div>
 					)}
