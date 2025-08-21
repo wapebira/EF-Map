@@ -1567,8 +1567,9 @@ function App() {
           <span style={{ fontSize: '12px' }}>Use blue accent</span>
         </label>
       </div>
-      <div ref={mountRef} style={{ width: '100vw', height: '100vh' }} />
-  {/* Small persistent logo in the bottom-right */}
+    <div ref={mountRef} style={{ width: '100vw', height: '100vh' }} />
+  {/* Small persistent logo and referral code */}
+  <div className="ef-referral">Referral code: n7GEWunG</div>
   <img src={logo} alt="EF Map" className="ef-small-logo" />
     </>
   );

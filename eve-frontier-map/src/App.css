@@ -58,12 +58,37 @@ body {
   position: fixed;
   right: 12px;
   bottom: 12px;
-  width: 48px;
-  height: 48px;
+  width: 96px; /* doubled */
+  height: 96px; /* doubled */
   opacity: 0.9;
   z-index: 3000;
-  border-radius: 6px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.6);
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.7);
   cursor: default;
+}
+
+.ef-referral {
+  position: fixed;
+  right: 12px;
+  bottom: 12px;
+  transform: translateX(-110%); /* place to left of logo */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 48px; /* half of 96px logo height */
+  padding: 0 14px;
+  background: rgba(0,0,0,0.55);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: system-ui, sans-serif;
+  letter-spacing: 0.5px;
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 6px;
+  backdrop-filter: blur(4px);
+  z-index: 3000;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+  pointer-events: none; /* purely informational */
+  white-space: nowrap;
 }
 /* .system-label--selected intentionally left unstyled - uses same styles as .system-label */
