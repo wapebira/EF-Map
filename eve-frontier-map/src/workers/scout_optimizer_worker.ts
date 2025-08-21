@@ -7,15 +7,22 @@ interface Gate { source_system_id:number; destination_system_id:number }
 interface InitMessage { type:'init'; systems: { [name:string]: System }; stargates: { [id:string]: Gate }; }
 interface BaselineMessage { type:'baseline'; start:string; systems:string[]; returnToStart:boolean; generation?:number; maxShipRange:number; shipTradeDistance:number; minGateHopsSaved:number; debug?:boolean }
 interface OptimizeMessage { type:'optimize'; path:string[]; passes:number; timePerPassSec:number; returnToStart:boolean; generation?:number; maxShipRange:number; shipTradeDistance:number; minGateHopsSaved:number; debug?:boolean }
+interface OptimizeContinuousMessage { type:'optimizeContinuous'; path:string[]; maxTimeSec:number; stallTimeoutSec:number; returnToStart:boolean; generation?:number; maxShipRange:number; shipTradeDistance:number; minGateHopsSaved:number; debug?:boolean }
+interface UpdateChampionMessage { type:'updateChampion'; path:string[]; generation?:number }
 interface StopMessage { type:'stop' }
 
-type InMsg = InitMessage | BaselineMessage | OptimizeMessage | StopMessage;
+type InMsg = InitMessage | BaselineMessage | OptimizeMessage | OptimizeContinuousMessage | UpdateChampionMessage | StopMessage;
 
 // Source systems keyed by ID string passed from main thread; we'll build name & id maps
 let systemsDataRaw: { [key:string]: System } = {};
 let systemsByName: { [name:string]: System } = {};
 let stargates: Gate[] = [];
 let stopping = false;
+let activeGeneration: number | undefined;
+// Shared champion state for continuous optimization (may be updated via updateChampion broadcast)
+let currentChampionPath: string[] | null = null;
+let currentChampionCost: PathCost | null = null;
+let lastImprovementTime = 0;
 
 const dist = (a:System,b:System) => {
   const dx=a.position.x-b.position.x, dy=a.position.y-b.position.y, dz=a.position.z-b.position.z;
@@ -303,7 +310,51 @@ const iterativeImprove = (base:string[], passes:number, timePerPassSec:number, r
 };
 
 const post = (data:unknown)=>{ // @ts-ignore
-  self.postMessage(data); };
+self.postMessage(data); };
+
+// Single small search iteration used by continuous mode
+const searchIteration = (path:string[], returnToStart:boolean, debug:boolean): { path:string[]; improved:boolean; cost:PathCost } => {
+  // mutation: small segment reverse
+  let candidate = path.slice();
+  if(candidate.length>5){
+    const a=1+Math.floor(Math.random()*(candidate.length-3));
+    const b=a+1+Math.floor(Math.random()*(candidate.length-a-2));
+    candidate.splice(a,b-a, ...candidate.slice(a,b).reverse());
+  }
+  const improved = twoOpt(candidate, returnToStart, 250, debug); // 250ms budget typical early exit
+  const costImproved = computePathCost(improved, returnToStart);
+  const baseCost = computePathCost(path, returnToStart);
+  const better = (costImproved.shipDistance < baseCost.shipDistance) ||
+    (costImproved.shipDistance===baseCost.shipDistance && costImproved.shipJumps < baseCost.shipJumps) ||
+    (costImproved.shipDistance===baseCost.shipDistance && costImproved.shipJumps===baseCost.shipJumps && costImproved.totalDistance < baseCost.totalDistance);
+  return better ? { path: improved, improved:true, cost: costImproved } : { path, improved:false, cost: baseCost };
+};
+
+const continuousOptimize = (initial:string[], maxTimeSec:number, stallTimeoutSec:number, returnToStart:boolean, generation:number|undefined, debug:boolean) => {
+  currentChampionPath = initial.slice();
+  currentChampionCost = computePathCost(currentChampionPath, returnToStart);
+  lastImprovementTime = Date.now();
+  const startTime = lastImprovementTime;
+  const maxTimeMs = maxTimeSec*1000;
+  const stallMs = stallTimeoutSec>0 ? stallTimeoutSec*1000 : 0;
+  while(!stopping){
+    const now = Date.now();
+    if(maxTimeMs>0 && now-startTime >= maxTimeMs){ post({ type:'optimizeDone', reason:'time budget', generation }); break; }
+    if(stallMs>0 && now-lastImprovementTime >= stallMs){ post({ type:'optimizeDone', reason:'stall timeout', generation }); break; }
+    if(!currentChampionPath){ post({ type:'optimizeDone', reason:'no champion', generation }); break; }
+    // Perform one iteration
+    const iter = searchIteration(currentChampionPath, returnToStart, debug);
+    if(iter.improved){
+      currentChampionPath = iter.path.slice();
+      currentChampionCost = iter.cost;
+      lastImprovementTime = Date.now();
+      post({ type:'optimizeResult', path: currentChampionPath.slice(), shipDistance: iter.cost.shipDistance, shipJumps: iter.cost.shipJumps, totalDistance: iter.cost.totalDistance, generation });
+    }
+    // Yield to event loop periodically
+    if(Date.now()-now > 40){ /* heavy iteration; continue */ }
+  }
+  if(stopping){ post({ type:'optimizeDone', reason:'stopped', generation }); }
+};
 
 // Connectivity & minimum required ship range computation.
 // We treat each gate-connected component as a node; ship edges connect systems across components.
@@ -356,6 +407,7 @@ self.onmessage = (e:MessageEvent<InMsg>) => {
     for (const sys of Object.values(systemsDataRaw)) { systemsById.set(sys.id, sys); systemsByName[sys.name] = sys; }
     buildGateAdj(); stopping=false; post({ type:'ready' });
   } else if(msg.type==='baseline'){
+    activeGeneration = msg.generation;
     stopping=false;
     maxShipRange = msg.maxShipRange; shipTradeDistance = msg.shipTradeDistance; minGateHopsSaved = msg.minGateHopsSaved;
     if(!systemsByName[msg.start]) { post({ type:'baselineResult', path:[msg.start] }); return; }
@@ -448,6 +500,22 @@ self.onmessage = (e:MessageEvent<InMsg>) => {
   const champion = iterativeImprove(msg.path, msg.passes, msg.timePerPassSec, msg.returnToStart, (m)=>post({ type:'progress', message:m }), !!msg.debug);
     const cCost = computePathCost(champion, msg.returnToStart);
     post({ type:'optimizeResult', path: champion, shipDistance: cCost.shipDistance, shipJumps: cCost.shipJumps, totalDistance: cCost.totalDistance, generation: msg.generation });
+    post({ type:'optimizeDone', reason:'passes complete', generation: msg.generation });
+  } else if(msg.type==='optimizeContinuous') {
+    activeGeneration = msg.generation;
+    stopping=false;
+    maxShipRange = msg.maxShipRange; shipTradeDistance = msg.shipTradeDistance; minGateHopsSaved = msg.minGateHopsSaved;
+    continuousOptimize(msg.path, msg.maxTimeSec, msg.stallTimeoutSec, msg.returnToStart, msg.generation, !!msg.debug);
+  } else if(msg.type==='updateChampion') {
+    if(activeGeneration!==undefined && msg.generation!==undefined && msg.generation!==activeGeneration) return; // ignore old gen
+    if(!currentChampionPath){ currentChampionPath = msg.path.slice(); currentChampionCost = null; return; }
+    // Adopt if strictly better (need cost compare)
+    const newCost = computePathCost(msg.path, true); // returnToStart unknown; safe: true won't break cost order if path already has closure
+    if(!currentChampionCost || newCost.shipDistance < currentChampionCost.shipDistance ||
+      (newCost.shipDistance===currentChampionCost.shipDistance && newCost.shipJumps < currentChampionCost.shipJumps) ||
+      (newCost.shipDistance===currentChampionCost.shipDistance && newCost.shipJumps===currentChampionCost.shipJumps && newCost.totalDistance < currentChampionCost.totalDistance)){
+      currentChampionPath = msg.path.slice(); currentChampionCost = newCost; lastImprovementTime = Date.now();
+    }
   } else if(msg.type==='stop'){
     stopping=true; post({ type:'stopped' });
   }

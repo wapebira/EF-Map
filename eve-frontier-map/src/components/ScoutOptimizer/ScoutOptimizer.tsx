@@ -27,8 +27,9 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	const [radius, setRadius] = useState('50');
 	const [useRegion, setUseRegion] = useState(false);
 	const [gateReachableOnly, setGateReachableOnly] = useState(false);
-	const [passes, setPasses] = useState('3');
-	const [timePerPass, setTimePerPass] = useState('5');
+	// Continuous optimization controls
+	const [maxOptimizeTime, setMaxOptimizeTime] = useState('60');
+	const [stallTimeout, setStallTimeout] = useState('10');
 	const [debugMode, setDebugMode] = useState(false);
 	// Minimum required ship range (computed when baseline error received)
 	const [minRequiredShipRange, setMinRequiredShipRange] = useState<number|null>(null);
@@ -65,8 +66,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	const workersRef = useRef<Worker[]>([]);
 	const systemsForRunRef = useRef<string[]>([]);
 	const baselineDoneRef = useRef(false);
-	const optimizeExpectedRef = useRef(0);
-	const optimizeReceivedRef = useRef(0);
+	// Legacy pass tracking removed (continuous mode)
 	const readyCountRef = useRef(0);
 	const pendingBaselineRef = useRef<{ start:string; systems:string[]; returnToStart:boolean }|null>(null);
 	// Generation token to ignore late worker messages after invalidation or new run
@@ -141,6 +141,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 					if(data.minRequiredShipRange!==undefined){ setMinRequiredShipRange(data.minRequiredShipRange); }
 				} }
 				else if(data.type==='optimizeResult') { if(data.generation===undefined || data.generation===generationRef.current) handleOptimizeResult(data.path, data.shipJumps, data.shipDistance); }
+				else if(data.type==='optimizeDone') { if(data.generation===undefined || data.generation===generationRef.current){ setIsCalculating(false); log(`Optimization finished: ${data.reason}`); if(onOptimizedRoute && championDisplayPathRef.current){ try { onOptimizedRoute(championDisplayPathRef.current); } catch(e){/* ignore */} } } }
 				else if(data.type==='progress') { log(`Worker ${i+1}: ${data.message}`); }
 				else if(data.type==='stopped') { log(`Worker ${i+1} stopped.`); }
 			};
@@ -254,7 +255,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		try { onBaselineRoute && onBaselineRoute(expanded); } catch(e) { /* ignore */ }
 		// End baseline phase so user can immediately continue or copy
 		setIsCalculating(false);
-		log('Baseline complete. You can Continue Optimization to refine the route.');
+		log('Baseline complete. You can Start Optimization to refine the route.');
 	};
 
 	const handleOptimizeResult = (path:string[], workerShipJumps?:number, workerShipDistance?:number) => {
@@ -289,26 +290,21 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 				return prev;
 			}
 		});
-		optimizeReceivedRef.current += 1;
-		if(optimizeReceivedRef.current >= optimizeExpectedRef.current) {
-			setIsCalculating(false);
-			log('Optimization pass complete. You may run additional passes.');
-			// Emit final optimized route after async state settles
-			setTimeout(()=>{ if(onOptimizedRoute && championDisplayPathRef.current) { try { onOptimizedRoute(championDisplayPathRef.current); } catch(e){/* ignore */} } },0);
-		}
+		// Notify parent of latest champion (immediate feedback)
+		if(onOptimizedRoute && championDisplayPathRef.current){ try { onOptimizedRoute(championDisplayPathRef.current); } catch(e){/* ignore */} }
 	};
 
-	const runOptimizationPasses = () => {
-		if(!championPath){ alert('Baseline not finished yet.'); return; }
-		const p = parseInt(passes,10); const t = parseInt(timePerPass,10);
-		optimizeExpectedRef.current = workersRef.current.length || 1;
-		optimizeReceivedRef.current = 0;
-		setIsCalculating(true);
-		log(`Starting optimization passes: ${p} passes x ${t}s on ${optimizeExpectedRef.current} workers.`);
-		broadcast({ type:'optimize', path: championPath, passes: p, timePerPassSec: t, returnToStart, generation: generationRef.current, maxShipRange: parseFloat(shipMaxRange)||0, shipTradeDistance: parseFloat(shipTradeDistance)||0, minGateHopsSaved: parseInt(minGateHopsSaved,10)||0, debug: debugMode });
-	};
+// removed runOptimizationPasses (replaced by continuous optimization)
 
 	const stop = () => { broadcast({ type:'stop' }); setIsCalculating(false); log('Stop requested.'); };
+
+	const startContinuousOptimization = () => {
+		if(!championPath){ alert('Baseline not finished yet.'); return; }
+		const total = parseFloat(maxOptimizeTime)||0; const stall = parseFloat(stallTimeout)||0;
+		setIsCalculating(true);
+		log(`Starting optimization: max ${total||'∞'}s, stall ${stall||'∞'}s on ${workersRef.current.length||1} workers.`);
+		broadcast({ type:'optimizeContinuous', path: championPath, maxTimeSec: total, stallTimeoutSec: stall, returnToStart, generation: generationRef.current, maxShipRange: parseFloat(shipMaxRange)||0, shipTradeDistance: parseFloat(shipTradeDistance)||0, minGateHopsSaved: parseInt(minGateHopsSaved,10)||0, debug: debugMode });
+	};
 
 	// Recalculate baseline automatically when Return to Start toggled after baseline computed
 	useEffect(()=>{
@@ -597,10 +593,10 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 							<label><input type="checkbox" checked={gateReachableOnly} onChange={e=> setGateReachableOnly(e.target.checked)} /> Only Gate-Reachable From Start</label>
 						</div>
 					<div className="scout-input-row">
-						<label>Passes / Time per Pass (s)</label>
+						<label>Optimize Time / Stall Timeout (s)</label>
 						<div style={{ display:'flex', gap:'6px' }}>
-							<input type="number" className="p2p-input" value={passes} onChange={e=> setPasses(e.target.value)} />
-							<input type="number" className="p2p-input" value={timePerPass} onChange={e=> setTimePerPass(e.target.value)} />
+							<input type="number" className="p2p-input" value={maxOptimizeTime} onChange={e=> setMaxOptimizeTime(e.target.value)} />
+							<input type="number" className="p2p-input" value={stallTimeout} onChange={e=> setStallTimeout(e.target.value)} />
 						</div>
 					</div>
 					<div className="scout-input-row">
@@ -632,7 +628,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 					{datasetChanged && !championPath && !isCalculating && <div className="scout-warning">System selection changed. Please Calculate Route again.</div>}
 					<div className="scout-actions">
 						{!championPath && <button className="scout-button" disabled={isCalculating} onClick={startCalculation}>Calculate Route</button>}
-						{championPath && <button className="scout-button" disabled={isCalculating} onClick={runOptimizationPasses}>Continue Optimization</button>}
+						{championPath && <button className="scout-button" disabled={isCalculating} onClick={startContinuousOptimization}>Start Optimization</button>}
 						{isCalculating && <button className="scout-button" onClick={stop}>Stop</button>}
 						{/* Copy buttons now rendered below with pagination */}
 					</div>
