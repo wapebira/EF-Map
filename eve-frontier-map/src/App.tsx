@@ -114,6 +114,8 @@ function App() {
   const [hoveredSystem, setHoveredSystem] = useState<SolarSystem | null>(null);
   const [isRegionHighlighterActive, setIsRegionHighlighterActive] = useState(false);
   const [isPlanetCountActive, setIsPlanetCountActive] = useState(false);
+  // Five legend bins (dynamic ranges) active flags; default all true when DPC enabled
+  const [planetBinsActive, setPlanetBinsActive] = useState<boolean[]>([true, true, true, true, true]);
   const [showDistance, setShowDistance] = useState(false);
   const [minPlanets, setMinPlanets] = useState(0);
   const [maxPlanets, setMaxPlanets] = useState(0);
@@ -567,24 +569,46 @@ function App() {
 
     for (let i = 0; i < numSteps; i++) {
       const lowerBound = Math.round(minPlanets + i * stepSize);
-      const upperBound = Math.round(minPlanets + (i + 1) * stepSize);
+      const upperRaw = minPlanets + (i + 1) * stepSize;
+      const upperBound = Math.round(upperRaw);
       const midPoint = Math.round((lowerBound + upperBound) / 2);
       const color = getPlanetCountColor(midPoint, minPlanets, maxPlanets);
+      const checked = planetBinsActive[i];
 
       legendItems.push(
-        <div key={i} style={{ display: 'flex', alignItems: 'center', marginBottom: '5px' }}>
-          <div style={{ width: '20px', height: '20px', backgroundColor: `#${color.getHexString()}`, marginRight: '10px' }}></div>
-          <span>{`${lowerBound} - ${upperBound} planets`}</span>
-        </div>
+        <label key={i} style={{ display: 'flex', alignItems: 'center', marginBottom: '6px', cursor: 'pointer', gap: '8px' }}>
+          <input
+            type="checkbox"
+            checked={checked}
+            onChange={(e) => {
+              setPlanetBinsActive(prev => {
+                const next = [...prev];
+                next[i] = e.target.checked;
+                return next;
+              });
+            }}
+            style={{ margin: 0 }}
+          />
+          <div style={{ width: '18px', height: '18px', backgroundColor: `#${color.getHexString()}`, borderRadius: '3px', border: checked ? 'none' : '1px solid #777', opacity: checked ? 1 : 0.25 }} />
+          <span style={{ fontSize: '12px' }}>{`${lowerBound} - ${upperBound} planets`}</span>
+        </label>
       );
     }
     return (
-      <div style={{ marginTop: '10px', padding: '10px', border: '1px solid #ccc', borderRadius: '5px' }}>
-        <strong>Planet Count Legend:</strong>
+      <div style={{ marginTop: '10px', padding: '10px', border: '1px solid #ccc', borderRadius: '5px', background: 'rgba(0,0,0,0.35)' }}>
+        <strong style={{ display: 'block', marginBottom: '6px', fontSize: '13px' }}>Planet Count Legend:</strong>
         {legendItems}
+        <div style={{ fontSize: '11px', opacity: 0.75, marginTop: '4px' }}>Uncheck ranges to de-emphasize them (stars revert to white).</div>
       </div>
     );
-  }, [isPlanetCountActive, minPlanets, maxPlanets, getPlanetCountColor]);
+  }, [isPlanetCountActive, minPlanets, maxPlanets, getPlanetCountColor, planetBinsActive]);
+
+  // Reset bins to all active when enabling Display Planet Counts
+  useEffect(() => {
+    if (isPlanetCountActive) {
+      setPlanetBinsActive([true, true, true, true, true]);
+    }
+  }, [isPlanetCountActive]);
 
   // Fetch and process data from SQLite
   useEffect(() => {
@@ -939,11 +963,27 @@ function App() {
       const minPlanets = Math.min(...planetCounts);
       const maxPlanets = Math.max(...planetCounts);
 
+      const numSteps = 5;
       for (let i = 0; i < visibleSystemsRef.current.length; i++) {
         const system = visibleSystemsRef.current[i];
-        const color = isPlanetCountActive
-          ? getPlanetCountColor(system.planets, minPlanets, maxPlanets)
-          : DEFAULT_STAR_COLOR;
+        let color: THREE.Color;
+        if (isPlanetCountActive) {
+          if (maxPlanets !== minPlanets) {
+            const ratio = (system.planets - minPlanets) / (maxPlanets - minPlanets);
+            let bin = Math.floor(ratio * numSteps);
+            if (bin >= numSteps) bin = numSteps - 1;
+            if (!planetBinsActive[bin]) {
+              color = DEFAULT_STAR_COLOR;
+            } else {
+              color = getPlanetCountColor(system.planets, minPlanets, maxPlanets);
+            }
+          } else {
+            // All same planet count; treat as single bin
+            color = planetBinsActive[0] ? DEFAULT_STAR_COLOR : DEFAULT_STAR_COLOR; // stays default
+          }
+        } else {
+          color = DEFAULT_STAR_COLOR;
+        }
         color.toArray(tempColors, i * 3);
       }
       starColorsAttribute.array.set(tempColors);
@@ -965,23 +1005,30 @@ function App() {
       );
     }
 
+    const numSteps = 5;
     for (let i = 0; i < visibleSystemsRef.current.length; i++) {
       const system = visibleSystemsRef.current[i];
       let color: THREE.Color;
-
       if (isPlanetCountActive) {
-        if (systemsInHighlightedRegion && systemsInHighlightedRegion.has(system.id)) {
-          // DPC is ON, HR is ON, and system is in highlighted region
+        let activeForBin = true;
+        if (maxPlanets !== minPlanets) {
+          const ratio = (system.planets - minPlanets) / (maxPlanets - minPlanets);
+            let bin = Math.floor(ratio * numSteps);
+            if (bin >= numSteps) bin = numSteps - 1;
+            activeForBin = planetBinsActive[bin];
+        } else {
+          activeForBin = planetBinsActive[0];
+        }
+        if (!activeForBin) {
+          color = DEFAULT_STAR_COLOR; // Bin disabled
+        } else if (systemsInHighlightedRegion && systemsInHighlightedRegion.has(system.id)) {
           color = getPlanetCountColor(system.planets, minPlanets, maxPlanets);
         } else if (systemsInHighlightedRegion && !systemsInHighlightedRegion.has(system.id)) {
-          // DPC is ON, HR is ON, but system is NOT in highlighted region
           color = DEFAULT_STAR_COLOR;
         } else {
-          // DPC is ON, but HR is OFF (global DPC)
           color = getPlanetCountColor(system.planets, minPlanets, maxPlanets);
         }
       } else {
-        // DPC is OFF (global white)
         color = DEFAULT_STAR_COLOR;
       }
       color.toArray(currentStarColors, i * 3);
@@ -1046,6 +1093,7 @@ function App() {
     getPlanetCountColor,
     getTransformedPosition,
     ringTexture,
+    planetBinsActive,
   ]);
 
   // Ensure toggling the Highlight Region checkbox applies or removes highlights immediately
@@ -1133,11 +1181,25 @@ function App() {
       const minPlanetsLocal = planetCounts.length > 0 ? Math.min(...planetCounts) : 0;
       const maxPlanetsLocal = planetCounts.length > 0 ? Math.max(...planetCounts) : 0;
 
+      const numStepsLocal = 5;
       for (let i = 0; i < visibleSystemsRef.current.length; i++) {
         const system = visibleSystemsRef.current[i];
-        const color = isPlanetCountActive
-          ? getPlanetCountColor(system.planets, minPlanetsLocal, maxPlanetsLocal)
-          : DEFAULT_STAR_COLOR;
+        let color: THREE.Color;
+        if (isPlanetCountActive) {
+          let binIdx = 0;
+          if (maxPlanetsLocal !== minPlanetsLocal) {
+            const ratio = (system.planets - minPlanetsLocal) / (maxPlanetsLocal - minPlanetsLocal);
+            binIdx = Math.floor(ratio * numStepsLocal);
+            if (binIdx >= numStepsLocal) binIdx = numStepsLocal - 1;
+          }
+          if (!planetBinsActive[binIdx]) {
+            color = DEFAULT_STAR_COLOR;
+          } else {
+            color = getPlanetCountColor(system.planets, minPlanetsLocal, maxPlanetsLocal);
+          }
+        } else {
+          color = DEFAULT_STAR_COLOR;
+        }
         color.toArray(tempColors, i * 3);
       }
       starColorsAttribute.array.set(tempColors);
@@ -1158,7 +1220,7 @@ function App() {
       // ignore
     }
 
-  }, [isRegionHighlighterActive, highlightedSystem, mapData, isPlanetCountActive, getPlanetCountColor, getTransformedPosition, ringTexture]);
+  }, [isRegionHighlighterActive, highlightedSystem, mapData, isPlanetCountActive, getPlanetCountColor, getTransformedPosition, ringTexture, planetBinsActive]);
 
   // Draw Route Lines (supports P2P or Scout route; Scout takes precedence when present)
   useEffect(() => {
