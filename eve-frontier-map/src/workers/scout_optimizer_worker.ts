@@ -172,8 +172,8 @@ const nearestNeighbor = (start:string, candidates:string[], returnToStart:boolea
           }
         }
       }
-      // Attempt single reposition to start to change tail context before declaring unreachable
-      if(route[route.length-1] !== start){
+  // Attempt single reposition to start to change tail context before declaring unreachable (only if a return loop desired)
+  if(returnToStart && route[route.length-1] !== start){
         const tailSys = systemsByName[route[route.length-1]]; const startSys = systemsByName[start];
         let canReposition=false;
         if(tailSys && startSys){
@@ -202,6 +202,11 @@ const nearestNeighbor = (start:string, candidates:string[], returnToStart:boolea
     }
   }
   if(returnToStart) route.push(start);
+  if(unreachable && debug){
+    const remainArr = [...remaining];
+    const sample = remainArr.slice(0,12).join(', ');
+    post({ type:'progress', message:`[DEBUG] NN unreachable with ${remaining.size} remaining (sample: ${sample}${remainArr.length>12?' ...':''})` });
+  }
   return { path:route, unreachable: unreachable || route.filter(n=>n!==start).length < candidates.filter(c=>c!==start).length };
 };
 
