@@ -42,11 +42,10 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	const [isCalculating, setIsCalculating] = useState(false);
 	// User toggles
 	const [compactPref, setCompactPref] = useState(false);
-	const [hideInputsPref, setHideInputsPref] = useState(false);
-	const [forcedCompact, setForcedCompact] = useState(false); // active while optimizing or small viewport
+	const [hideInputsPref, setHideInputsPref] = useState(false); // persists after optimization
 	const [smallViewport, setSmallViewport] = useState(false);
-	const effectiveCompact = forcedCompact || compactPref || smallViewport;
-	const effectiveHideInputs = hideInputsPref || (isCalculating && forcedCompact);
+	const effectiveCompact = compactPref || smallViewport; // no longer forced by optimization
+	const effectiveHideInputs = hideInputsPref; // inputs hidden only if user (or auto-set at start) chose so
 	// Macro path = optimization path (visited target systems order)
 	const [championPath, setChampionPath] = useState<string[]|null>(null);
 	// Display path = macro path expanded into individual gate hops (BFS) so gate segments are shown instead of ship jumps when possible
@@ -319,14 +318,13 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 
 // removed runOptimizationPasses (replaced by continuous optimization)
 
-	const stop = () => { broadcast({ type:'stop' }); setIsCalculating(false); if(globalMonitorRef.current!==undefined){ clearInterval(globalMonitorRef.current); globalMonitorRef.current=undefined; } setForcedCompact(false); log('Stop requested.'); };
+	const stop = () => { broadcast({ type:'stop' }); setIsCalculating(false); if(globalMonitorRef.current!==undefined){ clearInterval(globalMonitorRef.current); globalMonitorRef.current=undefined; } log('Stop requested.'); };
 
 	const startContinuousOptimization = () => {
 		if(!championPath){ alert('Baseline not finished yet.'); return; }
 		const total = parseFloat(maxOptimizeTime)||0; const stall = parseFloat(stallTimeout)||0;
 		setIsCalculating(true);
-		setForcedCompact(true);
-		setHideInputsPref(true); // auto-hide inputs
+		setHideInputsPref(true); // auto-hide inputs (but allow user to re-show if they uncheck)
 		log(`Starting optimization: max ${total||'∞'}s, global stall ${stall||'∞'}s on ${workersRef.current.length||1} workers.`);
 		optimizationStartTimeRef.current = Date.now();
 		lastGlobalImprovementRef.current = Date.now();
@@ -686,18 +684,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 				<div className={`scout-optimizer-panel ${effectiveCompact? 'compact':''} ${effectiveHideInputs? 'hide-inputs':''}`}>
 					<div style={{display:'flex', gap:'10px', flexWrap:'wrap', alignItems:'center'}}>
 						<label style={{fontSize:'0.7rem', display:'flex', gap:4, alignItems:'center'}}>
-							<input type="checkbox" checked={compactPref || forcedCompact || smallViewport} onChange={(e)=>{
-								if(forcedCompact || smallViewport){
-									if(!e.target.checked){ // user tries to uncheck forced; remove forced if not calculating
-										if(!isCalculating) setForcedCompact(false);
-										setCompactPref(false);
-									}else{
-										setCompactPref(true);
-									}
-								}else{
-									setCompactPref(e.target.checked);
-								}
-							}} /> Compact{(forcedCompact || smallViewport) && !compactPref ? ' (forced)' : ''}
+							<input type="checkbox" checked={compactPref || smallViewport} onChange={(e)=> setCompactPref(e.target.checked)} /> Compact{smallViewport && !compactPref ? ' (auto)' : ''}
 						</label>
 						<label style={{fontSize:'0.7rem', display:'flex', gap:4, alignItems:'center'}}>
 							<input type="checkbox" checked={effectiveHideInputs} onChange={(e)=> setHideInputsPref(e.target.checked)} /> Hide Inputs
