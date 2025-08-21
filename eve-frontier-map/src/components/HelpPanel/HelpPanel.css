@@ -1,11 +1,11 @@
 :root[data-accent='orange'] .help-toggle-button { background: var(--accent); }
 :root[data-accent='blue'] .help-toggle-button { background: var(--accent); }
 
-.help-toggle-button { position:fixed; top:10px; right:10px; z-index:3000; color:#fff; border:none; padding:8px 14px; border-radius:4px; cursor:pointer; font-weight:600; box-shadow:0 2px 6px rgba(0,0,0,0.4); }
+.help-toggle-button { position:relative; z-index:4000; color:#fff; border:none; padding:8px 14px; border-radius:4px; cursor:pointer; font-weight:600; box-shadow:0 2px 6px rgba(0,0,0,0.4); }
 .help-toggle-button:hover { filter:brightness(1.1); }
 .help-toggle-button:active { transform:translateY(1px); }
 
-.help-panel-container { position:fixed; top:0; right:0; width:33vw; max-width:520px; min-width:340px; height:100vh; background:rgba(0,0,0,0.72); backdrop-filter: blur(6px); color:#eee; z-index:2500; display:flex; flex-direction:column; border-left:2px solid var(--accent); box-shadow:-4px 0 12px rgba(0,0,0,0.5); font-size:13px; }
+.help-panel-container { position:fixed; top:0; right:0; width:33vw; max-width:520px; min-width:340px; height:100vh; background:rgba(0,0,0,0.72); backdrop-filter: blur(6px); color:#eee; z-index:3500; display:flex; flex-direction:column; border-left:2px solid var(--accent); box-shadow:-4px 0 12px rgba(0,0,0,0.5); font-size:13px; margin:0; }
 .help-panel-header { display:flex; align-items:center; justify-content:space-between; padding:10px 14px; border-bottom:1px solid var(--accent); }
 .help-panel-header h2 { margin:0; font-size:15px; letter-spacing:0.5px; color:var(--accent); }
 .help-close-btn { background:none; color:#fff; border:none; font-size:18px; cursor:pointer; line-height:1; padding:4px 6px; }
@@ -39,4 +39,4 @@
 
 @media (max-width: 1200px) { .help-panel-container { width:40vw; } }
 @media (max-width: 900px) { .help-panel-container { width:50vw; } }
-@media (max-width: 700px) { .help-panel-container { width:100vw; } .help-toggle-button { right:50%; transform:translateX(50%); } }
+@media (max-width: 700px) { .help-panel-container { width:100vw; } }

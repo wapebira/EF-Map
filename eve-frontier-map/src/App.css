@@ -67,29 +67,49 @@ body {
   cursor: default;
 }
 
-.ef-referral {
+/* Top-right overlay toolbar housing Share + Referral + Help */
+/* Toolbar: help toggle fixed separately; shifting group sits under it */
+.ef-top-toolbar {
   position: fixed;
-  right: 12px;
-  bottom: 12px;
-  transform: translateX(-110%); /* place to left of logo */
+  top: 10px;
+  right: 10px;
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  z-index: 3200;
+}
+
+/* Shifting container only (share + referral) */
+.ef-toolbar-shifting {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  transition: transform 0.45s cubic-bezier(.25,.8,.25,1);
+  will-change: transform;
+}
+/* Shift left by panel width (responsive) minus small gap (8px) so referral right edge sits just left of panel */
+/* Panel widths: default 33vw (max 520px min 340px) with breakpoints. We approximate with same vw then override in media queries. */
+:root.help-open .ef-toolbar-shifting { transform: translateX(calc(-1 * (var(--help-panel-width, 33vw) + 8px))); }
+
+.ef-referral {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 48px; /* half of 96px logo height */
-  padding: 0 14px;
+  padding: 6px 14px;
   background: rgba(0,0,0,0.55);
   color: #fff;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   font-family: system-ui, sans-serif;
   letter-spacing: 0.5px;
-  border: 1px solid rgba(255,255,255,0.15);
+  border: 1px solid rgba(255,255,255,0.18);
   border-radius: 6px;
   backdrop-filter: blur(4px);
-  z-index: 3000;
   box-shadow: 0 2px 6px rgba(0,0,0,0.5);
-  pointer-events: auto; /* allow button click */
+  pointer-events: auto;
   white-space: nowrap;
+  min-height: 38px;
 }
 
 .ef-referral-code { margin-left:4px; font-weight:700; }
@@ -112,4 +132,37 @@ body {
 .ef-referral-copy-btn:hover { filter:brightness(1.1); }
 .ef-referral-copy-btn:active { transform:translateY(1px); }
 .ef-referral-copy-btn.copied { background:#2fa864; }
+
+/* Share Route button styled prominently */
+.share-route-btn {
+  position: relative;
+  background: linear-gradient(135deg, var(--accent) 0%, rgba(255,255,255,0.15) 120%);
+  color: #fff;
+  border: 1px solid var(--accent);
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: .5px;
+  font-family: system-ui, sans-serif;
+  border-radius: 6px;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.45);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 38px;
+  transition: filter .2s ease, transform .15s ease, background .3s ease;
+}
+.share-route-btn:hover:not(:disabled) { filter: brightness(1.1); }
+.share-route-btn:active:not(:disabled) { transform: translateY(1px); }
+.share-route-btn:disabled { opacity: .4; cursor: not-allowed; }
+.share-feedback { font-size:11px; position:absolute; bottom:-16px; left:0; right:0; text-align:center; color:#fff; opacity:.85; pointer-events:none; }
+
+@media (max-width: 1200px){ :root.help-open .ef-toolbar-shifting { transform: translateX(calc(-1 * (var(--help-panel-width, 40vw) + 8px))); } }
+@media (max-width: 900px){ :root.help-open .ef-toolbar-shifting { transform: translateX(calc(-1 * (var(--help-panel-width, 50vw) + 8px))); } }
+@media (max-width: 700px){
+  .ef-top-toolbar { right:50%; transform:translateX(50%); }
+  .ef-toolbar-shifting { flex-wrap:wrap; justify-content:center; }
+  :root.help-open .ef-toolbar-shifting { transform: translate(calc(-1 * (var(--help-panel-width, 100vw) - 8px)),0); }
+}
 /* .system-label--selected intentionally left unstyled - uses same styles as .system-label */

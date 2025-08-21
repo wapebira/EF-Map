@@ -254,6 +254,31 @@ const HelpPanel: React.FC<HelpPanelProps> = ({ accentIsBlue }) => {
     });
   }, [expanded, expandedSub]);
 
+  // Expose open state via root class for layout shifts of top-right toolbar
+  useEffect(()=>{
+    const root = document.documentElement;
+    if(open){
+      root.classList.add('help-open');
+    } else {
+      root.classList.remove('help-open');
+    }
+    return ()=>{ root.classList.remove('help-open'); };
+  }, [open]);
+
+  // Measure panel width when open to drive toolbar shift distance
+  useEffect(()=>{
+    if(!open) { document.documentElement.style.removeProperty('--help-panel-width'); return; }
+    const setWidth = () => {
+      const panel = document.getElementById('help-panel');
+      if(panel){
+        document.documentElement.style.setProperty('--help-panel-width', panel.offsetWidth + 'px');
+      }
+    };
+    setWidth();
+    window.addEventListener('resize', setWidth);
+    return ()=> window.removeEventListener('resize', setWidth);
+  }, [open]);
+
   return (
     <>
       <button
