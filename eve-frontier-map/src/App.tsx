@@ -1573,7 +1573,7 @@ function App() {
           />
         </div>
   {/* ...existing controls... (accent toggle removed from here) */}
-        <div style={{ marginTop: '10px' }}>
+        <div className="ef-control-group" style={{ marginTop: '10px' }}>
           <label>
             <input
               type="checkbox"
@@ -1585,7 +1585,7 @@ function App() {
             Highlight Region
           </label>
         </div>
-        <div style={{ marginTop: '10px' }}>
+        <div className="ef-control-group" style={{ marginTop: '10px' }}>
           <label>
             <input
               type="checkbox"
@@ -1597,7 +1597,7 @@ function App() {
             Display Planet Counts
           </label>
         </div>
-        <div style={{ marginTop: '10px' }}>
+        <div className="ef-control-group" style={{ marginTop: '10px' }}>
           <label>
             <input
               type="checkbox"

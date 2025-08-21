@@ -79,6 +79,10 @@ body {
   z-index: 3200;
 }
 
+/* Standardized checkbox label spacing */
+.ef-control-group label { display:flex; align-items:center; gap:6px; font-size:13px; }
+.ef-control-group input[type="checkbox"] { transform: translateY(1px); }
+
 /* Shifting container only (share + referral) */
 .ef-toolbar-shifting {
   display: flex;
@@ -136,15 +140,15 @@ body {
 /* Share Route button styled prominently */
 .share-route-btn {
   position: relative;
-  background: linear-gradient(135deg, var(--accent) 0%, rgba(255,255,255,0.15) 120%);
+  background: var(--accent);
   color: #fff;
-  border: 1px solid var(--accent);
-  padding: 8px 16px;
-  font-size: 13px;
+  border: none;
+  padding: 8px 14px;
+  font-size: 14px; /* match help button */
   font-weight: 600;
   letter-spacing: .5px;
   font-family: system-ui, sans-serif;
-  border-radius: 6px;
+  border-radius: 4px;
   cursor: pointer;
   box-shadow: 0 2px 6px rgba(0,0,0,0.45);
   display: flex;
@@ -153,9 +157,9 @@ body {
   min-height: 38px;
   transition: filter .2s ease, transform .15s ease, background .3s ease;
 }
-.share-route-btn:hover:not(:disabled) { filter: brightness(1.1); }
+.share-route-btn:hover:not(:disabled) { filter: brightness(1.08); }
 .share-route-btn:active:not(:disabled) { transform: translateY(1px); }
-.share-route-btn:disabled { opacity: .4; cursor: not-allowed; }
+.share-route-btn:disabled { opacity: .45; cursor: not-allowed; filter:none; }
 .share-feedback { font-size:11px; position:absolute; bottom:-16px; left:0; right:0; text-align:center; color:#fff; opacity:.85; pointer-events:none; }
 
 @media (max-width: 1200px){ :root.help-open .ef-toolbar-shifting { transform: translateX(calc(-1 * (var(--help-panel-width, 40vw) + 8px))); } }
