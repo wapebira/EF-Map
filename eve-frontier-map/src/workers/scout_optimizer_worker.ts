@@ -441,12 +441,13 @@ self.onmessage = (e:MessageEvent<InMsg>) => {
     if(invalid){
       post({ type:'progress', message:`Baseline contains ship jump over range (${worstOver.toFixed(2)} > ${maxShipRange}). Params may require adjustment.` });
     }
-    post({ type:'baselineResult', path: refined, generation: msg.generation });
+  post({ type:'baselineResult', path: refined, shipDistance: refinedCost.shipDistance, shipJumps: refinedCost.shipJumps, totalDistance: refinedCost.totalDistance, generation: msg.generation });
   } else if(msg.type==='optimize'){
     stopping=false;
     maxShipRange = msg.maxShipRange; shipTradeDistance = msg.shipTradeDistance; minGateHopsSaved = msg.minGateHopsSaved;
   const champion = iterativeImprove(msg.path, msg.passes, msg.timePerPassSec, msg.returnToStart, (m)=>post({ type:'progress', message:m }), !!msg.debug);
-    post({ type:'optimizeResult', path: champion, generation: msg.generation });
+    const cCost = computePathCost(champion, msg.returnToStart);
+    post({ type:'optimizeResult', path: champion, shipDistance: cCost.shipDistance, shipJumps: cCost.shipJumps, totalDistance: cCost.totalDistance, generation: msg.generation });
   } else if(msg.type==='stop'){
     stopping=true; post({ type:'stopped' });
   }

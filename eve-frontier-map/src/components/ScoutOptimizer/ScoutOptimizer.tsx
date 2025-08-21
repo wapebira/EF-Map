@@ -134,13 +134,13 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 						workersRef.current.forEach(w2=> w2.postMessage({ type:'baseline', ...pb, ...baselineParams, generation: generationRef.current, debug: debugMode }));
 					}
 				}
-				else if(data.type==='baselineResult') { if(data.generation===undefined || data.generation===generationRef.current) handleBaselineResult(data.path); }
+				else if(data.type==='baselineResult') { if(data.generation===undefined || data.generation===generationRef.current) handleBaselineResult(data.path, data.shipJumps, data.shipDistance); }
 				else if(data.type==='baselineError') { if(data.generation===undefined || data.generation===generationRef.current){
 					log(`Baseline error: ${data.reason}`);
 					setIsCalculating(false);
 					if(data.minRequiredShipRange!==undefined){ setMinRequiredShipRange(data.minRequiredShipRange); }
 				} }
-				else if(data.type==='optimizeResult') { if(data.generation===undefined || data.generation===generationRef.current) handleOptimizeResult(data.path); }
+				else if(data.type==='optimizeResult') { if(data.generation===undefined || data.generation===generationRef.current) handleOptimizeResult(data.path, data.shipJumps, data.shipDistance); }
 				else if(data.type==='progress') { log(`Worker ${i+1}: ${data.message}`); }
 				else if(data.type==='stopped') { log(`Worker ${i+1} stopped.`); }
 			};
@@ -230,7 +230,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		return expanded;
 	},[mapData,gatesBySource]);
 
-	const handleBaselineResult = (path:string[]) => {
+	const handleBaselineResult = (path:string[], workerShipJumps?:number, workerShipDistance?:number) => {
 		if(baselineDoneRef.current) return;
 		baselineDoneRef.current=true;
 		setChampionPath(path);
@@ -240,10 +240,15 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		championDisplayPathRef.current = expanded;
 		const distVal = computeRouteDistance(path);
 		setChampionDistance(distVal);
-		// compute ship metrics for baseline
-		const shipMetrics = computeShipMetrics(path);
-		setChampionShipJumps(shipMetrics.shipJumps);
-		setChampionShipDistance(shipMetrics.shipDistance);
+		// prefer worker metrics if provided (authoritative from optimization logic)
+		if(workerShipJumps!==undefined && workerShipDistance!==undefined){
+			setChampionShipJumps(workerShipJumps);
+			setChampionShipDistance(workerShipDistance);
+		} else {
+			const shipMetrics = computeShipMetrics(path);
+			setChampionShipJumps(shipMetrics.shipJumps);
+			setChampionShipDistance(shipMetrics.shipDistance);
+		}
 		baselineDistanceRef.current = distVal; // store baseline distance for improvement stats
 		log(`Baseline distance: ${distVal.toFixed(2)} LY over ${path.length} systems`);
 		try { onBaselineRoute && onBaselineRoute(expanded); } catch(e) { /* ignore */ }
@@ -252,12 +257,16 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		log('Baseline complete. You can Continue Optimization to refine the route.');
 	};
 
-	const handleOptimizeResult = (path:string[]) => {
+	const handleOptimizeResult = (path:string[], workerShipJumps?:number, workerShipDistance?:number) => {
 		setChampionPath(prev=>{
 			const candDist = computeRouteDistance(path);
 			if(!prev){
 				setChampionDistance(candDist);
-				const m = computeShipMetrics(path); setChampionShipJumps(m.shipJumps); setChampionShipDistance(m.shipDistance);
+				if(workerShipJumps!==undefined && workerShipDistance!==undefined){
+					setChampionShipJumps(workerShipJumps); setChampionShipDistance(workerShipDistance);
+				} else {
+					const m = computeShipMetrics(path); setChampionShipJumps(m.shipJumps); setChampionShipDistance(m.shipDistance);
+				}
 				log(`Initial optimization candidate distance: ${candDist.toFixed(2)} LY (${path.length} systems)`);
 				championPathRef.current = path;
 				const expanded = expandPathToGateSequence(path); setChampionDisplayPath(expanded); championDisplayPathRef.current = expanded;
@@ -266,7 +275,11 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 			const currentDist = championDistance ?? computeRouteDistance(prev);
 			if(candDist + 1e-6 < currentDist){
 				setChampionDistance(candDist);
-				const m = computeShipMetrics(path); setChampionShipJumps(m.shipJumps); setChampionShipDistance(m.shipDistance);
+				if(workerShipJumps!==undefined && workerShipDistance!==undefined){
+					setChampionShipJumps(workerShipJumps); setChampionShipDistance(workerShipDistance);
+				} else {
+					const m = computeShipMetrics(path); setChampionShipJumps(m.shipJumps); setChampionShipDistance(m.shipDistance);
+				}
 				log(`Improved champion distance: ${currentDist.toFixed(2)} -> ${candDist.toFixed(2)} LY`);
 				championPathRef.current = path;
 				const expanded = expandPathToGateSequence(path); setChampionDisplayPath(expanded); championDisplayPathRef.current = expanded;
