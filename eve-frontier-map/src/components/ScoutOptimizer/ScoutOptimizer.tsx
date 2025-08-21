@@ -40,7 +40,13 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	const [workerCount, setWorkerCount] = useState(()=> Math.max(1,(navigator.hardwareConcurrency||4)-2).toString());
 	const [statusLog, setStatusLog] = useState<string[]>([]);
 	const [isCalculating, setIsCalculating] = useState(false);
-	const [showInputs, setShowInputs] = useState(true); // compact mode toggle during optimization
+	// User toggles
+	const [compactPref, setCompactPref] = useState(false);
+	const [hideInputsPref, setHideInputsPref] = useState(false);
+	const [forcedCompact, setForcedCompact] = useState(false); // active while optimizing or small viewport
+	const [smallViewport, setSmallViewport] = useState(false);
+	const effectiveCompact = forcedCompact || compactPref || smallViewport;
+	const effectiveHideInputs = hideInputsPref || (isCalculating && forcedCompact);
 	// Macro path = optimization path (visited target systems order)
 	const [championPath, setChampionPath] = useState<string[]|null>(null);
 	// Display path = macro path expanded into individual gate hops (BFS) so gate segments are shown instead of ship jumps when possible
@@ -313,13 +319,14 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 
 // removed runOptimizationPasses (replaced by continuous optimization)
 
-	const stop = () => { broadcast({ type:'stop' }); setIsCalculating(false); if(globalMonitorRef.current!==undefined){ clearInterval(globalMonitorRef.current); globalMonitorRef.current=undefined; } log('Stop requested.'); };
+	const stop = () => { broadcast({ type:'stop' }); setIsCalculating(false); if(globalMonitorRef.current!==undefined){ clearInterval(globalMonitorRef.current); globalMonitorRef.current=undefined; } setForcedCompact(false); log('Stop requested.'); };
 
 	const startContinuousOptimization = () => {
 		if(!championPath){ alert('Baseline not finished yet.'); return; }
 		const total = parseFloat(maxOptimizeTime)||0; const stall = parseFloat(stallTimeout)||0;
 		setIsCalculating(true);
-		setShowInputs(false); // auto-collapse for compact view
+		setForcedCompact(true);
+		setHideInputsPref(true); // auto-hide inputs
 		log(`Starting optimization: max ${total||'∞'}s, global stall ${stall||'∞'}s on ${workersRef.current.length||1} workers.`);
 		optimizationStartTimeRef.current = Date.now();
 		lastGlobalImprovementRef.current = Date.now();
@@ -662,55 +669,77 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		return ()=>{ if(globalMonitorRef.current!==undefined){ clearInterval(globalMonitorRef.current); globalMonitorRef.current=undefined; } };
 	},[]);
 
+	// Detect small viewport height to auto-force compact
+	useEffect(()=>{
+		const check = () => { setSmallViewport(window.innerHeight < 820); };
+		check();
+		window.addEventListener('resize', check);
+		return ()=> window.removeEventListener('resize', check);
+	},[]);
+
 	return (
 		<div className="scout-optimizer-container">
 			<label>
 				<input type="checkbox" checked={open} onChange={(e)=> onToggle(e.target.checked)} /> Scout Optimizer
 			</label>
 			{open && (
-				<div className={`scout-optimizer-panel ${isCalculating && championPath && !showInputs ? 'compact' : ''}`}>
-					{isCalculating && championPath && (
-						<div style={{display:'flex', gap:'6px', flexWrap:'wrap'}}>
-							<button className="scout-button" onClick={()=> setShowInputs(s=>!s)}>{showInputs? 'Hide Inputs' : 'Show Inputs'}</button>
-							{!showInputs && <span style={{fontSize:'0.7rem', alignSelf:'center', opacity:0.8}}>Compact mode active</span>}
-						</div>
-					)}
-					{(!isCalculating || !championPath || showInputs) && <div className="scout-input-row">
+				<div className={`scout-optimizer-panel ${effectiveCompact? 'compact':''} ${effectiveHideInputs? 'hide-inputs':''}`}>
+					<div style={{display:'flex', gap:'10px', flexWrap:'wrap', alignItems:'center'}}>
+						<label style={{fontSize:'0.7rem', display:'flex', gap:4, alignItems:'center'}}>
+							<input type="checkbox" checked={compactPref || forcedCompact || smallViewport} onChange={(e)=>{
+								if(forcedCompact || smallViewport){
+									if(!e.target.checked){ // user tries to uncheck forced; remove forced if not calculating
+										if(!isCalculating) setForcedCompact(false);
+										setCompactPref(false);
+									}else{
+										setCompactPref(true);
+									}
+								}else{
+									setCompactPref(e.target.checked);
+								}
+							}} /> Compact{(forcedCompact || smallViewport) && !compactPref ? ' (forced)' : ''}
+						</label>
+						<label style={{fontSize:'0.7rem', display:'flex', gap:4, alignItems:'center'}}>
+							<input type="checkbox" checked={effectiveHideInputs} onChange={(e)=> setHideInputsPref(e.target.checked)} /> Hide Inputs
+						</label>
+						{smallViewport && <span style={{fontSize:'0.6rem', opacity:0.7}}>Small viewport auto-compact</span>}
+					</div>
+					{(!effectiveHideInputs) && <div className="scout-input-row">
 						<label>Start System</label>
 						<AutoCompleteInput value={startSystem} onChange={setStartSystem} onSelect={setStartSystem} dataSource={systemNames} placeholder="Enter start system" />
 						</div>}
-					{(!isCalculating || !championPath || showInputs) && <div className="scout-input-row">
+					{(!effectiveHideInputs) && <div className="scout-input-row">
 						<label><input type="checkbox" checked={useRegion} onChange={e=> setUseRegion(e.target.checked)} /> Use Region Instead of Radius</label>
 						{!useRegion && (
 							<input type="number" className="p2p-input" value={radius} onChange={e=> setRadius(e.target.value)} placeholder="Max Radius (LY)" />
 						)}
 					</div>}
-					{(!isCalculating || !championPath || showInputs) && <div className="scout-input-row">
+					{(!effectiveHideInputs) && <div className="scout-input-row">
 							<label><input type="checkbox" checked={gateReachableOnly} onChange={e=> setGateReachableOnly(e.target.checked)} /> Only Gate-Reachable From Start</label>
-							</div>}
-					{(!isCalculating || !championPath || showInputs) && <div className="scout-input-row">
+						</div>}
+					{(!effectiveHideInputs) && <div className="scout-input-row">
 						<label>Optimize Time / Stall Timeout (s)</label>
 						<div style={{ display:'flex', gap:'6px' }}>
 							<input type="number" className="p2p-input" value={maxOptimizeTime} onChange={e=> setMaxOptimizeTime(e.target.value)} />
 							<input type="number" className="p2p-input" value={stallTimeout} onChange={e=> setStallTimeout(e.target.value)} />
 						</div>
 						</div>}
-					{(!isCalculating || !championPath || showInputs) && <div className="scout-input-row">
+					{(!effectiveHideInputs) && <div className="scout-input-row">
 						<label>Worker Threads</label>
 						<input type="number" className="p2p-input" value={workerCount} onChange={e=> setWorkerCount(e.target.value)} />
 					</div>}
-					{(!isCalculating || !championPath || showInputs) && <div className="scout-input-row">
+					{(!effectiveHideInputs) && <div className="scout-input-row">
 						<label>Ship Max Jump Range (LY)</label>
 						<input type="number" className="p2p-input" value={shipMaxRange} onChange={e=> setShipMaxRange(e.target.value)} />
 					</div>}
-					{(!isCalculating || !championPath || showInputs) && <div className="scout-input-row">
+					{(!effectiveHideInputs) && <div className="scout-input-row">
 						<label>Gate Trade Rule (Ship LY / Min Gate Hops)</label>
 						<div style={{ display:'flex', gap:'6px' }}>
 							<input type="number" className="p2p-input" value={shipTradeDistance} onChange={e=> setShipTradeDistance(e.target.value)} placeholder="Max Ship LY" />
 							<input type="number" className="p2p-input" value={minGateHopsSaved} onChange={e=> setMinGateHopsSaved(e.target.value)} placeholder="Min Gate Hops" />
 						</div>
 						</div>}
-					{(!isCalculating || !championPath || showInputs) && <div className="scout-input-row">
+					{(!effectiveHideInputs) && <div className="scout-input-row">
 						<label><input type="checkbox" checked={returnToStart} onChange={e=> onReturnToStartChange(e.target.checked)} /> Return to Start</label>
 						</div>}
 					{systemsWarning && <div className="scout-warning">Warning: Large system set may impact performance ({collectSystems().length}).</div>}
@@ -718,7 +747,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 					{minRequiredShipRange!==null && (
 						<div className="scout-warning">Minimum ship range required to connect all systems: {minRequiredShipRange.toFixed(2)} LY</div>
 					)}
-					{(!isCalculating || !championPath || showInputs) && <div className="scout-input-row">
+					{(!effectiveHideInputs) && <div className="scout-input-row">
 						<label><input type="checkbox" checked={debugMode} onChange={e=> setDebugMode(e.target.checked)} /> Debug Mode</label>
 					</div>}
 					{datasetChanged && !championPath && !isCalculating && <div className="scout-warning">System selection changed. Please Calculate Route again.</div>}
