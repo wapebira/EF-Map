@@ -726,7 +726,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 						</div>}
 					{(!effectiveHideInputs) && <div className="scout-input-row">
 						<label>Worker Threads</label>
-						<input type="number" className="p2p-input" value={workerCount} onChange={e=> setWorkerCount(e.target.value)} />
+						<input type="number" className="p2p-input" value={workerCount} disabled={isCalculating} title={isCalculating? 'Worker count locked during run' : 'Set number of optimizer workers'} onChange={e=> setWorkerCount(e.target.value)} />
 					</div>}
 					{(!effectiveHideInputs) && <div className="scout-input-row">
 						<label>Ship Max Jump Range (LY)</label>
