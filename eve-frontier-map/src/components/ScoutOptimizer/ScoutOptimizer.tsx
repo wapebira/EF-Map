@@ -710,7 +710,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 
 	return (
 		<div className="scout-optimizer-container">
-			<label>
+			<label className="module-toggle-label">
 				<input type="checkbox" checked={open} onChange={(e)=> onToggle(e.target.checked)} /> Scout Optimizer
 			</label>
 			{open && (
