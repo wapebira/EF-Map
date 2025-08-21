@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import './P2PRouting.css';
 import AutoCompleteInput from '../AutoCompleteInput/AutoCompleteInput';
 
@@ -191,10 +191,61 @@ interface P2PRoutingProps {
   systemNames: string[];
   progress?: { explored: number; frontier: number; elapsedMs: number; message: string } | null;
   routeCalcTimeMs?: number | null;
+  open: boolean;
+  onToggle: (open: boolean) => void;
 }
 
-const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeResult, mapData, systemNames, progress, routeCalcTimeMs }: P2PRoutingProps) => {
-  const [isOpen, setIsOpen] = useState(false);
+// Minimal neutral custom select (no accent colors) for consistent option highlight across platforms
+interface NeutralOption<T extends string> { value: T; label: string }
+interface NeutralSelectProps<T extends string> {
+  value: T; onChange: (v: T)=>void; options: NeutralOption<T>[]; ariaLabel: string; id: string;
+}
+const NeutralSelect = <T extends string>({ value, onChange, options, ariaLabel, id }: NeutralSelectProps<T>) => {
+  const [open, setOpen] = useState(false);
+  const [hoverIdx, setHoverIdx] = useState<number>(-1);
+  const wrapRef = useRef<HTMLDivElement|null>(null);
+
+  const currentIdx = options.findIndex(o=>o.value===value);
+
+  const close = useCallback(()=>{ setOpen(false); setHoverIdx(-1); },[]);
+  const openList = useCallback(()=>{ setOpen(true); setHoverIdx(currentIdx>=0?currentIdx:0); },[currentIdx]);
+
+  useEffect(()=>{
+    if(!open) return; const handler=(e:MouseEvent)=>{ if(wrapRef.current && !wrapRef.current.contains(e.target as Node)) close(); };
+    window.addEventListener('mousedown', handler); return ()=>window.removeEventListener('mousedown', handler);
+  },[open, close]);
+
+  const onKey = (e: React.KeyboardEvent) => {
+    if(e.key==='ArrowDown'){ e.preventDefault(); if(!open) openList(); else setHoverIdx(i=> Math.min(options.length-1, (i<0?0:i)+1)); }
+    else if(e.key==='ArrowUp'){ e.preventDefault(); if(!open) openList(); else setHoverIdx(i=> Math.max(0, (i<0?0:i)-1)); }
+    else if(e.key==='Enter' || e.key===' '){ e.preventDefault(); if(!open) openList(); else { if(hoverIdx>=0){ onChange(options[hoverIdx].value); close(); } } }
+    else if(e.key==='Escape'){ if(open){ e.preventDefault(); close(); } }
+  };
+
+  return (
+    <div className="neutral-select-wrapper" ref={wrapRef}>
+      <button id={id} type="button" aria-haspopup="listbox" aria-expanded={open} aria-label={ariaLabel}
+        className="neutral-select-trigger" onClick={()=> open?close():openList()} onKeyDown={onKey}>
+        <span>{options.find(o=>o.value===value)?.label || ''}</span>
+        <span className="neutral-select-caret" />
+      </button>
+      {open && (
+        <div role="listbox" className="neutral-select-dropdown" aria-activedescendant={hoverIdx>=0?`${id}-opt-${hoverIdx}`:undefined}>
+          {options.map((o,i)=>(
+            <div key={o.value} id={`${id}-opt-${i}`} role="option" aria-selected={o.value===value}
+              className={`neutral-select-option${i===hoverIdx?' hover':''}${o.value===value?' selected':''}`}
+              onMouseEnter={()=>setHoverIdx(i)}
+              onMouseDown={(e)=>{ e.preventDefault(); onChange(o.value); close(); }}>
+              {o.label}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeResult, mapData, systemNames, progress, routeCalcTimeMs, open, onToggle }: P2PRoutingProps) => {
   const [fromSystem, setFromSystem] = useState('');
   const [toSystem, setToSystem] = useState('');
   const [jumpDistance, setJumpDistance] = useState('60');
@@ -242,16 +293,16 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
 
   return (
     <div className="p2p-routing-container">
-      <label>
+      <label className="module-toggle-label">
         <input
           type="checkbox"
-          checked={isOpen}
-          onChange={(e) => setIsOpen(e.target.checked)}
+          checked={open}
+          onChange={(e) => onToggle(e.target.checked)}
         />
         Point-to-Point Routing
       </label>
 
-      {isOpen && (
+      {open && (
         <div className="p2p-routing-panel">
           <div className="p2p-input-group">
             <label htmlFor="from-system">From</label>
@@ -282,31 +333,36 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
               type="number"
               value={jumpDistance}
               onChange={(e) => setJumpDistance(e.target.value)}
+                className="p2p-input"
             />
           </div>
 
           <div className="p2p-input-group">
             <label htmlFor="optimize-for">Optimize For</label>
-            <select
+            <NeutralSelect
               id="optimize-for"
+              ariaLabel="Optimize For"
               value={optimizeFor}
-              onChange={(e) => setOptimizeFor(e.target.value as 'fuel' | 'jumps')}
-            >
-              <option value="fuel">Fuel (Prefer Gates)</option>
-              <option value="jumps">Jumps</option>
-            </select>
+              onChange={(v)=> setOptimizeFor(v as 'fuel'|'jumps')}
+              options={[
+                { value: 'fuel', label: 'Fuel (Prefer Gates)' },
+                { value: 'jumps', label: 'Jumps' },
+              ]}
+            />
           </div>
 
           <div className="p2p-input-group">
             <label htmlFor="algorithm-select">Algorithm</label>
-            <select
+            <NeutralSelect
               id="algorithm-select"
+              ariaLabel="Algorithm"
               value={algorithm}
-              onChange={(e) => setAlgorithm(e.target.value as 'astar' | 'dijkstra')}
-            >
-              <option value="astar">A* (basic)</option>
-              <option value="dijkstra">Dijkstra (advanced)</option>
-            </select>
+              onChange={(v)=> setAlgorithm(v as 'astar'|'dijkstra')}
+              options={[
+                { value: 'astar', label: 'A* (basic)' },
+                { value: 'dijkstra', label: 'Dijkstra (advanced)' },
+              ]}
+            />
           </div>
 
           <button className="p2p-calculate-button" onClick={handleCalculate} disabled={isCalculating}>

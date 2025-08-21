@@ -54,7 +54,7 @@ const AutoCompleteInput = ({ value, onChange, onSelect, dataSource, placeholder 
         value={value}
         onChange={handleChange}
         placeholder={placeholder}
-        style={{ padding: '5px', width: '100%' }}
+        className="p2p-input"
       />
       {isSuggestionsVisible && suggestions.length > 0 && (
         <ul className="suggestions-list">

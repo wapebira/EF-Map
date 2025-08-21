@@ -9,7 +9,31 @@ import { openDbFromArrayBuffer } from "./lib/sql";
 import type { SystemRow, StargateRow, RegionRow, ConstellationRow } from "./types/db";
 import LoadingScreen from './components/LoadingScreen';
 import P2PRouting from './components/P2PRouting/P2PRouting';
+import ScoutOptimizer from './components/ScoutOptimizer/ScoutOptimizer';
 import AutoCompleteInput from './components/AutoCompleteInput/AutoCompleteInput';
+import HelpPanel from './components/HelpPanel/HelpPanel';
+import { updateHashForShare, decodeShare } from './utils/share';
+
+// Small referral badge component with copy-to-clipboard
+const ReferralBadge: React.FC = () => {
+  const [copied, setCopied] = useState(false);
+  const code = 'n7GEWunG';
+  const handleCopy = () => {
+    navigator.clipboard.writeText(code).then(()=>{
+      setCopied(true);
+      setTimeout(()=> setCopied(false), 1600);
+    }).catch(()=>{/* ignore */});
+  };
+  return (
+    <div className="ef-referral" aria-label="Referral code">
+      <span>Referral code:</span>
+      <span className="ef-referral-code">{code}</span>
+      <button className={`ef-referral-copy-btn ${copied ? 'copied' : ''}`} onClick={handleCopy} aria-label="Copy referral code">
+        {copied ? 'Copied' : 'Copy'}
+      </button>
+    </div>
+  );
+};
 
 // Helper function to create a circular texture
 const createCircleTexture = () => {
@@ -98,7 +122,11 @@ function App() {
   const routingWorkerRef = useRef<Worker | null>(null);
   const [isCalculatingRoute, setIsCalculatingRoute] = useState(false);
   const [routeResult, setRouteResult] = useState<{ path: string[] | null; error?: string } | null>(null);
+  const [scoutRouteResult, setScoutRouteResult] = useState<{ path: string[] | null } | null>(null);
+  const [scoutInvalidateToken, setScoutInvalidateToken] = useState(0);
   const [routeProgress, setRouteProgress] = useState<{ explored: number; frontier: number; elapsedMs: number; message: string } | null>(null);
+  const [shareFeedback, setShareFeedback] = useState('');
+  const lastP2PParamsRef = useRef<{ jump:number; optimize:'fuel'|'jumps'; algo:'astar'|'dijkstra'; from?:string; to?:string }>({ jump:60, optimize:'fuel', algo:'astar' });
 
   // New state for labels
   const hoverLabelObj = useRef<CSS2DObject | null>(null);
@@ -113,6 +141,24 @@ function App() {
   const hoverPointRef = useRef<THREE.Points | null>(null);
   const stargateLinesRef = useRef<THREE.LineSegments | null>(null);
   const routeLinesRef = useRef<THREE.Group | null>(null); // New ref for route lines
+  // Track which module produced the currently drawn route ('scout' or 'p2p')
+  const routeSourceRef = useRef<'scout'|'p2p'|null>(null);
+  const clearCurrentRoute = useCallback(() => {
+    try {
+      if (routeLinesRef.current && sceneRef.current) {
+        routeLinesRef.current.traverse(child => {
+          if (child instanceof THREE.Mesh) {
+            child.geometry.dispose();
+            (child.material as THREE.Material).dispose();
+          }
+        });
+        sceneRef.current.remove(routeLinesRef.current);
+        routeLinesRef.current = null;
+      }
+      routeAnimUpdatersRef.current = [];
+      routeSourceRef.current = null;
+    } catch (e) { /* ignore */ }
+  }, []);
   const visibleSystemsRef = useRef<SolarSystem[]>([]);
   const animationRef = useRef({
     isAnimating: false,
@@ -208,6 +254,17 @@ function App() {
   useEffect(() => {
     const root = document.documentElement;
     root.style.setProperty('--accent', accentIsBlue ? 'var(--selection-blue)' : 'var(--selection-orange)');
+    // Tag root for CSS theme-specific rules
+    root.setAttribute('data-accent', accentIsBlue ? 'blue' : 'orange');
+    if (!accentIsBlue) {
+      // Pastel versions for orange mode only
+      root.style.setProperty('--accent-pastel', '#ffb9ab'); // lightened orange
+      root.style.setProperty('--accent-pastel-border', '#ff8665');
+    } else {
+      // Clear / reset so blue mode keeps normal look (browser default focus or existing styling)
+      root.style.setProperty('--accent-pastel', '');
+      root.style.setProperty('--accent-pastel-border', '');
+    }
     // Update runtime three.js colors used by the app
   const accentHex = accentIsBlue ? 0x00aaff : 0xff4c26;
     // Update hover material if exists
@@ -335,7 +392,8 @@ function App() {
           setRouteResult({ path: null, error });
           return;
         }
-        setRouteResult({ path, error: undefined });
+  setRouteResult({ path, error: undefined });
+  if(path && path.length>1){ try { const p = (lastP2PParamsRef as any).current; updateHashForShare({ type:'p', from:path[0], to:path[path.length-1], jump:p?.jump||60, optimize:p?.optimize||'fuel', algo:p?.algo||'astar', path }); } catch(e) { /* ignore */ } }
 
         // On successful route, center the view on the starting system
         if (path && path.length > 0 && mapData) {
@@ -362,6 +420,49 @@ function App() {
   // Track route calculation start time and elapsed time
   const routeCalcStartRef = useRef<number | null>(null);
   const [routeCalcTimeMs, setRouteCalcTimeMs] = useState<number | null>(null);
+
+  // Panel open states (mutually exclusive upcoming with Scout Optimizer)
+  const [p2pOpen, setP2POpen] = useState(false);
+  const [_scoutOpen, _setScoutOpen] = useState(false); // placeholder for future Scout panel
+  const [scoutOpen, setScoutOpenReal] = useState(false);
+  const [returnToStart, setReturnToStart] = useState(false);
+  // One-time hash import ref
+  const initialHashAppliedRef = useRef(false);
+
+  const toggleP2P = (open: boolean) => {
+    setP2POpen(open);
+    if (open) { setScoutOpenReal(false); }
+  };
+  const toggleScout = (open: boolean) => {
+    setScoutOpenReal(open);
+    if (open) { setP2POpen(false); }
+  };
+
+  // Apply shared route from URL hash once map data is loaded and scene initialized
+  useEffect(()=>{
+    if(!isLoaded || !mapData) return;
+    if(initialHashAppliedRef.current) return;
+    initialHashAppliedRef.current = true;
+    if(!window.location.hash) return;
+    const share = decodeShare(window.location.hash);
+    if(!share) return;
+    // Validate system names exist
+    const systemsByLower = new Map<string, SolarSystem>(Object.values(mapData.solar_systems).map(s=> [s.name.toLowerCase(), s]));
+    const allExist = share.path.every(p=> systemsByLower.has(p.toLowerCase()));
+    if(!allExist || share.path.length < 2) return;
+    if(share.type==='p'){
+      // Populate P2P route state directly
+      lastP2PParamsRef.current = { jump: share.jump, optimize: share.optimize, algo: share.algo, from: share.from, to: share.to };
+      setRouteResult({ path: share.path });
+      setP2POpen(true); setScoutOpenReal(false);
+      const startSys = systemsByLower.get(share.path[0].toLowerCase()); if(startSys) selectSystem(startSys);
+    } else if(share.type==='s') {
+      setReturnToStart(share.returnToStart);
+      setScoutRouteResult({ path: share.path });
+      setScoutOpenReal(true); setP2POpen(false);
+      const startSys = systemsByLower.get(share.path[0].toLowerCase()); if(startSys) selectSystem(startSys);
+    }
+  }, [isLoaded, mapData, selectSystem]);
 
   // Stop / cancel the current calculation: terminate worker and recreate a fresh one
   const stopCalculation = useCallback(() => {
@@ -401,7 +502,8 @@ function App() {
         setRouteResult({ path: null, error });
         return;
       }
-      setRouteResult({ path, error: undefined });
+  setRouteResult({ path, error: undefined });
+  if(path && path.length>1){ try { const p=(lastP2PParamsRef as any).current; updateHashForShare({ type:'p', from:path[0], to:path[path.length-1], jump:p?.jump||60, optimize:p?.optimize||'fuel', algo:p?.algo||'astar', path }); } catch(e) { /* ignore */ } }
 
       if (path && path.length > 0 && mapData) {
         const systemsByName = Object.fromEntries(Object.values(mapData.solar_systems).map(s => [s.name.toLowerCase(), s]));
@@ -414,17 +516,27 @@ function App() {
   }, [mapData, selectSystem]);
 
   const calculateRoute = useCallback((fromSystemName: string, toSystemName: string, maxJumpDistance: number, optimizeFor: 'fuel' | 'jumps', algorithm: 'astar' | 'dijkstra') => {
+    // Track last P2P params for share link updates
+    try { (lastP2PParamsRef as any).current = { jump:maxJumpDistance, optimize:optimizeFor, algo:algorithm, from:fromSystemName, to:toSystemName }; } catch(e) { /* ignore */ }
     if (!mapData) {
       alert('Map data is not loaded yet.');
       return;
     }
+
+    // If a scout route was displayed, clear it so P2P route takes visual precedence
+    if (scoutRouteResult) {
+      setScoutRouteResult(null);
+      setScoutInvalidateToken(t=> t+1); // force scout component to clear internal workers/state
+    }
+    // Always clear any currently drawn route lines before drawing new P2P route
+    clearCurrentRoute();
 
     setIsCalculatingRoute(true);
     setRouteResult(null);
   setRouteCalcTimeMs(null);
   routeCalcStartRef.current = Date.now();
 
-    routingWorkerRef.current?.postMessage({
+  routingWorkerRef.current?.postMessage({
       systems: mapData.solar_systems,
       stargates: mapData.stargates,
       fromSystemName,
@@ -433,7 +545,7 @@ function App() {
       optimizeFor,
       algorithm,
     });
-  }, [mapData]);
+  }, [mapData, scoutRouteResult, clearCurrentRoute]);
 
   // Helper to get planet count color
   const getPlanetCountColor = useCallback((planets: number, minPlanets: number, maxPlanets: number): THREE.Color => {
@@ -1048,130 +1160,122 @@ function App() {
 
   }, [isRegionHighlighterActive, highlightedSystem, mapData, isPlanetCountActive, getPlanetCountColor, getTransformedPosition, ringTexture]);
 
-  // Draw Route Lines
+  // Draw Route Lines (supports P2P or Scout route; Scout takes precedence when present)
   useEffect(() => {
     if (!sceneRef.current || !mapData) return;
 
-    // Clear previous route lines
     if (routeLinesRef.current) {
-      sceneRef.current.remove(routeLinesRef.current);
-      routeLinesRef.current.children.forEach((child: any) => {
-        child.geometry?.dispose();
-        child.material?.dispose();
-      });
+      try {
+        sceneRef.current.remove(routeLinesRef.current);
+        routeLinesRef.current.traverse(child => {
+          if (child instanceof THREE.Mesh) {
+            child.geometry.dispose();
+            (child.material as THREE.Material).dispose();
+          }
+        });
+      } catch (e) { /* ignore */ }
       routeLinesRef.current = null;
     }
 
-    if (routeResult && routeResult.path) {
-      const systemsByName = Object.fromEntries(Object.values(mapData.solar_systems).map(s => [s.name.toLowerCase(), s]));
-      const pathSystems = routeResult.path.map(name => systemsByName[name.toLowerCase()]).filter(Boolean);
+    const activePath = scoutRouteResult?.path || routeResult?.path;
+    if (!activePath || activePath.length < 2) {
+      routeAnimUpdatersRef.current = [];
+      routeSourceRef.current = null;
+      return;
+    }
 
-      if (pathSystems.length < 2) return;
+    const systemsByName = Object.fromEntries(Object.values(mapData.solar_systems).map(s => [s.name.toLowerCase(), s]));
+    const pathSystems = activePath.map(name => systemsByName[name.toLowerCase()]).filter(Boolean);
+    if (pathSystems.length < 2) {
+      routeAnimUpdatersRef.current = [];
+      routeSourceRef.current = null;
+      return;
+    }
 
-      const routeGroup = new THREE.Group();
-      routeLinesRef.current = routeGroup;
+    const routeGroup = new THREE.Group();
+    routeLinesRef.current = routeGroup;
+    routeSourceRef.current = scoutRouteResult?.path ? 'scout' : 'p2p';
+    const accentHex = accentIsBlue ? 0x00aaff : 0xff4c26;
+    const ROUTE_TUBE_RADIUS = 0.375;
+    const ROUTE_TUBULAR_SEGMENTS = 64;
+    const pulseSpheres: THREE.Mesh[] = [];
 
-  // Determine route color from the current accent CSS variable
-  const accentHex = accentIsBlue ? 0x00aaff : 0xff4c26;
-  // Tube radius for route rendering (world units). Reduce to ~0.375 to make the root much thinner (approximately 1/4 of 1.5)
-  const ROUTE_TUBE_RADIUS = 0.375;
-  const ROUTE_TUBULAR_SEGMENTS = 64;
-
-  // Array to hold pulse spheres for cleanup
-  const pulseSpheres: THREE.Mesh[] = [];
-
-  for (let i = 0; i < pathSystems.length - 1; i++) {
-        const startSystem = pathSystems[i];
-        const endSystem = pathSystems[i + 1];
-
-        const startPos = getTransformedPosition(startSystem.position);
-        const endPos = getTransformedPosition(endSystem.position);
-        const startVec = new THREE.Vector3(startPos.x, startPos.y, startPos.z);
-        const endVec = new THREE.Vector3(endPos.x, endPos.y, endPos.z);
-
-        // Check if a stargate exists between these two systems
-        const isStargateJump = Object.values(mapData.stargates).some(gate => 
-          (gate.source_system_id === startSystem.id && gate.destination_system_id === endSystem.id) ||
-          (gate.source_system_id === endSystem.id && gate.destination_system_id === startSystem.id)
-        );
-
-        // Use the accent color for all route lines
-        if (isStargateJump) {
-          // Create a short straight tube between systems to guarantee thickness across platforms
-          const points = [startVec.clone(), endVec.clone()];
-          const curve = new THREE.CatmullRomCurve3(points);
-          const geometry = new THREE.TubeGeometry(curve, Math.max(8, Math.floor(startVec.distanceTo(endVec) / 10)), ROUTE_TUBE_RADIUS, 8, false);
-          const material = new THREE.MeshBasicMaterial({ color: accentHex, transparent: true, opacity: 0.95, depthWrite: false });
-          const mesh = new THREE.Mesh(geometry, material);
-          mesh.renderOrder = 1;
-          routeGroup.add(mesh);
-          // Pulse sphere for this hop
-          const pulseGeo = new THREE.SphereGeometry(Math.max(ROUTE_TUBE_RADIUS * 0.6, 0.5), 8, 8);
-          const pulseMat = new THREE.MeshBasicMaterial({ color: accentHex, transparent: true, opacity: 1.0 });
-          const pulse = new THREE.Mesh(pulseGeo, pulseMat);
-          pulse.position.copy(startVec);
-          routeGroup.add(pulse);
-          pulseSpheres.push(pulse);
-        } else {
-          // It's a direct ship jump, draw a stronger curved tube
-          const midPoint = new THREE.Vector3().addVectors(startVec, endVec).multiplyScalar(0.5);
-          const dist = startVec.distanceTo(endVec);
-          const controlPointOffset = new THREE.Vector3(0, dist * 0.30, 0);
-          const controlPoint = new THREE.Vector3().addVectors(midPoint, controlPointOffset);
-
-          const curve = new THREE.QuadraticBezierCurve3(startVec, controlPoint, endVec);
-          // Use TubeGeometry directly from the quadratic curve to guarantee consistent thickness
-          const geometry = new THREE.TubeGeometry(curve as any, ROUTE_TUBULAR_SEGMENTS, ROUTE_TUBE_RADIUS, 8, false);
-          const material = new THREE.MeshBasicMaterial({ color: accentHex, transparent: true, opacity: 0.95, depthWrite: false });
-          const mesh = new THREE.Mesh(geometry, material);
-          mesh.renderOrder = 1;
-          routeGroup.add(mesh);
-          // Pulse sphere for this hop
-          const pulseGeo = new THREE.SphereGeometry(Math.max(ROUTE_TUBE_RADIUS * 0.6, 0.5), 8, 8);
-          const pulseMat = new THREE.MeshBasicMaterial({ color: accentHex, transparent: true, opacity: 1.0 });
-          const pulse = new THREE.Mesh(pulseGeo, pulseMat);
-          pulse.position.copy(startVec);
-          routeGroup.add(pulse);
-          pulseSpheres.push(pulse);
-        }
+    for (let i = 0; i < pathSystems.length - 1; i++) {
+      const startSystem = pathSystems[i];
+      const endSystem = pathSystems[i + 1];
+      const startPos = getTransformedPosition(startSystem.position);
+      const endPos = getTransformedPosition(endSystem.position);
+      const startVec = new THREE.Vector3(startPos.x, startPos.y, startPos.z);
+      const endVec = new THREE.Vector3(endPos.x, endPos.y, endPos.z);
+      const isStargateJump = Object.values(mapData.stargates).some(gate =>
+        (gate.source_system_id === startSystem.id && gate.destination_system_id === endSystem.id) ||
+        (gate.source_system_id === endSystem.id && gate.destination_system_id === startSystem.id)
+      );
+      if (isStargateJump) {
+        const points = [startVec.clone(), endVec.clone()];
+        const curve = new THREE.CatmullRomCurve3(points);
+        const geometry = new THREE.TubeGeometry(curve, Math.max(8, Math.floor(startVec.distanceTo(endVec) / 10)), ROUTE_TUBE_RADIUS, 8, false);
+        const material = new THREE.MeshBasicMaterial({ color: accentHex, transparent: true, opacity: 0.95, depthWrite: false });
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.renderOrder = 1;
+        routeGroup.add(mesh);
+        const pulseGeo = new THREE.SphereGeometry(Math.max(ROUTE_TUBE_RADIUS * 0.6, 0.5), 8, 8);
+        const pulseMat = new THREE.MeshBasicMaterial({ color: accentHex, transparent: true, opacity: 1.0 });
+        const pulse = new THREE.Mesh(pulseGeo, pulseMat);
+        pulse.position.copy(startVec);
+        routeGroup.add(pulse);
+        pulseSpheres.push(pulse);
+      } else {
+        const midPoint = new THREE.Vector3().addVectors(startVec, endVec).multiplyScalar(0.5);
+        const dist = startVec.distanceTo(endVec);
+        const controlPointOffset = new THREE.Vector3(0, dist * 0.30, 0);
+        const controlPoint = new THREE.Vector3().addVectors(midPoint, controlPointOffset);
+        const curve = new THREE.QuadraticBezierCurve3(startVec, controlPoint, endVec);
+        const geometry = new THREE.TubeGeometry(curve as any, ROUTE_TUBULAR_SEGMENTS, ROUTE_TUBE_RADIUS, 8, false);
+        const material = new THREE.MeshBasicMaterial({ color: accentHex, transparent: true, opacity: 0.95, depthWrite: false });
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.renderOrder = 1;
+        routeGroup.add(mesh);
+        const pulseGeo = new THREE.SphereGeometry(Math.max(ROUTE_TUBE_RADIUS * 0.6, 0.5), 8, 8);
+        const pulseMat = new THREE.MeshBasicMaterial({ color: accentHex, transparent: true, opacity: 1.0 });
+        const pulse = new THREE.Mesh(pulseGeo, pulseMat);
+        pulse.position.copy(startVec);
+        routeGroup.add(pulse);
+        pulseSpheres.push(pulse);
       }
-      sceneRef.current.add(routeGroup);
+    }
+    sceneRef.current.add(routeGroup);
 
-      // Register animators for pulses: they travel from start to end in sequence
-      const animators: Array<() => void> = [];
-      pulseSpheres.forEach((pulse, idx) => {
-        const start = pathSystems[idx];
-        const end = pathSystems[idx + 1];
-        const startPos = getTransformedPosition(start.position);
-        const endPos = getTransformedPosition(end.position);
-        const sVec = new THREE.Vector3(startPos.x, startPos.y, startPos.z);
-        const eVec = new THREE.Vector3(endPos.x, endPos.y, endPos.z);
-        const curve = new THREE.QuadraticBezierCurve3(sVec, new THREE.Vector3().addVectors(sVec, eVec).multiplyScalar(0.5).add(new THREE.Vector3(0, sVec.distanceTo(eVec) * 0.25, 0)), eVec);
-        let t = 0;
-        const speed = 0.5 + (idx % 3) * 0.1; // slight variation per hop
-        const updater = () => {
-          t += 0.01 * speed;
-          if (t > 1) t = 0;
-          const pos = curve.getPoint(t);
-          pulse.position.copy(pos);
-          // Simple pulsing scale
-          const scale = 1 + Math.sin(t * Math.PI * 2) * 0.3;
-          pulse.scale.set(scale, scale, scale);
-        };
-        animators.push(updater);
+    const animators: Array<() => void> = [];
+    pulseSpheres.forEach((pulse, idx) => {
+      const start = pathSystems[idx];
+      const end = pathSystems[idx + 1];
+      const startPos = getTransformedPosition(start.position);
+      const endPos = getTransformedPosition(end.position);
+      const sVec = new THREE.Vector3(startPos.x, startPos.y, startPos.z);
+      const eVec = new THREE.Vector3(endPos.x, endPos.y, endPos.z);
+      const curve = new THREE.QuadraticBezierCurve3(sVec, new THREE.Vector3().addVectors(sVec, eVec).multiplyScalar(0.5).add(new THREE.Vector3(0, sVec.distanceTo(eVec) * 0.25, 0)), eVec);
+      let t = 0;
+      const speed = 0.5 + (idx % 3) * 0.1;
+      const updater = () => {
+        t += 0.01 * speed;
+        if (t > 1) t = 0;
+        const pos = curve.getPoint(t);
+        pulse.position.copy(pos);
+        const scale = 1 + Math.sin(t * Math.PI * 2) * 0.3;
+        pulse.scale.set(scale, scale, scale);
+      };
+      animators.push(updater);
+    });
+    routeAnimUpdatersRef.current = animators;
+
+    return () => {
+      animators.forEach(a => {
+        const idx = routeAnimUpdatersRef.current.indexOf(a);
+        if (idx !== -1) routeAnimUpdatersRef.current.splice(idx, 1);
       });
-      // Attach animators to the global updaters list so they run each frame
-      routeAnimUpdatersRef.current.push(...animators);
-
-      // Ensure cleanup removes these animators and meshes when route is cleared
-      const cleanupRoute = () => {
-        // remove animators
-        animators.forEach(a => {
-          const idx = routeAnimUpdatersRef.current.indexOf(a);
-          if (idx !== -1) routeAnimUpdatersRef.current.splice(idx, 1);
-        });
-        // remove meshes
-        if (routeLinesRef.current) {
+      if (routeLinesRef.current) {
+        try {
           routeLinesRef.current.traverse(child => {
             if (child instanceof THREE.Mesh) {
               child.geometry.dispose();
@@ -1179,32 +1283,21 @@ function App() {
             }
           });
           sceneRef.current?.remove(routeLinesRef.current);
-          routeLinesRef.current = null;
-        }
-      };
-
-      // Replace previous cleanup with our route-specific cleanup when effect re-runs
-      // (the effect's return will run earlier cleanup and then our cleanup will be available for next run)
-      // Attach for outer cleanup
-      (routeGroup as any)._cleanup = cleanupRoute;
-    }
-
-  }, [routeResult, mapData, getTransformedPosition]);
+        } catch (e) { /* ignore */ }
+        routeLinesRef.current = null;
+      }
+      routeSourceRef.current = null;
+    };
+  }, [routeResult, scoutRouteResult, mapData, getTransformedPosition, accentIsBlue]);
 
   // Recolor route meshes when the accent changes
   useEffect(() => {
     if (!sceneRef.current || !routeLinesRef.current) return;
     const accentHex = accentIsBlue ? 0x00aaff : 0xff4c26;
     routeLinesRef.current.traverse((child) => {
-      if ((child as THREE.Mesh).material) {
-        const mat = (child as THREE.Mesh).material as THREE.Material | THREE.Material[];
-        if (Array.isArray(mat)) {
-          mat.forEach(m => {
-            if ((m as any).color) (m as any).color.set(accentHex);
-          });
-        } else {
-          if ((mat as any).color) (mat as any).color.set(accentHex);
-        }
+      const anyChild: any = child as any;
+      if (anyChild.material && (anyChild.material as any).color) {
+        (anyChild.material as any).color.set(accentHex);
       }
     });
   }, [accentIsBlue]);
@@ -1275,8 +1368,10 @@ function App() {
       mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
       mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
 
-      if (event.buttons & 1) { // Left mouse button is down
-        const currentMousePos = new THREE.Vector2(event.clientX, event.clientY);
+      const currentMousePos = new THREE.Vector2(event.clientX, event.clientY);
+      const anyButtonDown = event.buttons !== 0; // any mouse button depressed
+      // Detect drag for left, middle, or right buttons
+      if (anyButtonDown) {
         if (currentMousePos.distanceTo(mouseDownPosRef.current) > DRAG_THRESHOLD) {
           isDraggingRef.current = true;
         }
@@ -1286,7 +1381,8 @@ function App() {
         return;
       }
 
-      if (!isDraggingRef.current) {
+      // Only perform expensive raycast when no buttons are pressed (pure hover)
+      if (!isDraggingRef.current && !anyButtonDown) {
         raycaster.setFromCamera(mouse, cameraRef.current);
         // Dynamic threshold based on camera distance
         const distance = cameraRef.current.position.distanceTo(controlsRef.current.target);
@@ -1382,7 +1478,7 @@ function App() {
     };
 
     const onPointerDown = (event: PointerEvent) => {
-      if (event.button !== 0) return; // Only care about left mouse button
+      // Track initial position/time for any button to better detect drags (panning/right, middle)
       isDraggingRef.current = false;
       mouseDownPosRef.current.set(event.clientX, event.clientY);
       mouseDownTimeRef.current = Date.now();
@@ -1434,6 +1530,35 @@ function App() {
 
   return (
     <>
+  {/* Referral code copy state */}
+  {/* ...existing code... */}
+  <div className="ef-top-toolbar">
+    <div className="ef-toolbar-shifting">
+      <button
+        className="share-route-btn"
+        onClick={() => {
+          const path = scoutRouteResult?.path || routeResult?.path;
+          if(!path || path.length < 2){ setShareFeedback('No route'); setTimeout(()=>setShareFeedback(''),1500); return; }
+          if(scoutRouteResult?.path){
+            updateHashForShare({ type:'s', start:path[0], returnToStart:false, path }, true);
+            setShareFeedback('Scout link copied');
+          } else if(routeResult?.path){
+            const p=(lastP2PParamsRef as any).current||{jump:60,optimize:'fuel',algo:'astar'};
+            updateHashForShare({ type:'p', from:path[0], to:path[path.length-1], jump:p.jump, optimize:p.optimize, algo:p.algo, path }, true);
+            setShareFeedback('P2P link copied');
+          }
+          setTimeout(()=> setShareFeedback(''),2500);
+        }}
+        disabled={!(routeResult?.path || scoutRouteResult?.path)}
+        aria-label="Share current route"
+      >
+        Share Route
+        {shareFeedback && <span className="share-feedback">{shareFeedback}</span>}
+      </button>
+      <ReferralBadge />
+    </div>
+    <HelpPanel accentIsBlue={accentIsBlue} />
+  </div>
       <div style={{ position: 'absolute', top: 10, left: 10, zIndex: 1, color: 'white', backgroundColor: 'rgba(0,0,0,0.5)', padding: '10px', borderRadius: '5px' }}>
         <div>
           <AutoCompleteInput
@@ -1448,8 +1573,8 @@ function App() {
           />
         </div>
   {/* ...existing controls... (accent toggle removed from here) */}
-        <div style={{ marginTop: '10px' }}>
-          <label>
+        <div className="ef-control-group" style={{ marginTop: '10px' }}>
+          <label className="module-toggle-label">
             <input
               type="checkbox"
               checked={isRegionHighlighterActive}
@@ -1460,8 +1585,8 @@ function App() {
             Highlight Region
           </label>
         </div>
-        <div style={{ marginTop: '10px' }}>
-          <label>
+        <div className="ef-control-group" style={{ marginTop: '10px' }}>
+          <label className="module-toggle-label">
             <input
               type="checkbox"
               checked={isPlanetCountActive}
@@ -1472,8 +1597,8 @@ function App() {
             Display Planet Counts
           </label>
         </div>
-        <div style={{ marginTop: '10px' }}>
-          <label>
+        <div className="ef-control-group" style={{ marginTop: '10px' }}>
+          <label className="module-toggle-label">
             <input
               type="checkbox"
               checked={showDistance}
@@ -1491,6 +1616,33 @@ function App() {
           mapData={mapData}
           systemNames={mapData ? Object.values(mapData.solar_systems).map(s => s.name) : []}
           progress={routeProgress}
+          open={p2pOpen}
+          onToggle={toggleP2P}
+        />
+        <ScoutOptimizer
+          open={scoutOpen}
+          onToggle={toggleScout}
+          mapData={mapData}
+          systemNames={mapData ? Object.values(mapData.solar_systems).map(s => s.name) : []}
+          returnToStart={returnToStart}
+          onReturnToStartChange={setReturnToStart}
+          invalidateToken={scoutInvalidateToken}
+          importedRoutePath={scoutRouteResult?.path || null}
+          onBaselineRoute={(path)=>{ 
+            setScoutRouteResult({ path }); 
+            if(mapData && path.length){
+              const first = Object.values(mapData.solar_systems).find(s=> s.name.toLowerCase()===path[0].toLowerCase());
+              if(first){ selectSystem(first); }
+            }
+          }}
+          onOptimizedRoute={(path)=>{ 
+            setScoutRouteResult({ path }); 
+            if(mapData && path.length){
+              const first = Object.values(mapData.solar_systems).find(s=> s.name.toLowerCase()===path[0].toLowerCase());
+              if(first){ selectSystem(first); }
+            }
+          }}
+          onClearRoute={()=> setScoutRouteResult(null)}
         />
         {isPlanetCountActive && generatePlanetCountLegend()}
       </div>
@@ -1500,8 +1652,8 @@ function App() {
           <span style={{ fontSize: '12px' }}>Use blue accent</span>
         </label>
       </div>
-      <div ref={mountRef} style={{ width: '100vw', height: '100vh' }} />
-  {/* Small persistent logo in the bottom-right */}
+    <div ref={mountRef} style={{ width: '100vw', height: '100vh' }} />
+  {/* Small persistent logo and referral code */}
   <img src={logo} alt="EF Map" className="ef-small-logo" />
     </>
   );
