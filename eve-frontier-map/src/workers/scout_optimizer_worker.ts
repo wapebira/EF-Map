@@ -171,6 +171,30 @@ const nearestNeighbor = (start:string, candidates:string[], returnToStart:boolea
             post({ type:'progress', message:`[DEBUG] Ordering block: ${altCandidate.name} reachable from earlier ${altCandidate.via} at ${altCandidate.d.toFixed(2)} LY but not from tail ${route[route.length-1]}` });
           }
         }
+        // Backtrack bridging: if still stuck, try walking back along existing path (duplicating nodes) to an anchor that can reach a target
+        if(connectivityGuaranteed && remaining.size){
+          let plan: { backtrackIdx:number; target:string; d:number } | null = null;
+          outerBacktrack: for(let i=route.length-2;i>=0;i--){ // exclude tail (route.length-1)
+            const anchorName = route[i]; const anchorSys = systemsByName[anchorName]; if(!anchorSys) continue;
+            for(const tgt of remaining){
+              const tgtSys = systemsByName[tgt]; if(!tgtSys) continue; const d=dist(anchorSys,tgtSys);
+              if(d <= maxShipRange+1e-6){ plan={ backtrackIdx:i, target:tgt, d }; break outerBacktrack; }
+            }
+          }
+          if(plan){
+            // Duplicate reverse suffix from tail back to anchor
+            const suffix = route.slice(plan.backtrackIdx); // [anchor, ..., tail]
+            for(let s=suffix.length-2; s>=0; s--){ // start from element before tail backwards to index 0 (anchor)
+              const node = suffix[s];
+              // Skip if already last (avoid immediate duplication of tail when suffix ends)
+              if(route[route.length-1] !== node) route.push(node);
+            }
+            route.push(plan.target);
+            remaining.delete(plan.target);
+            if(debug) post({ type:'progress', message:`[DEBUG] Backtrack bridge via anchor ${route[route.length-2]} -> ship ${plan.target} (${plan.d.toFixed(2)} LY) after duplicating ${suffix.length-1} nodes` });
+            continue;
+          }
+        }
       }
   // Attempt single reposition to start to change tail context before declaring unreachable (only if a return loop desired)
   if(returnToStart && route[route.length-1] !== start){
