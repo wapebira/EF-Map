@@ -8,11 +8,7 @@
 //   scout: start,returnFlag(0/1),pathSemicolonSep (champion macro path)
 // We then join fields with ',' and if length > 120 chars we LZ-compress then base64 and prefix 'z'.
 
-// lz-string lacks bundled types in some versions; use require fallback typing
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const LZ: any = require('lz-string');
-const compressToUint8Array = LZ.compressToUint8Array as (s:string)=>Uint8Array;
-const decompressFromUint8Array = LZ.decompressFromUint8Array as (a:Uint8Array)=>string | null;
+import { compressToUint8Array, decompressFromUint8Array } from 'lz-string';
 
 export interface P2PShareData {
   type: 'p';
@@ -36,25 +32,18 @@ export type ShareData = P2PShareData | ScoutShareData;
 const PREFIX = 'r1';
 
 function base64FromBytes(bytes: Uint8Array): string {
-  if (typeof btoa !== 'undefined') {
-    let binary = '';
-    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-    return btoa(binary).replace(/=+$/,'').replace(/\+/g,'-').replace(/\//g,'_');
-  }
-  // Node fallback (not expected in browser build path)
-  return Buffer.from(bytes).toString('base64').replace(/=+$/,'').replace(/\+/g,'-').replace(/\//g,'_');
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary).replace(/=+$/,'').replace(/\+/g,'-').replace(/\//g,'_');
 }
 
 function bytesFromBase64(b64: string): Uint8Array {
   b64 = b64.replace(/-/g,'+').replace(/_/g,'/');
   while (b64.length % 4) b64 += '=';
-  if (typeof atob !== 'undefined') {
-    const binary = atob(b64);
-    const out = new Uint8Array(binary.length);
-    for (let i=0;i<binary.length;i++) out[i] = binary.charCodeAt(i);
-    return out;
-  }
-  return new Uint8Array(Buffer.from(b64,'base64'));
+  const binary = atob(b64);
+  const out = new Uint8Array(binary.length);
+  for (let i=0;i<binary.length;i++) out[i] = binary.charCodeAt(i);
+  return out;
 }
 
 export function encodeShare(data: ShareData): string {
