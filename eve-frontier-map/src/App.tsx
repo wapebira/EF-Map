@@ -12,6 +12,7 @@ import P2PRouting from './components/P2PRouting/P2PRouting';
 import ScoutOptimizer from './components/ScoutOptimizer/ScoutOptimizer';
 import AutoCompleteInput from './components/AutoCompleteInput/AutoCompleteInput';
 import HelpPanel from './components/HelpPanel/HelpPanel';
+import { updateHashForShare } from './utils/share';
 
 // Small referral badge component with copy-to-clipboard
 const ReferralBadge: React.FC = () => {
@@ -124,6 +125,8 @@ function App() {
   const [scoutRouteResult, setScoutRouteResult] = useState<{ path: string[] | null } | null>(null);
   const [scoutInvalidateToken, setScoutInvalidateToken] = useState(0);
   const [routeProgress, setRouteProgress] = useState<{ explored: number; frontier: number; elapsedMs: number; message: string } | null>(null);
+  const [shareFeedback, setShareFeedback] = useState('');
+  const lastP2PParamsRef = useRef<{ jump:number; optimize:'fuel'|'jumps'; algo:'astar'|'dijkstra'; from?:string; to?:string }>({ jump:60, optimize:'fuel', algo:'astar' });
 
   // New state for labels
   const hoverLabelObj = useRef<CSS2DObject | null>(null);
@@ -389,7 +392,8 @@ function App() {
           setRouteResult({ path: null, error });
           return;
         }
-        setRouteResult({ path, error: undefined });
+  setRouteResult({ path, error: undefined });
+  if(path && path.length>1){ try { const p = (lastP2PParamsRef as any).current; updateHashForShare({ type:'p', from:path[0], to:path[path.length-1], jump:p?.jump||60, optimize:p?.optimize||'fuel', algo:p?.algo||'astar', path }); } catch(e) { /* ignore */ } }
 
         // On successful route, center the view on the starting system
         if (path && path.length > 0 && mapData) {
@@ -470,7 +474,8 @@ function App() {
         setRouteResult({ path: null, error });
         return;
       }
-      setRouteResult({ path, error: undefined });
+  setRouteResult({ path, error: undefined });
+  if(path && path.length>1){ try { const p=(lastP2PParamsRef as any).current; updateHashForShare({ type:'p', from:path[0], to:path[path.length-1], jump:p?.jump||60, optimize:p?.optimize||'fuel', algo:p?.algo||'astar', path }); } catch(e) { /* ignore */ } }
 
       if (path && path.length > 0 && mapData) {
         const systemsByName = Object.fromEntries(Object.values(mapData.solar_systems).map(s => [s.name.toLowerCase(), s]));
@@ -483,6 +488,8 @@ function App() {
   }, [mapData, selectSystem]);
 
   const calculateRoute = useCallback((fromSystemName: string, toSystemName: string, maxJumpDistance: number, optimizeFor: 'fuel' | 'jumps', algorithm: 'astar' | 'dijkstra') => {
+    // Track last P2P params for share link updates
+    try { (lastP2PParamsRef as any).current = { jump:maxJumpDistance, optimize:optimizeFor, algo:algorithm, from:fromSystemName, to:toSystemName }; } catch(e) { /* ignore */ }
     if (!mapData) {
       alert('Map data is not loaded yet.');
       return;
@@ -501,7 +508,7 @@ function App() {
   setRouteCalcTimeMs(null);
   routeCalcStartRef.current = Date.now();
 
-    routingWorkerRef.current?.postMessage({
+  routingWorkerRef.current?.postMessage({
       systems: mapData.solar_systems,
       stargates: mapData.stargates,
       fromSystemName,
@@ -1499,6 +1506,10 @@ function App() {
   {/* ...existing code... */}
   <HelpPanel accentIsBlue={accentIsBlue} />
       <div style={{ position: 'absolute', top: 10, left: 10, zIndex: 1, color: 'white', backgroundColor: 'rgba(0,0,0,0.5)', padding: '10px', borderRadius: '5px' }}>
+        <div style={{display:'flex', gap:8, marginBottom:8}}>
+          <button onClick={() => { const path = scoutRouteResult?.path || routeResult?.path; if(!path||path.length<2){ setShareFeedback('No route'); setTimeout(()=>setShareFeedback(''),1500); return;} if(scoutRouteResult?.path){ updateHashForShare({ type:'s', start:path[0], returnToStart:false, path }, true); setShareFeedback('Scout link copied'); } else if(routeResult?.path){ const p=(lastP2PParamsRef as any).current||{jump:60,optimize:'fuel',algo:'astar'}; updateHashForShare({ type:'p', from:path[0], to:path[path.length-1], jump:p.jump, optimize:p.optimize, algo:p.algo, path }, true); setShareFeedback('P2P link copied'); } setTimeout(()=> setShareFeedback(''),2500); }} disabled={!(routeResult?.path || scoutRouteResult?.path)} style={{padding:'4px 8px', fontSize:'12px'}}>Share Route</button>
+          {shareFeedback && <span style={{fontSize:'12px', opacity:0.8}}>{shareFeedback}</span>}
+        </div>
         <div>
           <AutoCompleteInput
             placeholder="Search for a system..."
