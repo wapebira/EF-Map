@@ -13,6 +13,27 @@ import ScoutOptimizer from './components/ScoutOptimizer/ScoutOptimizer';
 import AutoCompleteInput from './components/AutoCompleteInput/AutoCompleteInput';
 import HelpPanel from './components/HelpPanel/HelpPanel';
 
+// Small referral badge component with copy-to-clipboard
+const ReferralBadge: React.FC = () => {
+  const [copied, setCopied] = useState(false);
+  const code = 'n7GEWunG';
+  const handleCopy = () => {
+    navigator.clipboard.writeText(code).then(()=>{
+      setCopied(true);
+      setTimeout(()=> setCopied(false), 1600);
+    }).catch(()=>{/* ignore */});
+  };
+  return (
+    <div className="ef-referral" aria-label="Referral code">
+      <span>Referral code:</span>
+      <span className="ef-referral-code">{code}</span>
+      <button className={`ef-referral-copy-btn ${copied ? 'copied' : ''}`} onClick={handleCopy} aria-label="Copy referral code">
+        {copied ? 'Copied' : 'Copy'}
+      </button>
+    </div>
+  );
+};
+
 // Helper function to create a circular texture
 const createCircleTexture = () => {
   const canvas = document.createElement('canvas');
@@ -1474,6 +1495,8 @@ function App() {
 
   return (
     <>
+  {/* Referral code copy state */}
+  {/* ...existing code... */}
   <HelpPanel accentIsBlue={accentIsBlue} />
       <div style={{ position: 'absolute', top: 10, left: 10, zIndex: 1, color: 'white', backgroundColor: 'rgba(0,0,0,0.5)', padding: '10px', borderRadius: '5px' }}>
         <div>
@@ -1569,7 +1592,7 @@ function App() {
       </div>
     <div ref={mountRef} style={{ width: '100vw', height: '100vh' }} />
   {/* Small persistent logo and referral code */}
-  <div className="ef-referral">Referral code: n7GEWunG</div>
+  <ReferralBadge />
   <img src={logo} alt="EF Map" className="ef-small-logo" />
     </>
   );
