@@ -11,6 +11,7 @@ import LoadingScreen from './components/LoadingScreen';
 import P2PRouting from './components/P2PRouting/P2PRouting';
 import ScoutOptimizer from './components/ScoutOptimizer/ScoutOptimizer';
 import AutoCompleteInput from './components/AutoCompleteInput/AutoCompleteInput';
+import HelpPanel from './components/HelpPanel/HelpPanel';
 
 // Helper function to create a circular texture
 const createCircleTexture = () => {
@@ -1107,7 +1108,6 @@ function App() {
   useEffect(() => {
     if (!sceneRef.current || !mapData) return;
 
-    // Remove any existing route group
     if (routeLinesRef.current) {
       try {
         sceneRef.current.remove(routeLinesRef.current);
@@ -1125,7 +1125,7 @@ function App() {
     if (!activePath || activePath.length < 2) {
       routeAnimUpdatersRef.current = [];
       routeSourceRef.current = null;
-      return; // nothing to draw
+      return;
     }
 
     const systemsByName = Object.fromEntries(Object.values(mapData.solar_systems).map(s => [s.name.toLowerCase(), s]));
@@ -1214,12 +1214,10 @@ function App() {
     routeAnimUpdatersRef.current = animators;
 
     return () => {
-      // Remove animators
       animators.forEach(a => {
         const idx = routeAnimUpdatersRef.current.indexOf(a);
         if (idx !== -1) routeAnimUpdatersRef.current.splice(idx, 1);
       });
-      // Remove meshes
       if (routeLinesRef.current) {
         try {
           routeLinesRef.current.traverse(child => {
@@ -1241,15 +1239,9 @@ function App() {
     if (!sceneRef.current || !routeLinesRef.current) return;
     const accentHex = accentIsBlue ? 0x00aaff : 0xff4c26;
     routeLinesRef.current.traverse((child) => {
-      if ((child as THREE.Mesh).material) {
-        const mat = (child as THREE.Mesh).material as THREE.Material | THREE.Material[];
-        if (Array.isArray(mat)) {
-          mat.forEach(m => {
-            if ((m as any).color) (m as any).color.set(accentHex);
-          });
-        } else {
-          if ((mat as any).color) (mat as any).color.set(accentHex);
-        }
+      const anyChild: any = child as any;
+      if (anyChild.material && (anyChild.material as any).color) {
+        (anyChild.material as any).color.set(accentHex);
       }
     });
   }, [accentIsBlue]);
@@ -1482,6 +1474,7 @@ function App() {
 
   return (
     <>
+  <HelpPanel accentIsBlue={accentIsBlue} />
       <div style={{ position: 'absolute', top: 10, left: 10, zIndex: 1, color: 'white', backgroundColor: 'rgba(0,0,0,0.5)', padding: '10px', borderRadius: '5px' }}>
         <div>
           <AutoCompleteInput
