@@ -12,7 +12,7 @@ import P2PRouting from './components/P2PRouting/P2PRouting';
 import ScoutOptimizer from './components/ScoutOptimizer/ScoutOptimizer';
 import AutoCompleteInput from './components/AutoCompleteInput/AutoCompleteInput';
 import HelpPanel from './components/HelpPanel/HelpPanel';
-import { updateHashForShare } from './utils/share';
+import { updateHashForShare, decodeShare } from './utils/share';
 
 // Small referral badge component with copy-to-clipboard
 const ReferralBadge: React.FC = () => {
@@ -426,6 +426,8 @@ function App() {
   const [_scoutOpen, _setScoutOpen] = useState(false); // placeholder for future Scout panel
   const [scoutOpen, setScoutOpenReal] = useState(false);
   const [returnToStart, setReturnToStart] = useState(false);
+  // One-time hash import ref
+  const initialHashAppliedRef = useRef(false);
 
   const toggleP2P = (open: boolean) => {
     setP2POpen(open);
@@ -435,6 +437,32 @@ function App() {
     setScoutOpenReal(open);
     if (open) { setP2POpen(false); }
   };
+
+  // Apply shared route from URL hash once map data is loaded and scene initialized
+  useEffect(()=>{
+    if(!isLoaded || !mapData) return;
+    if(initialHashAppliedRef.current) return;
+    initialHashAppliedRef.current = true;
+    if(!window.location.hash) return;
+    const share = decodeShare(window.location.hash);
+    if(!share) return;
+    // Validate system names exist
+    const systemsByLower = new Map<string, SolarSystem>(Object.values(mapData.solar_systems).map(s=> [s.name.toLowerCase(), s]));
+    const allExist = share.path.every(p=> systemsByLower.has(p.toLowerCase()));
+    if(!allExist || share.path.length < 2) return;
+    if(share.type==='p'){
+      // Populate P2P route state directly
+      lastP2PParamsRef.current = { jump: share.jump, optimize: share.optimize, algo: share.algo, from: share.from, to: share.to };
+      setRouteResult({ path: share.path });
+      setP2POpen(true); setScoutOpenReal(false);
+      const startSys = systemsByLower.get(share.path[0].toLowerCase()); if(startSys) selectSystem(startSys);
+    } else if(share.type==='s') {
+      setReturnToStart(share.returnToStart);
+      setScoutRouteResult({ path: share.path });
+      setScoutOpenReal(true); setP2POpen(false);
+      const startSys = systemsByLower.get(share.path[0].toLowerCase()); if(startSys) selectSystem(startSys);
+    }
+  }, [isLoaded, mapData, selectSystem]);
 
   // Stop / cancel the current calculation: terminate worker and recreate a fresh one
   const stopCalculation = useCallback(() => {
