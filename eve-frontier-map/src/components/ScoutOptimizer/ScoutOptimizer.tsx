@@ -723,7 +723,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 					{notePages.length>0 && (
 						<div className="p2p-results">
 							<h4>Route Note{notePages.length>1?` (Page ${activeNotePage+1}/${notePages.length})`:''}</h4>
-							<div className="p2p-copy-buttons">
+							<div className="scout-grid-buttons">
 								{notePages.map((_,idx)=>(
 									<button key={idx} onClick={()=>{ setActiveNotePage(idx); handleCopyPage(idx); }} className={`p2p-copy-button ${activeNotePage===idx?'active':''}`}>
 										{copyButtonText} {notePages.length>1?`${idx+1}/${notePages.length}`:''}
@@ -744,11 +744,20 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 								<div><strong>Gate Hops (expanded):</strong> {championDisplayPath.length}</div>
 							)}
 							{isCalculating && workerStatusRef.current.length>0 && (
-								<div style={{marginTop:'6px'}}>
-									<strong>Workers:</strong> {workerStatusRef.current.map((ws,i)=>{
-										const since = ((Date.now()-ws.lastImprovement)/1000).toFixed(1);
-										return `#${i+1} ${ws.state} (${since}s)`;
-									}).join(', ')}
+								<div style={{marginTop:'6px', width:'100%'}}>
+									<strong>Workers:</strong>
+									<div className="scout-worker-grid">
+										{workerStatusRef.current.map((ws,i)=>{
+											const since = ((Date.now()-ws.lastImprovement)/1000).toFixed(0);
+											return (
+												<div key={i} className={`scout-worker-cell ${ws.state}`} title={`Worker ${i+1} ${ws.state} (${since}s since improvement)`}>
+													<span>#{i+1}</span>
+													<span>{ws.state}</span>
+													<span className="scout-worker-time">{since}s</span>
+												</div>
+											);
+										})}
+									</div>
 								</div>
 							)}
 						</div>

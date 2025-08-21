@@ -34,3 +34,42 @@
 .scout-copy-buttons { display:flex; gap:5px; flex-wrap:wrap; }
 .scout-copy-buttons button { flex-grow:1; padding:5px; background:rgba(0,0,0,0.25); border:1px solid rgba(0,170,255,0.25); color:white; cursor:pointer; }
 .scout-copy-buttons button.active { background: var(--accent); }
+
+/* Grid layout for note copy buttons (max 4 columns) */
+.scout-optimizer-panel .scout-grid-buttons {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 5px;
+  width: 100%;
+}
+.scout-optimizer-panel .scout-grid-buttons .p2p-copy-button {
+  flex-grow: 0; /* ensure grid sizing controls width */
+  width: 100%;
+}
+
+/* Worker status compact grid */
+.scout-worker-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  margin-top: 4px;
+  width: 100%;
+}
+.scout-worker-cell {
+  font-size: 0.65rem;
+  line-height: 1.1;
+  text-align: center;
+  padding: 3px 2px;
+  border: 1px solid #444;
+  border-radius: 3px;
+  background: #252525;
+  color: #ddd;
+  position: relative;
+}
+.scout-worker-cell.running { background:#123d18; border-color:#1f6a27; }
+.scout-worker-cell.restarting { background:#4a3808; border-color:#7a5c10; }
+.scout-worker-cell.baseline { background:#0a2d45; border-color:#134b70; }
+.scout-worker-cell.done { background:#333; border-color:#555; }
+.scout-worker-cell.idle { background:#2a2a2a; border-color:#444; }
+.scout-worker-cell span { display:block; }
+.scout-worker-cell .scout-worker-time { font-size:0.55rem; opacity:0.8; }
