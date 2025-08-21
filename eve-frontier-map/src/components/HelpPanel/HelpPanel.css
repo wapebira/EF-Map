@@ -21,7 +21,7 @@
 .accordion-header:hover { background:rgba(255,255,255,0.1); }
 .accordion-header .chevron { transition: transform 0.25s ease; font-size:11px; }
 .accordion-header.open .chevron { transform:rotate(90deg); }
-.accordion-body { max-height:0; overflow:hidden; transition:max-height 0.35s ease; background:rgba(0,0,0,0.25); }
+.accordion-body { max-height:0; overflow:hidden; transition:max-height 0.4s ease, padding 0.3s ease; background:rgba(0,0,0,0.25); }
 .accordion-body.open { padding:8px 12px 12px; }
 .accordion-body-inner { opacity:0; transform:translateY(-4px); transition:opacity 0.35s ease, transform 0.35s ease; }
 .accordion-body.open .accordion-body-inner { opacity:1; transform:translateY(0); }
@@ -29,8 +29,8 @@
 .subsection { margin-top:10px; border-left:2px solid var(--accent); padding:6px 10px 8px; background:rgba(255,255,255,0.03); border-radius:4px; }
 .subsection-title { font-weight:600; cursor:pointer; color:var(--accent); display:flex; align-items:center; gap:4px; font-size:12px; }
 .subsection-title:hover { text-decoration:underline; }
-.subsection-content { margin-top:6px; display:none; line-height:1.4; }
-.subsection-content.open { display:block; }
+.subsection-content { margin-top:6px; line-height:1.4; overflow:hidden; max-height:0; opacity:0; transition:max-height 0.35s ease, opacity 0.3s ease; }
+.subsection-content.open { opacity:1; }
 .code-inline { font-family:monospace; background:rgba(255,255,255,0.1); padding:1px 4px; border-radius:3px; font-size:12px; }
 
 .help-footer { position:absolute; bottom:0; left:0; right:0; padding:8px 12px; font-size:11px; color:#bbb; border-top:1px solid rgba(255,255,255,0.15); background:rgba(0,0,0,0.5); }

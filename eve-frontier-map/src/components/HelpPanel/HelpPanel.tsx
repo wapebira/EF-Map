@@ -176,20 +176,68 @@ const HelpPanel: React.FC<HelpPanelProps> = ({ accentIsBlue }) => {
   // Smooth expand/collapse height measurement for main sections
   const bodyRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
+  const sectionHeaderRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const subsectionContentRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
+  const scrollIntoViewSmooth = (el: HTMLElement | null) => {
+    if(!el || !scrollRef.current) return;
+    const container = scrollRef.current;
+    const elTop = el.offsetTop;
+    const elBottom = elTop + el.offsetHeight;
+    const viewTop = container.scrollTop;
+    const viewBottom = viewTop + container.clientHeight;
+    if(elTop < viewTop || elBottom > viewBottom - 40){
+      container.scrollTo({ top: elTop - 8, behavior: 'smooth' });
+    }
+  };
+
   const toggleSection = useCallback((id: string) => {
     setExpanded(prev => {
-      const next = { ...prev, [id]: !prev[id] };
+      const opening = !prev[id];
+      const next = { ...prev, [id]: opening };
+      // Delay scroll until after state applied & height measured
+      requestAnimationFrame(()=>{ if(opening) scrollIntoViewSmooth(sectionHeaderRefs.current[id]); });
       return next;
     });
   }, []);
 
   const toggleSub = useCallback((id: string) => {
-    setExpandedSub(prev => ({ ...prev, [id]: !prev[id] }));
+    setExpandedSub(prev => {
+      const opening = !prev[id];
+      const next = { ...prev, [id]: opening };
+      // Smooth height animation for subsection
+      const el = subsectionContentRefs.current[id];
+      if(el){
+        if(opening){
+          el.style.display = 'block';
+          el.style.maxHeight = '0px';
+          el.style.opacity = '0';
+          const target = el.scrollHeight;
+          requestAnimationFrame(()=>{
+            el.style.maxHeight = target + 'px';
+            el.style.opacity = '1';
+          });
+          // After transition, cleanup explicit maxHeight for responsive content changes
+          setTimeout(()=>{ if(el.classList.contains('open')) el.style.maxHeight = 'none'; }, 450);
+          // Scroll into view
+          requestAnimationFrame(()=> scrollIntoViewSmooth(el));
+        } else {
+          const currentHeight = el.scrollHeight;
+          el.style.maxHeight = currentHeight + 'px';
+          requestAnimationFrame(()=>{
+            el.style.maxHeight = '0px';
+            el.style.opacity = '0';
+          });
+          setTimeout(()=>{ if(!el.classList.contains('open')) el.style.display=''; }, 400);
+        }
+      }
+      return next;
+    });
   }, []);
 
   useEffect(() => {
     // Recalculate heights for all open sections (prevents cut-off when subsections expand)
-    Object.entries(bodyRefs.current).forEach(([id, el]) => {
+  Object.entries(bodyRefs.current).forEach(([id, el]) => {
       if (!el) return;
       const isOpen = expanded[id];
       if (isOpen) {
@@ -226,7 +274,7 @@ const HelpPanel: React.FC<HelpPanelProps> = ({ accentIsBlue }) => {
             {sections.map(section => {
               const isOpen = !!expanded[section.id];
               return (
-                <div key={section.id} className="accordion-section">
+        <div key={section.id} className="accordion-section">
                   <div
                     className={`accordion-header ${isOpen ? 'open' : ''}`}
                     role="button"
@@ -234,6 +282,7 @@ const HelpPanel: React.FC<HelpPanelProps> = ({ accentIsBlue }) => {
                     aria-expanded={isOpen}
                     onClick={() => toggleSection(section.id)}
                     onKeyDown={(e) => { if(e.key==='Enter' || e.key===' ') { e.preventDefault(); toggleSection(section.id);} }}
+          ref={el=>{ sectionHeaderRefs.current[section.id]=el; }}
                   >
                     <span className="chevron">▶</span>
                     <span>{section.title}</span>
@@ -259,7 +308,18 @@ const HelpPanel: React.FC<HelpPanelProps> = ({ accentIsBlue }) => {
                               <span className="chevron" style={{ transform: subOpen ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.25s ease' }}>▶</span>
                               {sub.title}
                             </div>
-                            <div className={`subsection-content ${subOpen ? 'open' : ''}`}>{sub.content}</div>
+                            <div
+                              ref={el => {
+                                subsectionContentRefs.current[sub.id] = el;
+                                if (el && subOpen) {
+                                  el.style.maxHeight = 'none';
+                                  el.style.opacity = '1';
+                                }
+                              }}
+                              className={`subsection-content ${subOpen ? 'open' : ''}`}
+                            >
+                              {sub.content}
+                            </div>
                           </div>
                         );
                       })}
