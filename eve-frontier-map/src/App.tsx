@@ -1574,7 +1574,7 @@ function App() {
         </div>
   {/* ...existing controls... (accent toggle removed from here) */}
         <div className="ef-control-group" style={{ marginTop: '10px' }}>
-          <label>
+          <label className="module-toggle-label">
             <input
               type="checkbox"
               checked={isRegionHighlighterActive}
@@ -1586,7 +1586,7 @@ function App() {
           </label>
         </div>
         <div className="ef-control-group" style={{ marginTop: '10px' }}>
-          <label>
+          <label className="module-toggle-label">
             <input
               type="checkbox"
               checked={isPlanetCountActive}
@@ -1598,7 +1598,7 @@ function App() {
           </label>
         </div>
         <div className="ef-control-group" style={{ marginTop: '10px' }}>
-          <label>
+          <label className="module-toggle-label">
             <input
               type="checkbox"
               checked={showDistance}

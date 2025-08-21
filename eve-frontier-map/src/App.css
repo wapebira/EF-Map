@@ -81,6 +81,7 @@ body {
 
 /* Standardized checkbox label spacing */
 .ef-control-group label { display:flex; align-items:center; gap:6px; font-size:13px; }
+.module-toggle-label { display:flex; align-items:center; gap:6px; font-size:14px; font-weight:500; }
 .ef-control-group input[type="checkbox"] { transform: translateY(1px); }
 
 /* Shifting container only (share + referral) */

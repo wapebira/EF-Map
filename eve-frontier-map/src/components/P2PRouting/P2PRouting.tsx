@@ -293,7 +293,7 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
 
   return (
     <div className="p2p-routing-container">
-      <label>
+      <label className="module-toggle-label">
         <input
           type="checkbox"
           checked={open}
