@@ -12,7 +12,7 @@
   gap: 10px;
 }
 .scout-optimizer-panel.compact { font-size: 0.8em; gap:6px; }
-.scout-optimizer-panel.compact .scout-input-row { display:none; }
+.scout-optimizer-panel.hide-inputs .scout-input-row { display:none; }
 .scout-optimizer-panel.compact .scout-metrics { font-size:0.85em; }
 .scout-optimizer-panel.compact .scout-status { max-height:90px; }
 .scout-optimizer-panel.compact .scout-worker-grid { gap:3px; }

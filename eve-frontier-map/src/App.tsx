@@ -12,7 +12,7 @@ import P2PRouting from './components/P2PRouting/P2PRouting';
 import ScoutOptimizer from './components/ScoutOptimizer/ScoutOptimizer';
 import AutoCompleteInput from './components/AutoCompleteInput/AutoCompleteInput';
 import HelpPanel from './components/HelpPanel/HelpPanel';
-import { updateHashForShare, decodeShare } from './utils/share';
+import { encodeShare, decodeShare } from './utils/share';
 
 // Small referral badge component with copy-to-clipboard
 const ReferralBadge: React.FC = () => {
@@ -399,7 +399,8 @@ function App() {
           return;
         }
   setRouteResult({ path, error: undefined });
-  if(path && path.length>1){ try { const p = (lastP2PParamsRef as any).current; updateHashForShare({ type:'p', from:path[0], to:path[path.length-1], jump:p?.jump||60, optimize:p?.optimize||'fuel', algo:p?.algo||'astar', path }); } catch(e) { /* ignore */ } }
+  // Clear any existing share hash now that user has generated a fresh route locally
+  if(window.location.hash){ try { history.replaceState(null,'', window.location.pathname + window.location.search); } catch { /* ignore */ } }
 
         // On successful route, center the view on the starting system
         if (path && path.length > 0 && mapData) {
@@ -509,7 +510,7 @@ function App() {
         return;
       }
   setRouteResult({ path, error: undefined });
-  if(path && path.length>1){ try { const p=(lastP2PParamsRef as any).current; updateHashForShare({ type:'p', from:path[0], to:path[path.length-1], jump:p?.jump||60, optimize:p?.optimize||'fuel', algo:p?.algo||'astar', path }); } catch(e) { /* ignore */ } }
+  if(window.location.hash){ try { history.replaceState(null,'', window.location.pathname + window.location.search); } catch { /* ignore */ } }
 
       if (path && path.length > 0 && mapData) {
         const systemsByName = Object.fromEntries(Object.values(mapData.solar_systems).map(s => [s.name.toLowerCase(), s]));
@@ -1715,12 +1716,20 @@ function App() {
           const path = scoutRouteResult?.path || routeResult?.path;
           if(!path || path.length < 2){ setShareFeedback('No route'); setTimeout(()=>setShareFeedback(''),1500); return; }
           if(scoutRouteResult?.path){
-            updateHashForShare({ type:'s', start:path[0], returnToStart:false, path }, true);
-            setShareFeedback('Scout link copied');
+            try {
+              const encoded = encodeShare({ type:'s', start:path[0], returnToStart, path });
+              const url = window.location.origin + window.location.pathname + window.location.search + '#' + encoded;
+              navigator.clipboard.writeText(url).catch(()=>{/* ignore */});
+              setShareFeedback('Scout link copied');
+            } catch { setShareFeedback('Error'); }
           } else if(routeResult?.path){
-            const p=(lastP2PParamsRef as any).current||{jump:60,optimize:'fuel',algo:'astar'};
-            updateHashForShare({ type:'p', from:path[0], to:path[path.length-1], jump:p.jump, optimize:p.optimize, algo:p.algo, path }, true);
-            setShareFeedback('P2P link copied');
+            try {
+              const p=(lastP2PParamsRef as any).current||{jump:60,optimize:'fuel',algo:'astar'};
+              const encoded = encodeShare({ type:'p', from:path[0], to:path[path.length-1], jump:p.jump, optimize:p.optimize, algo:p.algo, path });
+              const url = window.location.origin + window.location.pathname + window.location.search + '#' + encoded;
+              navigator.clipboard.writeText(url).catch(()=>{/* ignore */});
+              setShareFeedback('P2P link copied');
+            } catch { setShareFeedback('Error'); }
           }
           setTimeout(()=> setShareFeedback(''),2500);
         }}
@@ -1805,6 +1814,8 @@ function App() {
           importedRoutePath={scoutRouteResult?.path || null}
           onBaselineRoute={(path)=>{ 
             setScoutRouteResult({ path }); 
+            // Clear existing hash on new scout route
+            if(window.location.hash){ try { history.replaceState(null,'', window.location.pathname + window.location.search); } catch { /* ignore */ } }
             if(mapData && path.length){
               const first = Object.values(mapData.solar_systems).find(s=> s.name.toLowerCase()===path[0].toLowerCase());
               if(first){ selectSystem(first); }
@@ -1812,6 +1823,7 @@ function App() {
           }}
           onOptimizedRoute={(path)=>{ 
             setScoutRouteResult({ path }); 
+            if(window.location.hash){ try { history.replaceState(null,'', window.location.pathname + window.location.search); } catch { /* ignore */ } }
             if(mapData && path.length){
               const first = Object.values(mapData.solar_systems).find(s=> s.name.toLowerCase()===path[0].toLowerCase());
               if(first){ selectSystem(first); }
