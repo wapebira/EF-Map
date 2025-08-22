@@ -1258,9 +1258,10 @@ function App() {
     routeLinesRef.current = routeGroup;
     routeSourceRef.current = scoutRouteResult?.path ? 'scout' : 'p2p';
     const accentHex = accentIsBlue ? 0x00aaff : 0xff4c26;
-    const ROUTE_TUBE_RADIUS = 0.375;
-    const ROUTE_TUBULAR_SEGMENTS = 64;
-    const pulseSpheres: THREE.Mesh[] = [];
+  const ROUTE_TUBE_RADIUS = 0.375; // base world radius (will be capped by screen-space)
+  const ROUTE_TUBULAR_SEGMENTS = 64;
+  const pulseSpheres: THREE.Mesh[] = [];
+  const segmentDescriptors: Array<{ isStargate: boolean; startVec: THREE.Vector3; endVec: THREE.Vector3; controlPoint?: THREE.Vector3; mesh: THREE.Mesh; }> = [];
 
     for (let i = 0; i < pathSystems.length - 1; i++) {
       const startSystem = pathSystems[i];
@@ -1287,6 +1288,7 @@ function App() {
         pulse.position.copy(startVec);
         routeGroup.add(pulse);
         pulseSpheres.push(pulse);
+        segmentDescriptors.push({ isStargate: true, startVec, endVec, mesh });
       } else {
         const midPoint = new THREE.Vector3().addVectors(startVec, endVec).multiplyScalar(0.5);
         const dist = startVec.distanceTo(endVec);
@@ -1304,9 +1306,46 @@ function App() {
         pulse.position.copy(startVec);
         routeGroup.add(pulse);
         pulseSpheres.push(pulse);
+        segmentDescriptors.push({ isStargate: false, startVec, endVec, controlPoint, mesh });
       }
     }
     sceneRef.current.add(routeGroup);
+
+    // Dynamic pixel-size capped thickness updater (8px diameter cap)
+    const routePts = segmentDescriptors.flatMap(s => [s.startVec, s.endVec]);
+    const routeBox = new THREE.Box3().setFromPoints(routePts);
+    const routeSphere = routeBox.getBoundingSphere(new THREE.Sphere());
+    let lastAppliedRadius = ROUTE_TUBE_RADIUS;
+    const thicknessUpdater = () => {
+      if (!cameraRef.current || !rendererRef.current) return;
+      const cam = cameraRef.current;
+      const dist = cam.position.distanceTo(routeSphere.center);
+      if (dist <= 0) return;
+      const fov = cam.fov * Math.PI / 180;
+      const canvasH = rendererRef.current.domElement.clientHeight || window.innerHeight;
+      const desiredPixelDiameter = 8; // cap
+      const desiredPixelRadius = desiredPixelDiameter / 2;
+      // pixelHeight = (worldHeight / dist) * (canvasH / (2 * tan(fov/2)))
+      // worldRadius = pixelRadius * dist * (2 * tan(fov/2)) / canvasH
+      const worldRadiusCap = desiredPixelRadius * dist * (2 * Math.tan(fov / 2)) / canvasH;
+      const targetRadius = Math.min(ROUTE_TUBE_RADIUS, worldRadiusCap);
+      if (Math.abs(targetRadius - lastAppliedRadius) < 0.01) return; // skip small changes
+      // Rebuild geometries with new radius
+      segmentDescriptors.forEach(seg => {
+        try {
+          (seg.mesh.geometry as THREE.TubeGeometry).dispose();
+          if (seg.isStargate) {
+            const curve = new THREE.CatmullRomCurve3([seg.startVec.clone(), seg.endVec.clone()]);
+            seg.mesh.geometry = new THREE.TubeGeometry(curve, Math.max(8, Math.floor(seg.startVec.distanceTo(seg.endVec) / 10)), targetRadius, 8, false);
+          } else {
+            const curve = new THREE.QuadraticBezierCurve3(seg.startVec, seg.controlPoint!, seg.endVec);
+            seg.mesh.geometry = new THREE.TubeGeometry(curve as any, ROUTE_TUBULAR_SEGMENTS, targetRadius, 8, false);
+          }
+        } catch (e) { /* ignore */ }
+      });
+      lastAppliedRadius = targetRadius;
+    };
+    routeAnimUpdatersRef.current.push(thicknessUpdater);
 
     // --- Auto zoom & animated transition to encompass route ---
     try {
@@ -1385,7 +1424,7 @@ function App() {
       };
       animators.push(updater);
     });
-    routeAnimUpdatersRef.current = animators;
+  routeAnimUpdatersRef.current = [...routeAnimUpdatersRef.current, ...animators];
 
     return () => {
       animators.forEach(a => {
