@@ -174,6 +174,10 @@ function App() {
 
   // Updaters that run each frame (used for route pulse animations)
   const routeAnimUpdatersRef = useRef<Array<() => void>>([]);
+  // Dynamic route thickness scaling refs (for pulse sphere sync with pixel cap)
+  const routeBaseRadiusRef = useRef<number>(0.375); // default base tube radius
+  const routeCurrentRadiusRef = useRef<number>(0.375);
+  const routeRadiusScaleRef = useRef<number>(1); // currentRadius / baseRadius
 
   // New refs for managing overlays
   const selectedStarHaloRef = useRef<THREE.Points | null>(null);
@@ -1259,6 +1263,9 @@ function App() {
     routeSourceRef.current = scoutRouteResult?.path ? 'scout' : 'p2p';
     const accentHex = accentIsBlue ? 0x00aaff : 0xff4c26;
   const ROUTE_TUBE_RADIUS = 0.375; // base world radius (will be capped by screen-space)
+  routeBaseRadiusRef.current = ROUTE_TUBE_RADIUS;
+  routeCurrentRadiusRef.current = ROUTE_TUBE_RADIUS;
+  routeRadiusScaleRef.current = 1;
   const ROUTE_TUBULAR_SEGMENTS = 64;
   const pulseSpheres: THREE.Mesh[] = [];
   const segmentDescriptors: Array<{ isStargate: boolean; startVec: THREE.Vector3; endVec: THREE.Vector3; controlPoint?: THREE.Vector3; mesh: THREE.Mesh; }> = [];
@@ -1344,6 +1351,8 @@ function App() {
         } catch (e) { /* ignore */ }
       });
       lastAppliedRadius = targetRadius;
+      routeCurrentRadiusRef.current = targetRadius;
+      routeRadiusScaleRef.current = targetRadius / routeBaseRadiusRef.current;
     };
     routeAnimUpdatersRef.current.push(thicknessUpdater);
 
@@ -1404,7 +1413,7 @@ function App() {
     } catch (e) { /* ignore auto zoom errors */ }
 
     const animators: Array<() => void> = [];
-    pulseSpheres.forEach((pulse, idx) => {
+  pulseSpheres.forEach((pulse, idx) => {
       const start = pathSystems[idx];
       const end = pathSystems[idx + 1];
       const startPos = getTransformedPosition(start.position);
@@ -1419,8 +1428,10 @@ function App() {
         if (t > 1) t = 0;
         const pos = curve.getPoint(t);
         pulse.position.copy(pos);
-        const scale = 1 + Math.sin(t * Math.PI * 2) * 0.3;
-        pulse.scale.set(scale, scale, scale);
+    const animScale = 1 + Math.sin(t * Math.PI * 2) * 0.3;
+    const thicknessScale = routeRadiusScaleRef.current; // sync with tube thickness cap
+    const finalScale = animScale * thicknessScale;
+    pulse.scale.set(finalScale, finalScale, finalScale);
       };
       animators.push(updater);
     });
