@@ -1308,46 +1308,61 @@ function App() {
     }
     sceneRef.current.add(routeGroup);
 
-    // --- Auto zoom to route ---
+    // --- Auto zoom & animated transition to encompass route ---
     try {
       if (cameraRef.current && controlsRef.current) {
         const cam = cameraRef.current;
         const controls = controlsRef.current;
-        // Collect transformed positions of path systems
         const pts: THREE.Vector3[] = pathSystems.map(sys => {
           const p = getTransformedPosition(sys.position);
           return new THREE.Vector3(p.x, p.y, p.z);
         });
         if (pts.length >= 2) {
           const box = new THREE.Box3().setFromPoints(pts);
-            const sphere = box.getBoundingSphere(new THREE.Sphere());
-            const radius = sphere.radius;
-            if (radius > 0) {
-              // Recenter camera & target so route is centered without altering direction vector
-              const currentDir = cam.position.clone().sub(controls.target); // direction FROM target
-              const centerOffset = sphere.center.clone().sub(controls.target);
-              controls.target.add(centerOffset);
-              cam.position.add(centerOffset);
-              // Compute required distance so bounding sphere occupies ~60% of viewport height
-              const fov = cam.fov * Math.PI / 180;
-              const aspect = cam.aspect;
-              const hFov = 2 * Math.atan(Math.tan(fov / 2) * aspect);
-              const desiredFill = 0.6; // fraction of view height the diameter should span
-              const effectiveRadius = radius / desiredFill; // scale so sphere appears larger
-              const distV = effectiveRadius / Math.tan(fov / 2);
-              const distH = effectiveRadius / Math.tan(hFov / 2);
-              const needed = Math.max(distV, distH);
-              const dirNorm = currentDir.clone().normalize();
-              const newPos = controls.target.clone().add(dirNorm.multiplyScalar(needed));
+          const sphere = box.getBoundingSphere(new THREE.Sphere());
+          const radius = sphere.radius;
+          if (radius > 0) {
+            const fov = cam.fov * Math.PI / 180;
+            const aspect = cam.aspect;
+            const hFov = 2 * Math.atan(Math.tan(fov / 2) * aspect);
+            const desiredFill = 0.6; // portion of height the diameter should roughly occupy
+            const effectiveRadius = radius / desiredFill;
+            const distV = effectiveRadius / Math.tan(fov / 2);
+            const distH = effectiveRadius / Math.tan(hFov / 2);
+            const neededDistance = Math.max(distV, distH);
+
+            // Preserve viewing direction
+            const currentDir = cam.position.clone().sub(controls.target);
+            const dirNorm = currentDir.clone().normalize();
+
+            // Target of animation: move target to route center, position along preserved direction at needed distance
+            const newTarget = sphere.center.clone();
+            const newPos = newTarget.clone().add(dirNorm.multiplyScalar(neededDistance));
+
+            // Only animate if movement or distance change is significant (prevents tiny jiggles)
+            const distMove = controls.target.distanceTo(newTarget);
+            const distChange = cam.position.distanceTo(newPos);
+            const threshold = 5; // world units
+            if (distMove > threshold || Math.abs(distChange) > threshold) {
+              const anim = animationRef.current;
+              anim.isAnimating = true;
+              anim.startTime = Date.now();
+              anim.duration = 800; // ms smooth transition
+              anim.startPos.copy(cam.position);
+              anim.startTarget.copy(controls.target);
+              anim.endTarget.copy(newTarget);
+              anim.endPos.copy(newPos);
+            } else {
+              // Apply immediately if negligible
+              controls.target.copy(newTarget);
               cam.position.copy(newPos);
               cam.updateProjectionMatrix();
               controls.update();
             }
+          }
         }
       }
-    } catch (e) {
-      // Non-fatal; ignore auto-zoom errors.
-    }
+    } catch (e) { /* ignore auto zoom errors */ }
 
     const animators: Array<() => void> = [];
     pulseSpheres.forEach((pulse, idx) => {
