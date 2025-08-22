@@ -1547,27 +1547,34 @@ function App() {
     };
 
     const onPointerUp = (event: PointerEvent) => {
-      if (event.button !== 0) return; // Only care about left mouse button
-
       const timeElapsed = Date.now() - mouseDownTimeRef.current;
-
-      if (!isDraggingRef.current && timeElapsed < CLICK_TIME_THRESHOLD) {
-        // It was a click, not a drag
-        if (hoveredSystem) {
-          selectSystem(hoveredSystem);
+      // Handle left click selection only for left button, but ALWAYS reset drag state
+      if (event.button === 0) {
+        if (!isDraggingRef.current && timeElapsed < CLICK_TIME_THRESHOLD) {
+          if (hoveredSystem) {
+            selectSystem(hoveredSystem);
+          }
         }
       }
-      isDraggingRef.current = false; // Reset drag state
+      // Reset drag state for any button so hover resumes after right/middle drags
+      isDraggingRef.current = false;
+    };
+
+    const onPointerLeave = () => {
+      // Safety: ensure drag state cleared when pointer leaves canvas (prevents stuck state)
+      isDraggingRef.current = false;
     };
 
     currentRenderer.domElement.addEventListener('pointermove', onPointerMove);
     currentRenderer.domElement.addEventListener('pointerdown', onPointerDown);
-    currentRenderer.domElement.addEventListener('pointerup', onPointerUp);
+  currentRenderer.domElement.addEventListener('pointerup', onPointerUp);
+  currentRenderer.domElement.addEventListener('pointerleave', onPointerLeave);
 
     return () => {
       currentRenderer.domElement.removeEventListener('pointermove', onPointerMove);
       currentRenderer.domElement.removeEventListener('pointerdown', onPointerDown);
-      currentRenderer.domElement.removeEventListener('pointerup', onPointerUp);
+  currentRenderer.domElement.removeEventListener('pointerup', onPointerUp);
+  currentRenderer.domElement.removeEventListener('pointerleave', onPointerLeave);
     };
     }, [isLoaded, hoveredSystem, isDraggingRef, mouseDownPosRef, mouseDownTimeRef, createSystemLabelElement, selectSystem, isPlanetCountActive, showDistance, highlightedSystem]);
 
