@@ -12,7 +12,7 @@ import P2PRouting from './components/P2PRouting/P2PRouting';
 import ScoutOptimizer from './components/ScoutOptimizer/ScoutOptimizer';
 import AutoCompleteInput from './components/AutoCompleteInput/AutoCompleteInput';
 import HelpPanel from './components/HelpPanel/HelpPanel';
-import { updateHashForShare, decodeShare } from './utils/share';
+import { encodeShare, decodeShare } from './utils/share';
 
 // Small referral badge component with copy-to-clipboard
 const ReferralBadge: React.FC = () => {
@@ -174,6 +174,10 @@ function App() {
 
   // Updaters that run each frame (used for route pulse animations)
   const routeAnimUpdatersRef = useRef<Array<() => void>>([]);
+  // Dynamic route thickness scaling refs (for pulse sphere sync with pixel cap)
+  const routeBaseRadiusRef = useRef<number>(0.375); // default base tube radius
+  const routeCurrentRadiusRef = useRef<number>(0.375);
+  const routeRadiusScaleRef = useRef<number>(1); // currentRadius / baseRadius
 
   // New refs for managing overlays
   const selectedStarHaloRef = useRef<THREE.Points | null>(null);
@@ -395,7 +399,8 @@ function App() {
           return;
         }
   setRouteResult({ path, error: undefined });
-  if(path && path.length>1){ try { const p = (lastP2PParamsRef as any).current; updateHashForShare({ type:'p', from:path[0], to:path[path.length-1], jump:p?.jump||60, optimize:p?.optimize||'fuel', algo:p?.algo||'astar', path }); } catch(e) { /* ignore */ } }
+  // Clear any existing share hash now that user has generated a fresh route locally
+  if(window.location.hash){ try { history.replaceState(null,'', window.location.pathname + window.location.search); } catch { /* ignore */ } }
 
         // On successful route, center the view on the starting system
         if (path && path.length > 0 && mapData) {
@@ -505,7 +510,7 @@ function App() {
         return;
       }
   setRouteResult({ path, error: undefined });
-  if(path && path.length>1){ try { const p=(lastP2PParamsRef as any).current; updateHashForShare({ type:'p', from:path[0], to:path[path.length-1], jump:p?.jump||60, optimize:p?.optimize||'fuel', algo:p?.algo||'astar', path }); } catch(e) { /* ignore */ } }
+  if(window.location.hash){ try { history.replaceState(null,'', window.location.pathname + window.location.search); } catch { /* ignore */ } }
 
       if (path && path.length > 0 && mapData) {
         const systemsByName = Object.fromEntries(Object.values(mapData.solar_systems).map(s => [s.name.toLowerCase(), s]));
@@ -1258,9 +1263,13 @@ function App() {
     routeLinesRef.current = routeGroup;
     routeSourceRef.current = scoutRouteResult?.path ? 'scout' : 'p2p';
     const accentHex = accentIsBlue ? 0x00aaff : 0xff4c26;
-    const ROUTE_TUBE_RADIUS = 0.375;
-    const ROUTE_TUBULAR_SEGMENTS = 64;
-    const pulseSpheres: THREE.Mesh[] = [];
+  const ROUTE_TUBE_RADIUS = 0.375; // base world radius (will be capped by screen-space)
+  routeBaseRadiusRef.current = ROUTE_TUBE_RADIUS;
+  routeCurrentRadiusRef.current = ROUTE_TUBE_RADIUS;
+  routeRadiusScaleRef.current = 1;
+  const ROUTE_TUBULAR_SEGMENTS = 64;
+  const pulseSpheres: THREE.Mesh[] = [];
+  const segmentDescriptors: Array<{ isStargate: boolean; startVec: THREE.Vector3; endVec: THREE.Vector3; controlPoint?: THREE.Vector3; mesh: THREE.Mesh; }> = [];
 
     for (let i = 0; i < pathSystems.length - 1; i++) {
       const startSystem = pathSystems[i];
@@ -1287,6 +1296,7 @@ function App() {
         pulse.position.copy(startVec);
         routeGroup.add(pulse);
         pulseSpheres.push(pulse);
+        segmentDescriptors.push({ isStargate: true, startVec, endVec, mesh });
       } else {
         const midPoint = new THREE.Vector3().addVectors(startVec, endVec).multiplyScalar(0.5);
         const dist = startVec.distanceTo(endVec);
@@ -1304,9 +1314,48 @@ function App() {
         pulse.position.copy(startVec);
         routeGroup.add(pulse);
         pulseSpheres.push(pulse);
+        segmentDescriptors.push({ isStargate: false, startVec, endVec, controlPoint, mesh });
       }
     }
     sceneRef.current.add(routeGroup);
+
+    // Dynamic pixel-size capped thickness updater (8px diameter cap)
+    const routePts = segmentDescriptors.flatMap(s => [s.startVec, s.endVec]);
+    const routeBox = new THREE.Box3().setFromPoints(routePts);
+    const routeSphere = routeBox.getBoundingSphere(new THREE.Sphere());
+    let lastAppliedRadius = ROUTE_TUBE_RADIUS;
+    const thicknessUpdater = () => {
+      if (!cameraRef.current || !rendererRef.current) return;
+      const cam = cameraRef.current;
+      const dist = cam.position.distanceTo(routeSphere.center);
+      if (dist <= 0) return;
+      const fov = cam.fov * Math.PI / 180;
+      const canvasH = rendererRef.current.domElement.clientHeight || window.innerHeight;
+      const desiredPixelDiameter = 8; // cap
+      const desiredPixelRadius = desiredPixelDiameter / 2;
+      // pixelHeight = (worldHeight / dist) * (canvasH / (2 * tan(fov/2)))
+      // worldRadius = pixelRadius * dist * (2 * tan(fov/2)) / canvasH
+      const worldRadiusCap = desiredPixelRadius * dist * (2 * Math.tan(fov / 2)) / canvasH;
+      const targetRadius = Math.min(ROUTE_TUBE_RADIUS, worldRadiusCap);
+      if (Math.abs(targetRadius - lastAppliedRadius) < 0.01) return; // skip small changes
+      // Rebuild geometries with new radius
+      segmentDescriptors.forEach(seg => {
+        try {
+          (seg.mesh.geometry as THREE.TubeGeometry).dispose();
+          if (seg.isStargate) {
+            const curve = new THREE.CatmullRomCurve3([seg.startVec.clone(), seg.endVec.clone()]);
+            seg.mesh.geometry = new THREE.TubeGeometry(curve, Math.max(8, Math.floor(seg.startVec.distanceTo(seg.endVec) / 10)), targetRadius, 8, false);
+          } else {
+            const curve = new THREE.QuadraticBezierCurve3(seg.startVec, seg.controlPoint!, seg.endVec);
+            seg.mesh.geometry = new THREE.TubeGeometry(curve as any, ROUTE_TUBULAR_SEGMENTS, targetRadius, 8, false);
+          }
+        } catch (e) { /* ignore */ }
+      });
+      lastAppliedRadius = targetRadius;
+      routeCurrentRadiusRef.current = targetRadius;
+      routeRadiusScaleRef.current = targetRadius / routeBaseRadiusRef.current;
+    };
+    routeAnimUpdatersRef.current.push(thicknessUpdater);
 
     // --- Auto zoom & animated transition to encompass route ---
     try {
@@ -1365,7 +1414,7 @@ function App() {
     } catch (e) { /* ignore auto zoom errors */ }
 
     const animators: Array<() => void> = [];
-    pulseSpheres.forEach((pulse, idx) => {
+  pulseSpheres.forEach((pulse, idx) => {
       const start = pathSystems[idx];
       const end = pathSystems[idx + 1];
       const startPos = getTransformedPosition(start.position);
@@ -1380,12 +1429,14 @@ function App() {
         if (t > 1) t = 0;
         const pos = curve.getPoint(t);
         pulse.position.copy(pos);
-        const scale = 1 + Math.sin(t * Math.PI * 2) * 0.3;
-        pulse.scale.set(scale, scale, scale);
+    const animScale = 1 + Math.sin(t * Math.PI * 2) * 0.3;
+    const thicknessScale = routeRadiusScaleRef.current; // sync with tube thickness cap
+    const finalScale = animScale * thicknessScale;
+    pulse.scale.set(finalScale, finalScale, finalScale);
       };
       animators.push(updater);
     });
-    routeAnimUpdatersRef.current = animators;
+  routeAnimUpdatersRef.current = [...routeAnimUpdatersRef.current, ...animators];
 
     return () => {
       animators.forEach(a => {
@@ -1665,12 +1716,20 @@ function App() {
           const path = scoutRouteResult?.path || routeResult?.path;
           if(!path || path.length < 2){ setShareFeedback('No route'); setTimeout(()=>setShareFeedback(''),1500); return; }
           if(scoutRouteResult?.path){
-            updateHashForShare({ type:'s', start:path[0], returnToStart:false, path }, true);
-            setShareFeedback('Scout link copied');
+            try {
+              const encoded = encodeShare({ type:'s', start:path[0], returnToStart, path });
+              const url = window.location.origin + window.location.pathname + window.location.search + '#' + encoded;
+              navigator.clipboard.writeText(url).catch(()=>{/* ignore */});
+              setShareFeedback('Scout link copied');
+            } catch { setShareFeedback('Error'); }
           } else if(routeResult?.path){
-            const p=(lastP2PParamsRef as any).current||{jump:60,optimize:'fuel',algo:'astar'};
-            updateHashForShare({ type:'p', from:path[0], to:path[path.length-1], jump:p.jump, optimize:p.optimize, algo:p.algo, path }, true);
-            setShareFeedback('P2P link copied');
+            try {
+              const p=(lastP2PParamsRef as any).current||{jump:60,optimize:'fuel',algo:'astar'};
+              const encoded = encodeShare({ type:'p', from:path[0], to:path[path.length-1], jump:p.jump, optimize:p.optimize, algo:p.algo, path });
+              const url = window.location.origin + window.location.pathname + window.location.search + '#' + encoded;
+              navigator.clipboard.writeText(url).catch(()=>{/* ignore */});
+              setShareFeedback('P2P link copied');
+            } catch { setShareFeedback('Error'); }
           }
           setTimeout(()=> setShareFeedback(''),2500);
         }}
@@ -1755,6 +1814,8 @@ function App() {
           importedRoutePath={scoutRouteResult?.path || null}
           onBaselineRoute={(path)=>{ 
             setScoutRouteResult({ path }); 
+            // Clear existing hash on new scout route
+            if(window.location.hash){ try { history.replaceState(null,'', window.location.pathname + window.location.search); } catch { /* ignore */ } }
             if(mapData && path.length){
               const first = Object.values(mapData.solar_systems).find(s=> s.name.toLowerCase()===path[0].toLowerCase());
               if(first){ selectSystem(first); }
@@ -1762,6 +1823,7 @@ function App() {
           }}
           onOptimizedRoute={(path)=>{ 
             setScoutRouteResult({ path }); 
+            if(window.location.hash){ try { history.replaceState(null,'', window.location.pathname + window.location.search); } catch { /* ignore */ } }
             if(mapData && path.length){
               const first = Object.values(mapData.solar_systems).find(s=> s.name.toLowerCase()===path[0].toLowerCase());
               if(first){ selectSystem(first); }
