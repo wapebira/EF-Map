@@ -1745,43 +1745,42 @@ function App() {
     <HelpPanel accentIsBlue={accentIsBlue} />
   </div>
       <div style={{ position: 'absolute', top: 10, left: 10, zIndex: 1, color: 'white', backgroundColor: 'rgba(0,0,0,0.5)', padding: '10px', borderRadius: '5px' }}>
-        <div>
-          <AutoCompleteInput
-            placeholder="Search for a system..."
-            value={searchQuery}
-            onChange={setSearchQuery}
-            onSelect={(selected) => {
-              setSearchQuery(selected);
-              handleSearch({ key: 'Enter' } as React.KeyboardEvent<HTMLInputElement>, selected);
-            }}
-            dataSource={mapData ? Object.values(mapData.solar_systems).map(s => s.name) : []}
-          />
-          <div style={{ display:'flex', gap:'6px', marginTop:'6px' }}>
-            <button
-              style={{
-                background: 'var(--accent)',
-                color: '#fff',
-                border: 'none',
-                padding: '6px 10px',
-                fontSize: '12px',
-                fontWeight: 600,
-                cursor: 'pointer',
-                borderRadius: '4px'
+        <div style={{ display:'flex', alignItems:'stretch', gap:'6px' }}>
+          <div style={{ flex:1 }}>
+            <AutoCompleteInput
+              placeholder="Search for a system..."
+              value={searchQuery}
+              onChange={setSearchQuery}
+              onSelect={(selected) => {
+                setSearchQuery(selected);
+                handleSearch({ key: 'Enter' } as React.KeyboardEvent<HTMLInputElement>, selected);
               }}
-              onClick={()=>{
-                // Clear route displays without moving camera
-                setRouteResult(null);
-                setScoutRouteResult(null);
-                setScoutInvalidateToken(t=> t+1);
-                // Clear hash if any
-                if(window.location.hash){ try { history.replaceState(null,'', window.location.pathname + window.location.search); } catch {/* ignore */} }
-                // Reset ancillary module toggles? Keep user toggles as-is per spec; only inputs.
-                setSearchQuery('');
-                setResetToken(t=> t+1);
-              }}
-              aria-label="Reset all inputs"
-            >Reset</button>
+              dataSource={mapData ? Object.values(mapData.solar_systems).map(s => s.name) : []}
+            />
           </div>
+          <button
+            style={{
+              background: 'var(--accent)',
+              color: '#fff',
+              border: 'none',
+              padding: '6px 12px',
+              fontSize: '12px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              borderRadius: '4px',
+              height: '38px',
+              alignSelf:'center'
+            }}
+            onClick={()=>{
+              setRouteResult(null);
+              setScoutRouteResult(null);
+              setScoutInvalidateToken(t=> t+1);
+              if(window.location.hash){ try { history.replaceState(null,'', window.location.pathname + window.location.search); } catch {/* ignore */} }
+              setSearchQuery('');
+              setResetToken(t=> t+1);
+            }}
+            aria-label="Reset all inputs"
+          >Reset</button>
         </div>
   {/* ...existing controls... (accent toggle removed from here) */}
         <div className="ef-control-group" style={{ marginTop: '10px' }}>
