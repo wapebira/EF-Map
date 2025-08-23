@@ -15,3 +15,5 @@ export async function handler(event) {
     return { statusCode: 500, body: 'Internal Error' };
   }
 }
+
+export default { handler };
