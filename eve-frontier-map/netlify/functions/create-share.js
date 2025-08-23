@@ -29,7 +29,14 @@ export async function handler(event) {
       store = getStore(storeName);
     } catch (e) {
       console.error('create-share failed to getStore', storeName, e);
-      throw e;
+      return { statusCode: 500, body: 'getStore failed: ' + e.message };
+    }
+    // Probe write
+    try {
+      await store.set('diag_write_probe', '1', { onlyIfNew: true });
+    } catch (e) {
+      console.error('create-share probe write failed', e);
+      return { statusCode: 500, body: 'probe write failed: ' + e.message };
     }
     let id = typeof preferId === 'string' ? preferId.slice(0, 16).replace(/[^A-Za-z0-9_-]/g, '') : '';
     if (!id) id = randomUUID().replace(/-/g, '').slice(0, 10);
@@ -40,7 +47,7 @@ export async function handler(event) {
         modified = result.modified;
       } catch (e) {
         console.error('create-share store.set error', id, e);
-        throw e;
+        return { statusCode: 500, body: 'store.set failed: ' + e.message };
       }
       if (modified) {
         return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) };
@@ -50,7 +57,7 @@ export async function handler(event) {
     return { statusCode: 500, body: 'Could not allocate id' };
   } catch (err) {
     console.error('create-share error', err);
-    return { statusCode: 500, body: 'Internal Error' };
+    return { statusCode: 500, body: 'Unhandled: ' + (err && err.message) };
   }
 }
 
