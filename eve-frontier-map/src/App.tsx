@@ -1839,6 +1839,7 @@ function App() {
           onReturnToStartChange={setReturnToStart}
           invalidateToken={scoutInvalidateToken}
           importedRoutePath={scoutRouteResult?.path || null}
+          resetToken={resetToken}
           onBaselineRoute={(path)=>{ 
             setScoutRouteResult({ path }); 
             // Clear existing hash on new scout route

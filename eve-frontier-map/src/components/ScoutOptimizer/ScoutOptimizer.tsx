@@ -19,11 +19,12 @@ interface ScoutOptimizerProps {
 	onClearRoute?:()=>void;
 	invalidateToken?: number; // external invalidation (e.g. P2P route started)
 	importedRoutePath?: string[] | null; // path supplied from shared URL (expanded display path)
+	resetToken?: number; // external reset for clearing all inputs
 }
 
 const MAX_SYSTEMS_WARNING = 300;
 
-const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, onReturnToStartChange, onBaselineRoute, onOptimizedRoute, onClearRoute, invalidateToken, importedRoutePath }: ScoutOptimizerProps) => {
+const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, onReturnToStartChange, onBaselineRoute, onOptimizedRoute, onClearRoute, invalidateToken, importedRoutePath, resetToken }: ScoutOptimizerProps) => {
 	const [startSystem, setStartSystem] = useState('');
 	const [radius, setRadius] = useState('50');
 	const [useRegion, setUseRegion] = useState(false);
@@ -83,6 +84,38 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	const pendingBaselineRef = useRef<{ start:string; systems:string[]; returnToStart:boolean }|null>(null);
 	// Generation token to ignore late worker messages after invalidation or new run
 	const generationRef = useRef(0);
+
+	// External reset: restore initial defaults
+	useEffect(()=>{
+		if(resetToken === undefined) return;
+		setStartSystem('');
+		setRadius('50');
+		setUseRegion(false);
+		setGateReachableOnly(false);
+		setMaxOptimizeTime('60');
+		setStallTimeout('10');
+		setMinRequiredShipRange(null);
+		setShipMaxRange('60');
+		setShipTradeDistance('0');
+		setMinGateHopsSaved('999');
+		setWorkerCount(Math.max(1,(navigator.hardwareConcurrency||4)-2).toString());
+		setStatusLog([]);
+		setIsCalculating(false);
+		setCompactPref(false);
+		setHideInputsPref(false);
+		setChampionPath(null); championPathRef.current=null;
+		setChampionDisplayPath(null); championDisplayPathRef.current=null;
+		setChampionDistance(null);
+		setChampionShipJumps(null); setChampionShipDistance(null);
+		baselineDistanceRef.current=null;
+		setDatasetChanged(false);
+		setNotePages([]); setActiveNotePage(0); setCopyButtonText('Copy');
+		workersRef.current.forEach(w=>{ try{ w.terminate(); }catch(e){} }); workersRef.current=[];
+		workerStatusRef.current=[];
+		pendingBaselineRef.current=null; baselineDoneRef.current=false;
+		if(globalMonitorRef.current!==undefined){ clearInterval(globalMonitorRef.current); globalMonitorRef.current=undefined; }
+		generationRef.current += 1; // invalidate any stray worker messages
+	}, [resetToken]);
 
 	const stargatesArray = mapData ? Object.values(mapData.stargates) : [];
 	const gatesBySource: {[id:number]: number[]} = {}; stargatesArray.forEach(g=>{ if(!gatesBySource[g.source_system_id]) gatesBySource[g.source_system_id]=[]; gatesBySource[g.source_system_id].push(g.destination_system_id); if(!gatesBySource[g.destination_system_id]) gatesBySource[g.destination_system_id]=[]; gatesBySource[g.destination_system_id].push(g.source_system_id); });
