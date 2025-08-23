@@ -11,21 +11,37 @@ export async function handler(event) {
     try {
       body = event.body ? JSON.parse(event.body) : {};
     } catch {
+      console.error('create-share invalid json body', event.body?.slice(0,200));
       return { statusCode: 400, body: 'Invalid JSON' };
     }
     const { data, preferId } = body || {};
     if (typeof data !== 'string' || !data.trim()) {
+      console.error('create-share missing data field');
       return { statusCode: 400, body: 'Missing data' };
     }
     if (!data.startsWith('r1|')) {
+      console.error('create-share invalid prefix', data.slice(0,10));
       return { statusCode: 400, body: 'Invalid share payload' };
     }
     const storeName = process.env.SHARE_STORE || 'shares';
-    const store = getStore(storeName);
+    let store;
+    try {
+      store = getStore(storeName);
+    } catch (e) {
+      console.error('create-share failed to getStore', storeName, e);
+      throw e;
+    }
     let id = typeof preferId === 'string' ? preferId.slice(0, 16).replace(/[^A-Za-z0-9_-]/g, '') : '';
     if (!id) id = randomUUID().replace(/-/g, '').slice(0, 10);
     for (let attempts = 0; attempts < 3; attempts++) {
-      const { modified } = await store.set(id, data, { onlyIfNew: true });
+      let modified;
+      try {
+        const result = await store.set(id, data, { onlyIfNew: true });
+        modified = result.modified;
+      } catch (e) {
+        console.error('create-share store.set error', id, e);
+        throw e;
+      }
       if (modified) {
         return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) };
       }

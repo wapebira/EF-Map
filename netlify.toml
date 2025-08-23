@@ -10,5 +10,7 @@
   NODE_VERSION = "20"
 
 [functions]
-  directory = "eve-frontier-map/netlify/functions"
+  # The functions directory is relative to the build base above. Since base is
+  # already set to "eve-frontier-map", we only need the path inside that dir.
+  directory = "netlify/functions"
   node_bundler = "esbuild"
