@@ -32,8 +32,8 @@ export async function handler(event) {
       storeError = e;
       console.warn('create-share direct getStore failed, attempting manual context', e.message);
       // Attempt manual context if env vars provided
-      const siteID = process.env.NETLIFY_SITE_ID || process.env.SITE_ID;
-      const token = process.env.BLOBS_TOKEN;
+  const siteID = process.env.BLOB_SITE_ID || process.env.NETLIFY_SITE_ID || process.env.SITE_ID;
+  const token = process.env.BLOB_PAT || process.env.BLOBS_TOKEN;
       if (siteID && token) {
         try {
           store = getStore(storeName, { siteID, token });

@@ -12,6 +12,16 @@ export async function handler(event) {
       store = getStore(storeName);
     } catch (e) {
       storeError = e;
+      const siteID = process.env.BLOB_SITE_ID || process.env.NETLIFY_SITE_ID || process.env.SITE_ID;
+      const token = process.env.BLOB_PAT || process.env.BLOBS_TOKEN;
+      if (siteID && token) {
+        try {
+          store = getStore(storeName, { siteID, token });
+          storeError = undefined;
+        } catch (e2) {
+          storeError = e2;
+        }
+      }
     }
     if (!store) {
       // In-memory fallback lookup (unlikely to hit because different lambda instance)
