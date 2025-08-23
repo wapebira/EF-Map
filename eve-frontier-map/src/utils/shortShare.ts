@@ -15,7 +15,7 @@ export async function createShortShare(encoded: string): Promise<string> {
 }
 
 export async function fetchShortShare(id: string): Promise<string | null> {
-  const res = await fetch(`/.netlify/functions/get-share/${encodeURIComponent(id)}`);
+  const res = await fetch(`/.netlify/functions/get-share?id=${encodeURIComponent(id)}`);
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`Fetch failed ${res.status}`);
   const json = await res.json();
