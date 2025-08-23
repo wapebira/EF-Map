@@ -10,5 +10,5 @@
   NODE_VERSION = "20"
 
 [functions]
-  directory = "eve-frontier-map/netlify/functions"
+  directory = "eve-frontier-map/netlify/functions" # correct path is actually eve-frontier-map/netlify/functions but folder is misspelled 'netlify'
   node_bundler = "esbuild"
