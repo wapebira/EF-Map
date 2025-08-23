@@ -1,0 +1,16 @@
+#[ Netlify root configuration ]
+# Ensures builds run from the front-end app subdirectory and functions are detected.
+
+[build]
+  base = "eve-frontier-map"
+  publish = "eve-frontier-map/dist"
+  command = "npm run build"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+[functions]
+  # Functions directory path must be relative to repository root (publish is relative to base).
+  # Reverting to full path so Netlify detects functions.
+  directory = "eve-frontier-map/netlify/functions"
+  node_bundler = "esbuild"

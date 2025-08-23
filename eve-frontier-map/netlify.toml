@@ -1,2 +1,8 @@
 [build.environment]
   NODE_VERSION = "20"
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+# Optional: enforce edge function regions or other settings later
