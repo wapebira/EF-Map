@@ -1,7 +1,7 @@
 import { getStore } from '@netlify/blobs';
 import { randomUUID } from 'node:crypto';
 
-// Classic Netlify Function handler for broader runtime compatibility.
+// Short share creation: stores compressed route state under a random id.
 export async function handler(event) {
   try {
     if (event.httpMethod !== 'POST') {
@@ -24,7 +24,7 @@ export async function handler(event) {
       return { statusCode: 400, body: 'Invalid share payload' };
     }
     const storeName = process.env.SHARE_STORE || 'shares';
-    let store; let storeError;
+  let store; let storeError;
     const siteID = process.env.BLOB_SITE_ID || process.env.NETLIFY_SITE_ID || process.env.SITE_ID;
     const token = process.env.BLOB_PAT || process.env.BLOBS_TOKEN;
     // Try explicit credential object form first
@@ -44,16 +44,6 @@ export async function handler(event) {
       memoryFallback = true;
     }
     const memorySet = (k,v,onlyIfNew)=>{ const c = globalThis.__SHARE_CACHE; if (onlyIfNew && c.has(k)) return { modified:false }; c.set(k,v); return { modified:true }; };
-    if (!memoryFallback) {
-      try {
-        // Simple probe: only write if key absent
-        const probe = await store.get('diag_write_probe');
-        if (probe === null) await store.set('diag_write_probe','1');
-      } catch (e) {
-        console.error('create-share probe write failed', e);
-        return { statusCode:500, body:'probe write failed: '+e.message+(storeError? ' (initial store error: '+storeError.message+')':'') };
-      }
-    }
     let id = typeof preferId === 'string' ? preferId.slice(0,16).replace(/[^A-Za-z0-9_-]/g,'') : '';
     if (!id) id = randomUUID().replace(/-/g,'').slice(0,10);
     for (let attempts = 0; attempts < 5; attempts++) {
@@ -64,14 +54,11 @@ export async function handler(event) {
             return { statusCode:200, headers:{'Content-Type':'application/json'}, body: JSON.stringify({ id, ephemeral:true }) };
           }
         } else {
-          // Manual collision avoidance since current API lacks onlyIfNew
-            const existing = await store.get(id);
-            if (existing !== null) {
-              id = randomUUID().replace(/-/g,'').slice(0,10);
-              continue;
-            }
-            await store.set(id, data);
-            return { statusCode:200, headers:{'Content-Type':'application/json'}, body: JSON.stringify({ id, ephemeral:false }) };
+          // Collision avoidance: read first
+          const existing = await store.get(id);
+          if (existing !== null) { id = randomUUID().replace(/-/g,'').slice(0,10); continue; }
+          await store.set(id, data);
+          return { statusCode:200, headers:{'Content-Type':'application/json'}, body: JSON.stringify({ id }) };
         }
       } catch (e) {
         console.error('create-share store op error', id, e);
@@ -80,7 +67,7 @@ export async function handler(event) {
       // If memory set collided, regenerate id
       id = randomUUID().replace(/-/g,'').slice(0,10);
     }
-    return { statusCode:500, body:'Could not allocate id after retries' };
+  return { statusCode:500, body:'Could not allocate id after retries' };
   } catch (err) {
     console.error('create-share error', err);
     return { statusCode: 500, body: 'Unhandled: ' + (err && err.message) };
