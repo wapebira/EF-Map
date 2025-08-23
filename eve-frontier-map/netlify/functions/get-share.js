@@ -19,7 +19,13 @@ export async function handler(event) {
           store = getStore(storeName, { siteID, token });
           storeError = undefined;
         } catch (e2) {
-          storeError = e2;
+          // Try object signature variant
+            try {
+              store = getStore({ name: storeName, siteID, token });
+              storeError = undefined;
+            } catch (e3) {
+              storeError = e3;
+            }
         }
       }
     }

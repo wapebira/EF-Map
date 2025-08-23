@@ -14,6 +14,7 @@ export async function handler() {
     // Try opening default store
     let testGet = 'ok';
     let manualTried = false;
+    let attempts = [];
     try {
       const s = getStore('shares');
       await s.get('nonexistent-key-for-diag');
@@ -23,11 +24,20 @@ export async function handler() {
       if (siteID && token) {
         manualTried = true;
         try {
+          attempts.push('two-arg');
           const s2 = getStore('shares', { siteID, token });
           await s2.get('nonexistent-key-for-diag');
-          testGet = 'manual ok';
+          testGet = 'manual ok (two-arg)';
         } catch (e2) {
-          testGet = 'manual getStore error: ' + e2.message;
+          // Try object signature variant
+          try {
+            attempts.push('object-arg');
+            const s3 = getStore({ name: 'shares', siteID, token });
+            await s3.get('nonexistent-key-for-diag');
+            testGet = 'manual ok (object-arg)';
+          } catch (e3) {
+            testGet = 'manual getStore error: ' + e2.message + ' | object-arg error: ' + e3.message;
+          }
         }
       } else {
         testGet = 'getStore error: ' + e.message + ' (no env vars)';
@@ -36,7 +46,7 @@ export async function handler() {
     return {
       statusCode: 200,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ node: process.versions.node, stores: storesInfo, listError, testGet, manualTried, env: {
+      body: JSON.stringify({ node: process.versions.node, stores: storesInfo, listError, testGet, manualTried, attempts, env: {
         hasBLOB_SITE_ID: Boolean(process.env.BLOB_SITE_ID),
         hasBLOB_PAT: Boolean(process.env.BLOB_PAT),
         hasNETLIFY_SITE_ID: Boolean(process.env.NETLIFY_SITE_ID)

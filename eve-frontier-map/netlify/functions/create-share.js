@@ -32,14 +32,22 @@ export async function handler(event) {
       storeError = e;
       console.warn('create-share direct getStore failed, attempting manual context', e.message);
       // Attempt manual context if env vars provided
-  const siteID = process.env.BLOB_SITE_ID || process.env.NETLIFY_SITE_ID || process.env.SITE_ID;
-  const token = process.env.BLOB_PAT || process.env.BLOBS_TOKEN;
+      const siteID = process.env.BLOB_SITE_ID || process.env.NETLIFY_SITE_ID || process.env.SITE_ID;
+      const token = process.env.BLOB_PAT || process.env.BLOBS_TOKEN;
       if (siteID && token) {
+        // Try two-arg signature
         try {
           store = getStore(storeName, { siteID, token });
         } catch (e2) {
-          console.error('create-share manual getStore failed', e2);
-          storeError = e2;
+          console.error('create-share manual getStore (two-arg) failed', e2.message);
+          // Try object signature
+          try {
+            store = getStore({ name: storeName, siteID, token });
+            console.log('create-share manual getStore object-arg succeeded');
+          } catch (e3) {
+            console.error('create-share manual getStore (object-arg) failed', e3.message);
+            storeError = e3; // last error
+          }
         }
       }
     }
