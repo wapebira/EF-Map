@@ -24,6 +24,66 @@ const sections: SectionDef[] = [
     ),
   },
   {
+    id: 'share-route',
+    title: 'Share Route (Short Link)',
+    subsections: [
+      {
+        id: 'share-what',
+        title: 'What it does',
+        content: (
+          <p>Generates a short shareable link that recreates your current planned route (or other encoded map state) when someone opens it. The link fragment contains a short ID (e.g. <span className="code-inline">#s=abc123xyz</span>) which is resolved via a tiny serverless lookup into the original compressed route string.</p>
+        ),
+      },
+      {
+        id: 'share-how',
+        title: 'How it works (under the hood)',
+        content: (
+          <div>
+            <p>The app encodes the current route state into a compact text payload (prefix <span className="code-inline">r1|</span> for versioning + compressed/base64 content). That payload alone is stored in a lightweight key/value blob store under a random 8–10 character ID. The short link you copy never includes the full data—only the ID.</p>
+            <ul style={{paddingLeft:'18px',margin:'6px 0'}}>
+              <li><strong>Stored:</strong> The exact route payload string (systems sequence + relevant params).</li>
+              <li><strong>Not stored:</strong> Your IP, browser fingerprint, account info (there is no account), other UI state, or past history.</li>
+              <li><strong>Randomness:</strong> IDs are cryptographically random; guessing someone else&apos;s active route is impractical.</li>
+              <li><strong>Versioning:</strong> The <span className="code-inline">r1|</span> prefix allows future format upgrades without breaking old links.</li>
+            </ul>
+          </div>
+        ),
+      },
+      {
+        id: 'share-privacy',
+        title: 'Privacy & Security',
+        content: (
+          <div>
+            <p>Only the minimal route payload you explicitly choose to share is sent to the serverless function. No personal or background data is attached. The payload contains system identifiers and routing parameters — nothing about you as a user.</p>
+            <p>Anyone with the resulting short link can load that same route (similar to an unlisted document link). If a route is sensitive, treat the link like a secret and share it only with trusted parties.</p>
+            <p>Links are currently persistent; there is no in-app deletion UI yet. If removal becomes necessary a server-side purge tool can be introduced in a later release (planned if demand arises).</p>
+          </div>
+        ),
+      },
+      {
+        id: 'share-limitations',
+        title: 'Limitations & Edge Cases',
+        content: (
+          <ul style={{paddingLeft:'18px',margin:'6px 0'}}>
+            <li>If the share service is temporarily unreachable you&apos;ll fall back to copying a longer full-data URL instead.</li>
+            <li>Old short links may display a warning if a future format (<span className="code-inline">r2|</span>, etc.) introduces incompatible changes; the app will attempt graceful migration.</li>
+            <li>If you modify the route after creating a link, generate a new link—existing links are immutable snapshots.</li>
+          </ul>
+        ),
+      },
+      {
+        id: 'share-troubleshooting',
+        title: 'Troubleshooting',
+        content: (
+          <div>
+            <p>If you see a 500 error in the console while sharing, the app should automatically copy the full (long) URL instead of a short link. You can still send that; it encodes the same data directly in the fragment.</p>
+            <p>If a short link loads to an empty map, the underlying payload may have been pruned or corrupted. Ask the sender to recreate and resend.</p>
+          </div>
+        ),
+      },
+    ],
+  },
+  {
     id: 'region-highlight',
     title: 'Highlight Region',
     subsections: [
