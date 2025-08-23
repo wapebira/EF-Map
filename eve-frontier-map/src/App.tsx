@@ -1763,13 +1763,15 @@ function App() {
               background: 'var(--accent)',
               color: '#fff',
               border: 'none',
-              padding: '6px 12px',
-              fontSize: '12px',
+              padding: '6px 12px', // match input vertical padding
+              fontSize: '13px', // align with .p2p-input font-size
+              lineHeight: '1.3',
               fontWeight: 600,
               cursor: 'pointer',
-              borderRadius: '4px',
-              height: '38px',
-              alignSelf:'center'
+              borderRadius: '3px',
+              alignSelf:'stretch', // match input height automatically
+              display:'flex',
+              alignItems:'center'
             }}
             onClick={()=>{
               setRouteResult(null);
