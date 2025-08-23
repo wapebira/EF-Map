@@ -45,24 +45,42 @@ export async function handler(event) {
     }
     const memorySet = (k,v,onlyIfNew)=>{ const c = globalThis.__SHARE_CACHE; if (onlyIfNew && c.has(k)) return { modified:false }; c.set(k,v); return { modified:true }; };
     if (!memoryFallback) {
-      try { await store.set('diag_write_probe','1',{ onlyIfNew:true }); } catch (e) { console.error('create-share probe write failed', e); return { statusCode:500, body:'probe write failed: '+e.message+(storeError? ' (initial store error: '+storeError.message+')':'') }; }
-    }
-  let id = typeof preferId === 'string' ? preferId.slice(0, 16).replace(/[^A-Za-z0-9_-]/g, '') : '';
-    if (!id) id = randomUUID().replace(/-/g, '').slice(0, 10);
-    for (let attempts = 0; attempts < 3; attempts++) {
-      let modified;
       try {
-  if (memoryFallback) { modified = memorySet(id, data, true).modified; } else { const result = await store.set(id, data, { onlyIfNew: true }); modified = result.modified; }
+        // Simple probe: only write if key absent
+        const probe = await store.get('diag_write_probe');
+        if (probe === null) await store.set('diag_write_probe','1');
       } catch (e) {
-        console.error('create-share store.set error', id, e);
-        return { statusCode: 500, body: 'store.set failed: ' + e.message + (memoryFallback? ' (memory fallback)':'' ) };
+        console.error('create-share probe write failed', e);
+        return { statusCode:500, body:'probe write failed: '+e.message+(storeError? ' (initial store error: '+storeError.message+')':'') };
       }
-      if (modified) {
-        return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, ephemeral: memoryFallback }) };
-      }
-      id = randomUUID().replace(/-/g, '').slice(0, 10);
     }
-    return { statusCode: 500, body: 'Could not allocate id' };
+    let id = typeof preferId === 'string' ? preferId.slice(0,16).replace(/[^A-Za-z0-9_-]/g,'') : '';
+    if (!id) id = randomUUID().replace(/-/g,'').slice(0,10);
+    for (let attempts = 0; attempts < 5; attempts++) {
+      try {
+        if (memoryFallback) {
+          const res = memorySet(id, data, true);
+          if (res.modified) {
+            return { statusCode:200, headers:{'Content-Type':'application/json'}, body: JSON.stringify({ id, ephemeral:true }) };
+          }
+        } else {
+          // Manual collision avoidance since current API lacks onlyIfNew
+            const existing = await store.get(id);
+            if (existing !== null) {
+              id = randomUUID().replace(/-/g,'').slice(0,10);
+              continue;
+            }
+            await store.set(id, data);
+            return { statusCode:200, headers:{'Content-Type':'application/json'}, body: JSON.stringify({ id, ephemeral:false }) };
+        }
+      } catch (e) {
+        console.error('create-share store op error', id, e);
+        return { statusCode:500, body:'store op failed: '+e.message+(memoryFallback?' (memory fallback)':'') };
+      }
+      // If memory set collided, regenerate id
+      id = randomUUID().replace(/-/g,'').slice(0,10);
+    }
+    return { statusCode:500, body:'Could not allocate id after retries' };
   } catch (err) {
     console.error('create-share error', err);
     return { statusCode: 500, body: 'Unhandled: ' + (err && err.message) };
