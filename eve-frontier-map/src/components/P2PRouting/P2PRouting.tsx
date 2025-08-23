@@ -193,6 +193,7 @@ interface P2PRoutingProps {
   routeCalcTimeMs?: number | null;
   open: boolean;
   onToggle: (open: boolean) => void;
+  resetToken?: number; // increments when parent requests a reset
 }
 
 // Minimal neutral custom select (no accent colors) for consistent option highlight across platforms
@@ -245,7 +246,7 @@ const NeutralSelect = <T extends string>({ value, onChange, options, ariaLabel, 
   );
 };
 
-const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeResult, mapData, systemNames, progress, routeCalcTimeMs, open, onToggle }: P2PRoutingProps) => {
+const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeResult, mapData, systemNames, progress, routeCalcTimeMs, open, onToggle, resetToken }: P2PRoutingProps) => {
   const [fromSystem, setFromSystem] = useState('');
   const [toSystem, setToSystem] = useState('');
   const [jumpDistance, setJumpDistance] = useState('60');
@@ -290,6 +291,21 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
       });
     }
   };
+
+  // Respond to external reset requests
+  useEffect(() => {
+    if(resetToken === undefined) return;
+    // Reset all local input states to initial defaults
+    setFromSystem('');
+    setToSystem('');
+    setJumpDistance('60');
+    setOptimizeFor('fuel');
+    setAlgorithm('astar');
+    setNotePages([]);
+    setSummary(null);
+    setActiveNotePage(0);
+    setCopyButtonText('Copy');
+  }, [resetToken]);
 
   return (
     <div className="p2p-routing-container">

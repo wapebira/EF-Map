@@ -110,6 +110,7 @@ function App() {
   const mountRef = useRef<HTMLDivElement>(null);
   const [mapData, setMapData] = useState<MapData | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [resetToken, setResetToken] = useState(0); // increments to signal UI reset
   const [highlightedSystem, setHighlightedSystem] = useState<SolarSystem | null>(null);
   const [hoveredSystem, setHoveredSystem] = useState<SolarSystem | null>(null);
   const [isRegionHighlighterActive, setIsRegionHighlighterActive] = useState(false);
@@ -1755,6 +1756,32 @@ function App() {
             }}
             dataSource={mapData ? Object.values(mapData.solar_systems).map(s => s.name) : []}
           />
+          <div style={{ display:'flex', gap:'6px', marginTop:'6px' }}>
+            <button
+              style={{
+                background: 'var(--accent)',
+                color: '#fff',
+                border: 'none',
+                padding: '6px 10px',
+                fontSize: '12px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                borderRadius: '4px'
+              }}
+              onClick={()=>{
+                // Clear route displays without moving camera
+                setRouteResult(null);
+                setScoutRouteResult(null);
+                setScoutInvalidateToken(t=> t+1);
+                // Clear hash if any
+                if(window.location.hash){ try { history.replaceState(null,'', window.location.pathname + window.location.search); } catch {/* ignore */} }
+                // Reset ancillary module toggles? Keep user toggles as-is per spec; only inputs.
+                setSearchQuery('');
+                setResetToken(t=> t+1);
+              }}
+              aria-label="Reset all inputs"
+            >Reset</button>
+          </div>
         </div>
   {/* ...existing controls... (accent toggle removed from here) */}
         <div className="ef-control-group" style={{ marginTop: '10px' }}>
@@ -1802,6 +1829,7 @@ function App() {
           progress={routeProgress}
           open={p2pOpen}
           onToggle={toggleP2P}
+          resetToken={resetToken}
         />
         <ScoutOptimizer
           open={scoutOpen}
