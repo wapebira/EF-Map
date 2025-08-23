@@ -24,67 +24,35 @@ export async function handler(event) {
       return { statusCode: 400, body: 'Invalid share payload' };
     }
     const storeName = process.env.SHARE_STORE || 'shares';
-    let store;
-    let storeError;
-    try {
-      store = getStore(storeName);
-    } catch (e) {
-      storeError = e;
-      console.warn('create-share direct getStore failed, attempting manual context', e.message);
-      // Attempt manual context if env vars provided
-      const siteID = process.env.BLOB_SITE_ID || process.env.NETLIFY_SITE_ID || process.env.SITE_ID;
-      const token = process.env.BLOB_PAT || process.env.BLOBS_TOKEN;
-      if (siteID && token) {
-        // Try two-arg signature
-        try {
-          store = getStore(storeName, { siteID, token });
-        } catch (e2) {
-          console.error('create-share manual getStore (two-arg) failed', e2.message);
-          // Try object signature
-          try {
-            store = getStore({ name: storeName, siteID, token });
-            console.log('create-share manual getStore object-arg succeeded');
-          } catch (e3) {
-            console.error('create-share manual getStore (object-arg) failed', e3.message);
-            storeError = e3; // last error
-          }
-        }
+    let store; let storeError;
+    const siteID = process.env.BLOB_SITE_ID || process.env.NETLIFY_SITE_ID || process.env.SITE_ID;
+    const token = process.env.BLOB_PAT || process.env.BLOBS_TOKEN;
+    // Try explicit credential object form first
+    if (siteID && token) {
+      try { store = getStore({ name: storeName, siteID, token }); } catch (e) { storeError = e; }
+      if (!store) {
+        try { store = getStore(storeName, { siteID, token }); storeError = undefined; } catch (e2) { storeError = e2; }
       }
+    }
+    // Fallback to implicit environment if still no store
+    if (!store) {
+      try { store = getStore(storeName); storeError = undefined; } catch (e) { storeError = e; }
     }
     let memoryFallback = false;
     if (!store) {
-      // In-memory fallback so feature still works per lambda cold start (not persistent across invocations)
-      if (!globalThis.__SHARE_CACHE) {
-        globalThis.__SHARE_CACHE = new Map();
-      }
+      if (!globalThis.__SHARE_CACHE) globalThis.__SHARE_CACHE = new Map();
       memoryFallback = true;
     }
-    const memorySet = (k,v,onlyIfNew)=>{
-      const cache = globalThis.__SHARE_CACHE;
-      if (onlyIfNew && cache.has(k)) return { modified: false };
-      cache.set(k,v);
-      return { modified: true };
-    };
-    // Probe write
+    const memorySet = (k,v,onlyIfNew)=>{ const c = globalThis.__SHARE_CACHE; if (onlyIfNew && c.has(k)) return { modified:false }; c.set(k,v); return { modified:true }; };
     if (!memoryFallback) {
-      try {
-        await store.set('diag_write_probe', '1', { onlyIfNew: true });
-      } catch (e) {
-        console.error('create-share probe write failed', e);
-        return { statusCode: 500, body: 'probe write failed: ' + e.message + (storeError? ' (initial store error: '+storeError.message+')':'') };
-      }
+      try { await store.set('diag_write_probe','1',{ onlyIfNew:true }); } catch (e) { console.error('create-share probe write failed', e); return { statusCode:500, body:'probe write failed: '+e.message+(storeError? ' (initial store error: '+storeError.message+')':'') }; }
     }
-    let id = typeof preferId === 'string' ? preferId.slice(0, 16).replace(/[^A-Za-z0-9_-]/g, '') : '';
+  let id = typeof preferId === 'string' ? preferId.slice(0, 16).replace(/[^A-Za-z0-9_-]/g, '') : '';
     if (!id) id = randomUUID().replace(/-/g, '').slice(0, 10);
     for (let attempts = 0; attempts < 3; attempts++) {
       let modified;
       try {
-        if (memoryFallback) {
-          modified = memorySet(id, data, true).modified;
-        } else {
-          const result = await store.set(id, data, { onlyIfNew: true });
-          modified = result.modified;
-        }
+  if (memoryFallback) { modified = memorySet(id, data, true).modified; } else { const result = await store.set(id, data, { onlyIfNew: true }); modified = result.modified; }
       } catch (e) {
         console.error('create-share store.set error', id, e);
         return { statusCode: 500, body: 'store.set failed: ' + e.message + (memoryFallback? ' (memory fallback)':'' ) };
