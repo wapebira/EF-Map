@@ -110,6 +110,7 @@ function App() {
   const mountRef = useRef<HTMLDivElement>(null);
   const [mapData, setMapData] = useState<MapData | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [resetToken, setResetToken] = useState(0); // increments to signal UI reset
   const [highlightedSystem, setHighlightedSystem] = useState<SolarSystem | null>(null);
   const [hoveredSystem, setHoveredSystem] = useState<SolarSystem | null>(null);
   const [isRegionHighlighterActive, setIsRegionHighlighterActive] = useState(false);
@@ -1744,17 +1745,42 @@ function App() {
     <HelpPanel accentIsBlue={accentIsBlue} />
   </div>
       <div style={{ position: 'absolute', top: 10, left: 10, zIndex: 1, color: 'white', backgroundColor: 'rgba(0,0,0,0.5)', padding: '10px', borderRadius: '5px' }}>
-        <div>
-          <AutoCompleteInput
-            placeholder="Search for a system..."
-            value={searchQuery}
-            onChange={setSearchQuery}
-            onSelect={(selected) => {
-              setSearchQuery(selected);
-              handleSearch({ key: 'Enter' } as React.KeyboardEvent<HTMLInputElement>, selected);
+        <div style={{ display:'flex', alignItems:'stretch', gap:'6px' }}>
+          <div style={{ flex:1 }}>
+            <AutoCompleteInput
+              placeholder="Search for a system..."
+              value={searchQuery}
+              onChange={setSearchQuery}
+              onSelect={(selected) => {
+                setSearchQuery(selected);
+                handleSearch({ key: 'Enter' } as React.KeyboardEvent<HTMLInputElement>, selected);
+              }}
+              dataSource={mapData ? Object.values(mapData.solar_systems).map(s => s.name) : []}
+            />
+          </div>
+          <button
+            style={{
+              background: 'var(--accent)',
+              color: '#fff',
+              border: 'none',
+              padding: '6px 12px',
+              fontSize: '12px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              borderRadius: '4px',
+              height: '38px',
+              alignSelf:'center'
             }}
-            dataSource={mapData ? Object.values(mapData.solar_systems).map(s => s.name) : []}
-          />
+            onClick={()=>{
+              setRouteResult(null);
+              setScoutRouteResult(null);
+              setScoutInvalidateToken(t=> t+1);
+              if(window.location.hash){ try { history.replaceState(null,'', window.location.pathname + window.location.search); } catch {/* ignore */} }
+              setSearchQuery('');
+              setResetToken(t=> t+1);
+            }}
+            aria-label="Reset all inputs"
+          >Reset</button>
         </div>
   {/* ...existing controls... (accent toggle removed from here) */}
         <div className="ef-control-group" style={{ marginTop: '10px' }}>
@@ -1802,6 +1828,7 @@ function App() {
           progress={routeProgress}
           open={p2pOpen}
           onToggle={toggleP2P}
+          resetToken={resetToken}
         />
         <ScoutOptimizer
           open={scoutOpen}
@@ -1812,6 +1839,7 @@ function App() {
           onReturnToStartChange={setReturnToStart}
           invalidateToken={scoutInvalidateToken}
           importedRoutePath={scoutRouteResult?.path || null}
+          resetToken={resetToken}
           onBaselineRoute={(path)=>{ 
             setScoutRouteResult({ path }); 
             // Clear existing hash on new scout route
