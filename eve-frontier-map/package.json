@@ -12,6 +12,7 @@
     "test:scout-cost": "node tools/test_scout_cost.js"
   },
   "dependencies": {
+  "@netlify/blobs": "^8.1.0",
     "@types/three": "^0.179.0",
     "lz-string": "^1.5.0",
     "react": "^19.1.1",

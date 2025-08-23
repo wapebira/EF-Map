@@ -13,6 +13,7 @@ import ScoutOptimizer from './components/ScoutOptimizer/ScoutOptimizer';
 import AutoCompleteInput from './components/AutoCompleteInput/AutoCompleteInput';
 import HelpPanel from './components/HelpPanel/HelpPanel';
 import { encodeShare, decodeShare } from './utils/share';
+import { createShortShare, fetchShortShare } from './utils/shortShare';
 
 // Small referral badge component with copy-to-clipboard
 const ReferralBadge: React.FC = () => {
@@ -446,29 +447,40 @@ function App() {
     if (open) { setP2POpen(false); }
   };
 
-  // Apply shared route from URL hash once map data is loaded and scene initialized
+  // Apply shared route from URL hash (supports short form #s=ID) once map data is loaded
   useEffect(()=>{
     if(!isLoaded || !mapData) return;
     if(initialHashAppliedRef.current) return;
     initialHashAppliedRef.current = true;
-    if(!window.location.hash) return;
-    const share = decodeShare(window.location.hash);
-    if(!share) return;
-    // Validate system names exist
+    const hash = window.location.hash;
+    if(!hash) return;
     const systemsByLower = new Map<string, SolarSystem>(Object.values(mapData.solar_systems).map(s=> [s.name.toLowerCase(), s]));
-    const allExist = share.path.every(p=> systemsByLower.has(p.toLowerCase()));
-    if(!allExist || share.path.length < 2) return;
-    if(share.type==='p'){
-      // Populate P2P route state directly
-      lastP2PParamsRef.current = { jump: share.jump, optimize: share.optimize, algo: share.algo, from: share.from, to: share.to };
-      setRouteResult({ path: share.path });
-      setP2POpen(true); setScoutOpenReal(false);
+    const apply = (share:any)=>{
+      if(!share) return;
+      const allExist = share.path.every((p:string)=> systemsByLower.has(p.toLowerCase()));
+      if(!allExist || share.path.length < 2) return;
+      if(share.type==='p'){
+        lastP2PParamsRef.current = { jump: share.jump, optimize: share.optimize, algo: share.algo, from: share.from, to: share.to };
+        setRouteResult({ path: share.path });
+        setP2POpen(true); setScoutOpenReal(false);
+      } else if(share.type==='s') {
+        setReturnToStart(share.returnToStart);
+        setScoutRouteResult({ path: share.path });
+        setScoutOpenReal(true); setP2POpen(false);
+      }
       const startSys = systemsByLower.get(share.path[0].toLowerCase()); if(startSys) selectSystem(startSys);
-    } else if(share.type==='s') {
-      setReturnToStart(share.returnToStart);
-      setScoutRouteResult({ path: share.path });
-      setScoutOpenReal(true); setP2POpen(false);
-      const startSys = systemsByLower.get(share.path[0].toLowerCase()); if(startSys) selectSystem(startSys);
+    };
+    if(hash.startsWith('#s=')){
+      const id = hash.slice(3);
+      if(id){
+        fetchShortShare(id).then(full=>{
+          if(!full) return;
+          const share = decodeShare('#'+full);
+          apply(share);
+        }).catch(()=>{/* ignore */});
+      }
+    } else {
+      apply(decodeShare(hash));
     }
   }, [isLoaded, mapData, selectSystem]);
 
@@ -1713,26 +1725,38 @@ function App() {
     <div className="ef-toolbar-shifting">
       <button
         className="share-route-btn"
-        onClick={() => {
+        onClick={async () => {
+          if(shareFeedback==='Saving...') return;
           const path = scoutRouteResult?.path || routeResult?.path;
           if(!path || path.length < 2){ setShareFeedback('No route'); setTimeout(()=>setShareFeedback(''),1500); return; }
+          let encoded: string | null = null;
           if(scoutRouteResult?.path){
             try {
-              const encoded = encodeShare({ type:'s', start:path[0], returnToStart, path });
-              const url = window.location.origin + window.location.pathname + window.location.search + '#' + encoded;
-              navigator.clipboard.writeText(url).catch(()=>{/* ignore */});
-              setShareFeedback('Scout link copied');
-            } catch { setShareFeedback('Error'); }
+              encoded = encodeShare({ type:'s', start:path[0], returnToStart, path });
+            } catch { /* ignore */ }
           } else if(routeResult?.path){
             try {
               const p=(lastP2PParamsRef as any).current||{jump:60,optimize:'fuel',algo:'astar'};
-              const encoded = encodeShare({ type:'p', from:path[0], to:path[path.length-1], jump:p.jump, optimize:p.optimize, algo:p.algo, path });
-              const url = window.location.origin + window.location.pathname + window.location.search + '#' + encoded;
-              navigator.clipboard.writeText(url).catch(()=>{/* ignore */});
-              setShareFeedback('P2P link copied');
-            } catch { setShareFeedback('Error'); }
+              encoded = encodeShare({ type:'p', from:path[0], to:path[path.length-1], jump:p.jump, optimize:p.optimize, algo:p.algo, path });
+            } catch { /* ignore */ }
           }
-          setTimeout(()=> setShareFeedback(''),2500);
+          if(!encoded){ setShareFeedback('Error'); setTimeout(()=>setShareFeedback(''),1500); return; }
+          try {
+            setShareFeedback('Saving...');
+            const id = await createShortShare(encoded);
+            const shortUrl = window.location.origin + window.location.pathname + window.location.search + '#s=' + id;
+            await navigator.clipboard.writeText(shortUrl);
+            setShareFeedback('Copied');
+          } catch {
+            try {
+              const full = window.location.origin + window.location.pathname + window.location.search + '#' + encoded;
+              await navigator.clipboard.writeText(full);
+              setShareFeedback('Copied full');
+            } catch {
+              setShareFeedback('Copy failed');
+            }
+          }
+          setTimeout(()=> setShareFeedback(''),2000);
         }}
         disabled={!(routeResult?.path || scoutRouteResult?.path)}
         aria-label="Share current route"
