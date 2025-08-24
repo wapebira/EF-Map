@@ -32,7 +32,16 @@ const ReferralBadge: React.FC = () => {
   return (
     <div className="ef-referral" aria-label="Referral code">
       <span>Referral code:</span>
-      <span className="ef-referral-code">{code}</span>
+      <a
+        href={`https://evefrontier.com/en?ref=${code}`}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="ef-referral-code"
+        style={{ textDecoration:'underline', cursor:'pointer' }}
+        aria-label="Open referral link in new tab"
+      >
+        {code}
+      </a>
       <button className={`ef-referral-copy-btn ${copied ? 'copied' : ''}`} onClick={handleCopy} aria-label="Copy referral code">
         {copied ? 'Copied' : 'Copy'}
       </button>
