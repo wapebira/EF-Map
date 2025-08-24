@@ -149,9 +149,12 @@ function App() {
   // Cinematic user-exposed controls (initial minimal set)
   const [cinematicExpanded, setCinematicExpanded] = useState(false);
   const [starColorMode, setStarColorMode] = useState<'purple'|'white'|'blue'|'red'|'yellow'|'random'>('purple');
-  const [hazeColor, setHazeColor] = useState('#294d8c'); // initial cold light blue
+  // Haze: separate draft states to avoid perf spikes on continuous drag
+  const [hazeColor, setHazeColor] = useState('#294d8c'); // committed
+  const [hazeColorDraft, setHazeColorDraft] = useState('#294d8c'); // draft while picking
   const [hazeIntensity, setHazeIntensity] = useState(0.12);
-  const [hazeRadius, setHazeRadius] = useState(0.85); // elliptical falloff modifier (was implicit 0.85)
+  const [hazeRadius, setHazeRadius] = useState(1.0); // committed spread factor
+  const [hazeRadiusDraft, setHazeRadiusDraft] = useState(1.0);
   const [aberrationAmt, setAberrationAmt] = useState(0.002);
 
   // State for P2P Routing
@@ -1100,7 +1103,7 @@ function App() {
       composerRef.current = composer; bloomPassRef.current = bloom;
       // Custom post-processing pass (vignette + grain + chromatic aberration + radial glow)
       // After composer and bloom have been created
-  const customShader = { uniforms:{ tDiffuse:{value:null}, uTime:{value:0}, uGrain:{value:0.35}, uVignette:{value:0.85}, uAberration:{value:new THREE.Vector2(aberrationAmt,aberrationAmt)}, uRadialGlow:{value:0.15}, resolution:{value:new THREE.Vector2(window.innerWidth, window.innerHeight)}, uHazeColor:{value:new THREE.Color(hazeColor)}, uHazeIntensity:{value:hazeIntensity}, uHazeRadius:{value:hazeRadius} }, vertexShader:`varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`, fragmentShader:`uniform sampler2D tDiffuse; uniform float uTime; uniform float uGrain; uniform float uVignette; uniform float uRadialGlow; uniform vec2 uAberration; uniform vec2 resolution; uniform vec3 uHazeColor; uniform float uHazeIntensity; uniform float uHazeRadius; varying vec2 vUv; float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))+uTime*917.2)*43758.5453); } void main(){ vec2 centered = vUv - 0.5; float r = length(centered); vec2 offR = vUv + uAberration*vec2( 0.5 - vUv.y,  vUv.x-0.5); vec2 offB = vUv - uAberration*vec2( 0.5 - vUv.x,  vUv.y-0.5); vec3 col; col.r = texture2D(tDiffuse, offR).r; col.g = texture2D(tDiffuse, vUv).g; col.b = texture2D(tDiffuse, offB).b; float glow = smoothstep(0.7,0.0,r)*uRadialGlow; col += glow; float vig = smoothstep(0.8, uVignette, r); col *= (1.0 - 0.65*vig); float ellipse = smoothstep(0.0,1.0,1.0 - r*r*uHazeRadius); vec3 haze = uHazeColor * (uHazeIntensity * ellipse); col += haze; float g = (hash(floor(gl_FragCoord.xy)) - 0.5)*uGrain; col += g/255.0; gl_FragColor = vec4(col,1.0); }`};
+  const customShader = { uniforms:{ tDiffuse:{value:null}, uTime:{value:0}, uGrain:{value:0.35}, uVignette:{value:0.85}, uAberration:{value:new THREE.Vector2(aberrationAmt,aberrationAmt)}, uRadialGlow:{value:0.15}, resolution:{value:new THREE.Vector2(window.innerWidth, window.innerHeight)}, uHazeColor:{value:new THREE.Color(hazeColor)}, uHazeIntensity:{value:hazeIntensity}, uHazeRadius:{value:hazeRadius} }, vertexShader:`varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`, fragmentShader:`uniform sampler2D tDiffuse; uniform float uTime; uniform float uGrain; uniform float uVignette; uniform float uRadialGlow; uniform vec2 uAberration; uniform vec2 resolution; uniform vec3 uHazeColor; uniform float uHazeIntensity; uniform float uHazeRadius; varying vec2 vUv; float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))+uTime*917.2)*43758.5453); } void main(){ vec2 centered = vUv - 0.5; float r = length(centered); vec2 offR = vUv + uAberration*vec2( 0.5 - vUv.y,  vUv.x-0.5); vec2 offB = vUv - uAberration*vec2( 0.5 - vUv.x,  vUv.y-0.5); vec3 col; col.r = texture2D(tDiffuse, offR).r; col.g = texture2D(tDiffuse, vUv).g; col.b = texture2D(tDiffuse, offB).b; float glow = smoothstep(0.7,0.0,r)*uRadialGlow; col += glow; float vig = smoothstep(0.8, uVignette, r); col *= (1.0 - 0.65*vig); float scaled = r / max(0.0001,uHazeRadius); float ellipse = smoothstep(0.0,1.0,1.0 - scaled*scaled); vec3 haze = uHazeColor * (uHazeIntensity * ellipse); col += haze; float g = (hash(floor(gl_FragCoord.xy)) - 0.5)*uGrain; col += g/255.0; gl_FragColor = vec4(col,1.0); }`};
       const pass = new ShaderPass(customShader as any); composer.addPass(pass); advancedPassRef.current = pass;
       renderer.toneMapping = THREE.ACESFilmicToneMapping as any; (renderer as any).toneMappingExposure = cinExposure;
       const onResize=()=>{ composer.setSize(window.innerWidth, window.innerHeight); bloom.setSize(window.innerWidth, window.innerHeight); }; window.addEventListener('resize', onResize); (enable as any)._resize = onResize;
@@ -1124,16 +1127,16 @@ function App() {
   useEffect(()=>{
     if(!cinematicMode) return;
     // Update haze / aberration uniforms
-    if(advancedPassRef.current){ const u = advancedPassRef.current.uniforms; if(u.uHazeColor) u.uHazeColor.value.set(hazeColor); if(u.uHazeIntensity) u.uHazeIntensity.value = hazeIntensity; if(u.uHazeRadius) u.uHazeRadius.value = hazeRadius; if(u.uAberration) u.uAberration.value.set(aberrationAmt,aberrationAmt); }
+  if(advancedPassRef.current){ const u = advancedPassRef.current.uniforms; if(u.uHazeColor) u.uHazeColor.value.set(hazeColor); if(u.uHazeIntensity) u.uHazeIntensity.value = hazeIntensity; if(u.uHazeRadius) u.uHazeRadius.value = hazeRadius; if(u.uAberration) u.uAberration.value.set(aberrationAmt,aberrationAmt); }
     // Update star palette
     if(cinematicStarMaterialRef.current){ const shader=(cinematicStarMaterialRef.current as any).userData?.shader; if(shader){ const palettes:Record<string,[number,number,number][]>={
       purple:[[0.55,0.50,0.95],[0.50,0.65,1.00],[0.85,0.60,1.00]],
-      white:[[0.95,0.95,0.95],[1.0,1.0,1.0],[0.95,0.95,0.95]],
-      blue:[[0.45,0.60,1.00],[0.55,0.70,1.00],[0.75,0.85,1.00]],
-      red:[[1.0,0.40,0.25],[1.0,0.55,0.32],[1.0,0.75,0.55]],
-      yellow:[[1.0,0.82,0.25],[1.0,0.92,0.45],[1.0,0.98,0.70]],
-      random:[[1.0,0.40,0.25],[0.55,0.65,1.0],[1.0,0.85,0.25]]
-    }; const sel=palettes[starColorMode]; if(sel){ shader.uniforms.uStarC1.value.set(sel[0][0],sel[0][1],sel[0][2]); shader.uniforms.uStarC2.value.set(sel[1][0],sel[1][1],sel[1][2]); shader.uniforms.uStarC3.value.set(sel[2][0],sel[2][1],sel[2][2]); }} }
+      white:[[0.98,0.98,0.98],[1.0,1.0,1.0],[0.98,0.98,0.98]],
+      blue:[[0.40,0.58,1.00],[0.30,0.52,1.00],[0.60,0.82,1.00]],
+      red:[[1.0,0.32,0.15],[1.0,0.50,0.28],[1.0,0.74,0.48]],
+      yellow:[[1.0,0.78,0.10],[1.0,0.90,0.36],[1.0,0.97,0.62]],
+      random:[[1.0,0.32,0.15],[0.55,0.65,1.0],[1.0,0.78,0.10]]
+    }; const strength:Record<string,number>={white:0.0,purple:0.85,blue:1.0,red:1.0,yellow:1.0,random:1.0}; const sel=palettes[starColorMode]; if(sel){ shader.uniforms.uStarC1.value.set(sel[0][0],sel[0][1],sel[0][2]); shader.uniforms.uStarC2.value.set(sel[1][0],sel[1][1],sel[1][2]); shader.uniforms.uStarC3.value.set(sel[2][0],sel[2][1],sel[2][2]); if(shader.uniforms.uColorStrength) shader.uniforms.uColorStrength.value = strength[starColorMode]; (cinematicStarMaterialRef.current as any).needsUpdate = true; }} }
   }, [cinematicMode, starColorMode, hazeColor, hazeIntensity, hazeRadius, aberrationAmt]);
 
   // Live slider updates
@@ -2090,15 +2093,15 @@ function App() {
               </div>
               <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
                 <label style={{ fontSize:12, fontWeight:600 }}>Haze Color</label>
-                <input type="color" value={hazeColor} onChange={e=> setHazeColor(e.target.value)} style={{ width:50, height:30, border:'none', background:'transparent', cursor:'pointer' }} />
+                <input type="color" value={hazeColorDraft} onInput={e=> setHazeColorDraft((e.target as HTMLInputElement).value)} onChange={e=> { const v=(e.target as HTMLInputElement).value; setHazeColorDraft(v); setHazeColor(v); (e.target as HTMLInputElement).blur(); }} style={{ width:50, height:30, border:'none', background:'transparent', cursor:'pointer' }} />
               </div>
               <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
                 <label style={{ fontSize:12, fontWeight:600 }}>Haze Intensity <span style={{ opacity:.65 }}>({hazeIntensity.toFixed(2)})</span></label>
                 <input type="range" min={0} max={0.4} step={0.01} value={hazeIntensity} onChange={e=> setHazeIntensity(parseFloat(e.target.value))} />
               </div>
               <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
-                <label style={{ fontSize:12, fontWeight:600 }}>Haze Radius <span style={{ opacity:.65 }}>({hazeRadius.toFixed(2)})</span></label>
-                <input type="range" min={0.3} max={1.5} step={0.05} value={hazeRadius} onChange={e=> setHazeRadius(parseFloat(e.target.value))} />
+                <label style={{ fontSize:12, fontWeight:600 }}>Haze Radius <span style={{ opacity:.65 }}>({hazeRadiusDraft.toFixed(2)})</span></label>
+                <input type="range" min={0.5} max={2.5} step={0.05} value={hazeRadiusDraft} onChange={e=> setHazeRadiusDraft(parseFloat(e.target.value))} onPointerUp={e=> setHazeRadius(parseFloat((e.target as HTMLInputElement).value))} onBlur={e=> setHazeRadius(parseFloat((e.target as HTMLInputElement).value))} />
               </div>
             </div>
           )}
