@@ -1274,7 +1274,17 @@ function App() {
       const pGeom = new THREE.BufferGeometry();
       pGeom.setAttribute('position', new THREE.BufferAttribute(pPos,3));
       pGeom.setAttribute('color', new THREE.BufferAttribute(pCol,3));
-      const pMat = new THREE.PointsMaterial({ size:4.5, sizeAttenuation:true, transparent:true, opacity:0.35, depthWrite:false, vertexColors:true, blending:THREE.AdditiveBlending });
+      const pMat = new THREE.PointsMaterial({
+        size:4.5,
+        sizeAttenuation:true,
+        transparent:true,
+        opacity:0.35,
+        depthWrite:false,
+        vertexColors:true,
+        blending:THREE.AdditiveBlending,
+        map: circleTexture,
+        alphaTest: 0.5
+      });
       parallaxStarsRef.current = new THREE.Points(pGeom,pMat); sceneRef.current!.add(parallaxStarsRef.current);
       // Initialize schedules
       const nowT = performance.now();
