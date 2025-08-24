@@ -2081,7 +2081,7 @@ function App() {
   const minDistance = 100;
   const maxDistance = 50000;
   const minThreshold = 1;   // near = very precise
-  const maxThreshold = 75;  // far = modest radius (avoid grabbing distant stars off-cursor)
+  const maxThreshold = 300;  // restored max threshold for far zoom hover forgiveness
   const clampedDistance = Math.max(minDistance, Math.min(maxDistance, distance));
   const normalizedDistance = (clampedDistance - minDistance) / (maxDistance - minDistance);
   const dynamicThreshold = minThreshold + (maxThreshold - minThreshold) * normalizedDistance;
