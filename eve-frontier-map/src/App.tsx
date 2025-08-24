@@ -129,6 +129,7 @@ function App() {
   const [bloomStrength, setBloomStrength] = useState(0.8);
   const [dustAmount, setDustAmount] = useState(0.6); // 0..1
   const [cinExposure, setCinExposure] = useState(1.0);
+  const [bgIntensity, setBgIntensity] = useState(0.3);
 
   // State for P2P Routing
   const routingWorkerRef = useRef<Worker | null>(null);
@@ -980,8 +981,8 @@ function App() {
       const dMat=new THREE.PointsMaterial({ size:14, sizeAttenuation:true, transparent:true, opacity:0.28*dustAmount, depthWrite:false, vertexColors:true, blending:THREE.AdditiveBlending });
   dustPointsRef.current=new THREE.Points(g,dMat); sceneRef.current!.add(dustPointsRef.current);
       // Background gradient sphere
-  const makeGrad=()=>{ const c=document.createElement('canvas'); c.width=2; c.height=512; const ctx=c.getContext('2d')!; const grd=ctx.createLinearGradient(0,0,0,512); grd.addColorStop(0,'#04040a'); grd.addColorStop(0.55,'#0d0830'); grd.addColorStop(1,'#180022'); ctx.fillStyle=grd; ctx.fillRect(0,0,2,512); return new THREE.CanvasTexture(c); };
-  const bg=new THREE.Mesh(new THREE.SphereGeometry(120000,32,32), new THREE.MeshBasicMaterial({ map: makeGrad(), side:THREE.BackSide })); backgroundMeshRef.current=bg; sceneRef.current!.add(bg);
+  const makeGrad=()=>{ const w=256,h=1024; const c=document.createElement('canvas'); c.width=w; c.height=h; const ctx=c.getContext('2d')!; const grd=ctx.createLinearGradient(0,0,0,h); grd.addColorStop(0,'#010104'); grd.addColorStop(0.4,'#050516'); grd.addColorStop(0.7,'#0b0730'); grd.addColorStop(1,'#120038'); ctx.fillStyle=grd; ctx.fillRect(0,0,w,h); const img=ctx.getImageData(0,0,w,h); for(let y=0;y<h;y+=2){ for(let x=0;x<w;x+=2){ const i=(y*w+x)*4; const n=(Math.random()-0.5)*6; img.data[i]+=n; img.data[i+1]+=n; img.data[i+2]+=n; } } ctx.putImageData(img,0,0); const tex=new THREE.CanvasTexture(c); tex.needsUpdate=true; return tex; };
+  const bg=new THREE.Mesh(new THREE.SphereGeometry(120000,48,48), new THREE.MeshBasicMaterial({ map: makeGrad(), side:THREE.BackSide, transparent:true, opacity:bgIntensity })); backgroundMeshRef.current=bg; sceneRef.current!.add(bg);
       // Post chain
       const composer=new EffectComposer(renderer); composer.addPass(new RenderPass(sceneRef.current!, camera)); const bloom=new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), bloomStrength, 0.4, 0.85); bloom.threshold=0; composer.addPass(bloom); composerRef.current=composer; bloomPassRef.current=bloom;
       renderer.toneMapping = THREE.ACESFilmicToneMapping as any; (renderer as any).toneMappingExposure = cinExposure;
@@ -1002,7 +1003,7 @@ function App() {
   }, [cinematicMode, bloomStrength, dustAmount, cinExposure]);
 
   // Live slider updates
-  useEffect(()=>{ if(!cinematicMode) return; if(bloomPassRef.current) bloomPassRef.current.strength = bloomStrength; if(rendererRef.current) (rendererRef.current as any).toneMappingExposure = cinExposure; if(dustPointsRef.current) (dustPointsRef.current.material as THREE.PointsMaterial).opacity = 0.28*dustAmount; }, [bloomStrength, dustAmount, cinExposure, cinematicMode]);
+  useEffect(()=>{ if(!cinematicMode) return; if(bloomPassRef.current) bloomPassRef.current.strength = bloomStrength; if(rendererRef.current) (rendererRef.current as any).toneMappingExposure = cinExposure; if(dustPointsRef.current) (dustPointsRef.current.material as THREE.PointsMaterial).opacity = 0.28*dustAmount; if(backgroundMeshRef.current) (backgroundMeshRef.current.material as THREE.MeshBasicMaterial).opacity = bgIntensity; }, [bloomStrength, dustAmount, cinExposure, bgIntensity, cinematicMode]);
 
   // This useLayoutEffect handles all dynamic star and stargate line coloring based on the pipeline.
   useLayoutEffect(() => {
@@ -1930,6 +1931,10 @@ function App() {
               <label style={{ display:'flex', flexDirection:'column', gap:'4px' }}>
                 <span>Exposure: {cinExposure.toFixed(2)}</span>
                 <input type="range" min={0.6} max={1.6} step={0.01} value={cinExposure} onChange={e=> setCinExposure(parseFloat(e.target.value))} />
+              </label>
+              <label style={{ display:'flex', flexDirection:'column', gap:'4px' }}>
+                <span>Background Intensity: {(bgIntensity*100).toFixed(0)}%</span>
+                <input type="range" min={0} max={1} step={0.01} value={bgIntensity} onChange={e=> setBgIntensity(parseFloat(e.target.value))} />
               </label>
             </div>
           )}
