@@ -1325,6 +1325,31 @@ function App() {
             for(let i=0;i<colAttr.count;i++){ colAttr.setXYZ(i,1,1,1); }
             colAttr.needsUpdate = true;
           }
+          // Recompute bounding volumes to ensure raycaster picks up points correctly
+          geom.computeBoundingSphere();
+        }
+      } catch { /* ignore */ }
+      // Rebuild the base starfield entirely as a fallback to clear any lingering shader state
+      try {
+        if(sceneRef.current){
+          if(starFieldRef.current){
+            sceneRef.current.remove(starFieldRef.current);
+            try { starFieldRef.current.geometry.dispose(); } catch {}
+            // Do not dispose pointsMaterial (shared)
+          }
+          const verts:number[] = []; const cols:number[] = [];
+          const white = new THREE.Color(0xffffff);
+          for(const sys of visibleSystemsRef.current){
+            const pos = getTransformedPosition(sys.position);
+            verts.push(pos.x,pos.y,pos.z);
+            cols.push(white.r,white.g,white.b);
+          }
+          const g = new THREE.BufferGeometry();
+          g.setAttribute('position', new THREE.Float32BufferAttribute(verts,3));
+          g.setAttribute('color', new THREE.Float32BufferAttribute(cols,3));
+          const basePoints = new THREE.Points(g, pointsMaterial);
+          starFieldRef.current = basePoints;
+          sceneRef.current.add(basePoints);
         }
       } catch { /* ignore */ }
   if(dustPointsRef.current){ dustPointsRef.current.geometry.dispose(); (dustPointsRef.current.material as THREE.Material).dispose(); sceneRef.current!.remove(dustPointsRef.current); dustPointsRef.current=null; }
