@@ -149,6 +149,24 @@ function App() {
   const shootingStarsEnabled = true;
   const hueDriftEnabled = true; // rollback
   const secondDustEnabled = true;
+  // Ambient effects master toggle
+  const ambientEffectsEnabled = true;
+  // Effect scheduling refs
+  const nextSupernovaAtRef = useRef<number>(0);
+  const nextLensBlinkAtRef = useRef<number>(0);
+  const nextCometAtRef = useRef<number>(0);
+  const nextRippleAtRef = useRef<number>(0);
+  // Groups / pools
+  const supernovaGroupRef = useRef<THREE.Group|null>(null);
+  const lensFlareGroupRef = useRef<THREE.Group|null>(null);
+  const rippleGroupRef = useRef<THREE.Group|null>(null);
+  const cometGroupRef = useRef<THREE.Group|null>(null);
+  const parallaxStarsRef = useRef<THREE.Points|null>(null);
+  // Simple object pools for reuse
+  const supernovaPoolRef = useRef<THREE.Mesh[]>([]);
+  const lensPoolRef = useRef<THREE.Mesh[]>([]);
+  const ripplePoolRef = useRef<THREE.Mesh[]>([]);
+  const cometPoolRef = useRef<THREE.Line[]>([]);
   // Cinematic user-exposed controls (initial minimal set)
   const [cinematicExpanded, setCinematicExpanded] = useState(false);
   const [starColorMode, setStarColorMode] = useState<'purple'|'white'|'blue'|'red'|'yellow'|'random'>('blue');
@@ -936,6 +954,86 @@ function App() {
                 arr[3] += 12; arr[4]+=2; arr[5]+=2; posAttr.needsUpdate=true; }
             }
          }
+         // Ambient effects
+         if(ambientEffectsEnabled){
+           const tSec = now/1000;
+           // Parallax stars subtle rotation & counter drift for depth illusion
+           if(parallaxStarsRef.current){ parallaxStarsRef.current.rotation.y += 0.00005; }
+           // Supernova spawn
+           if(supernovaGroupRef.current && now > nextSupernovaAtRef.current){
+             nextSupernovaAtRef.current = now + 45000 + Math.random()*45000;
+             // Pick random star position near center-ish (lerp between camera target and random distant point)
+             const base = new THREE.Vector3((Math.random()-0.5)*15000, (Math.random()-0.5)*15000, (Math.random()-0.5)*15000);
+             const geom = new THREE.SphereGeometry(40, 16, 16);
+             const mat = new THREE.MeshBasicMaterial({ color:0xffffff, transparent:true, opacity:1, blending:THREE.AdditiveBlending });
+             const mesh = supernovaPoolRef.current.pop() || new THREE.Mesh(geom, mat);
+             mesh.position.copy(base);
+             (mesh as any).birth = now; (mesh as any).phase='expand';
+             if(!(mesh.geometry instanceof THREE.SphereGeometry)) { mesh.geometry.dispose(); mesh.geometry = geom; }
+             if(!(mesh.material instanceof THREE.MeshBasicMaterial)) { (mesh.material as any).dispose(); mesh.material = mat; }
+             supernovaGroupRef.current.add(mesh);
+           }
+           // Lens flare blink spawn
+           if(lensFlareGroupRef.current && now > nextLensBlinkAtRef.current){
+             nextLensBlinkAtRef.current = now + 8000 + Math.random()*7000;
+             const geom = new THREE.PlaneGeometry(160,160);
+             const mat = new THREE.MeshBasicMaterial({ color:0x88aaff, transparent:true, opacity:0, blending:THREE.AdditiveBlending, depthWrite:false });
+             const m = lensPoolRef.current.pop() || new THREE.Mesh(geom, mat);
+             m.position.set((Math.random()-0.5)*25000, (Math.random()-0.5)*25000, (Math.random()-0.5)*25000);
+             m.lookAt(cameraRef.current!.position);
+             (m as any).birth = now; (m as any).ttl = 1400;
+             lensFlareGroupRef.current.add(m);
+           }
+           // Comet trail (longer, slower than meteor, reused logic)
+           if(cometGroupRef.current && now > nextCometAtRef.current){
+             nextCometAtRef.current = now + 60000 + Math.random()*60000;
+             const start = new THREE.Vector3((Math.random()-0.5)*30000, (Math.random()-0.5)*30000, -12000 - Math.random()*6000);
+             const dir = new THREE.Vector3(Math.random()*6000+6000, Math.random()*4000-2000, Math.random()*4000-2000).multiplyScalar((Math.random()<0.5?-1:1));
+             const end = start.clone().add(dir);
+             const geom = new THREE.BufferGeometry();
+             geom.setAttribute('position', new THREE.Float32BufferAttribute([start.x,start.y,start.z,end.x,end.y,end.z],3));
+             const mat = new THREE.LineBasicMaterial({ color:0xbbe1ff, transparent:true, opacity:1, blending:THREE.AdditiveBlending });
+             const line = cometPoolRef.current.pop() || new THREE.Line(geom, mat);
+             if(!(line.geometry instanceof THREE.BufferGeometry)){ (line.geometry as any).dispose?.(); line.geometry = geom; }
+             if(!(line.material instanceof THREE.LineBasicMaterial)){ (line.material as any).dispose?.(); line.material = mat; }
+             (line as any).birth = now; (line as any).ttl = 8000; (line as any).phase='fly';
+             cometGroupRef.current.add(line);
+           }
+           // Gravitational ripple spawn
+           if(rippleGroupRef.current && now > nextRippleAtRef.current){
+             nextRippleAtRef.current = now + 30000 + Math.random()*40000;
+             const geom = new THREE.RingGeometry(50,52, 64);
+             const mat = new THREE.MeshBasicMaterial({ color:0x7da8ff, transparent:true, opacity:0.7, blending:THREE.AdditiveBlending, side:THREE.DoubleSide, depthWrite:false });
+             const ring = ripplePoolRef.current.pop() || new THREE.Mesh(geom, mat);
+             ring.position.set((Math.random()-0.5)*20000, (Math.random()-0.5)*20000, (Math.random()-0.5)*20000);
+             ring.rotation.x = Math.random()*Math.PI; ring.rotation.y = Math.random()*Math.PI;
+             (ring as any).birth = now; (ring as any).ttl=5000; (ring as any).baseScale=1;
+             rippleGroupRef.current.add(ring);
+           }
+           // Update & recycle supernovae
+           if(supernovaGroupRef.current){
+             const snChildren = [...supernovaGroupRef.current.children];
+             for(const s of snChildren){ const age = now - (s as any).birth; if(age>4000){ supernovaGroupRef.current.remove(s); supernovaPoolRef.current.push(s as any); continue; }
+               const tAge = age/4000; const scale = 1 + tAge*15; s.scale.set(scale,scale,scale);
+               const mat:any = (s as any).material; mat.opacity = 1.0 - tAge; }
+           }
+           // Update lens flare blinks
+           if(lensFlareGroupRef.current){
+             const lfChildren = [...lensFlareGroupRef.current.children];
+             for(const l of lfChildren){ const ttl = (l as any).ttl; const age = now - (l as any).birth; if(age>ttl){ lensFlareGroupRef.current.remove(l); lensPoolRef.current.push(l as any); continue; } const half=ttl/2; const mat:any = (l as any).material; if(age<half){ mat.opacity = age/half * 0.55; } else { mat.opacity = (1-(age-half)/half)*0.55; } l.lookAt(cameraRef.current!.position); }
+           }
+           // Update comets
+           if(cometGroupRef.current){
+             const cmChildren = [...cometGroupRef.current.children];
+             for(const c of cmChildren){ const ttl = (c as any).ttl; const age = now - (c as any).birth; if(age>ttl){ cometGroupRef.current.remove(c); cometPoolRef.current.push(c as any); continue; }
+               const op = 1 - age/ttl; (c as any).material.opacity = op; const posAttr = (c as any).geometry.attributes.position; if(age<2000){ const arr = posAttr.array as Float32Array; arr[3]+=8; arr[4]+=2; arr[5]+=2; posAttr.needsUpdate=true; } }
+           }
+           // Update ripples
+           if(rippleGroupRef.current){
+             const rpChildren = [...rippleGroupRef.current.children];
+             for(const rMesh of rpChildren){ const ttl=(rMesh as any).ttl; const age = now - (rMesh as any).birth; if(age>ttl){ rippleGroupRef.current.remove(rMesh); ripplePoolRef.current.push(rMesh as any); continue; } const t = age/ttl; const scl = 1 + t*60; rMesh.scale.set(scl,scl,scl); const mat:any = (rMesh as any).material; mat.opacity = (1-t)*0.7; }
+           }
+         }
          if(advancedPassRef.current){ advancedPassRef.current.uniforms.uTime.value = performance.now()/1000; }
          composerRef.current ? composerRef.current.render() : rendererRef.current?.render(sceneRef.current!, cameraRef.current!);
        } else {
@@ -1074,6 +1172,36 @@ function App() {
       // Meteors group
       meteorsGroupRef.current = new THREE.Group(); sceneRef.current!.add(meteorsGroupRef.current);
       lastMeteorSpawnRef.current = performance.now();
+      // Ambient effect groups
+      supernovaGroupRef.current = new THREE.Group(); sceneRef.current!.add(supernovaGroupRef.current);
+      lensFlareGroupRef.current = new THREE.Group(); sceneRef.current!.add(lensFlareGroupRef.current);
+      rippleGroupRef.current = new THREE.Group(); sceneRef.current!.add(rippleGroupRef.current);
+      cometGroupRef.current = new THREE.Group(); sceneRef.current!.add(cometGroupRef.current);
+      // Parallax background stars (very distant sparse layer)
+      const PARALLAX_COUNT = 320;
+      const pPos = new Float32Array(PARALLAX_COUNT*3);
+      const pCol = new Float32Array(PARALLAX_COUNT*3);
+      for(let i=0;i<PARALLAX_COUNT;i++){
+        const r = 90000 * Math.cbrt(Math.random());
+        const th = Math.random()*Math.PI*2;
+        const ph = Math.acos(2*Math.random()-1);
+        pPos[i*3] = r*Math.sin(ph)*Math.cos(th);
+        pPos[i*3+1] = r*Math.sin(ph)*Math.sin(th);
+        pPos[i*3+2] = r*Math.cos(ph);
+        const tint = new THREE.Color().setHSL(0.58+Math.random()*0.05, 0.25, 0.65+Math.random()*0.2);
+        pCol[i*3] = tint.r; pCol[i*3+1] = tint.g; pCol[i*3+2] = tint.b;
+      }
+      const pGeom = new THREE.BufferGeometry();
+      pGeom.setAttribute('position', new THREE.BufferAttribute(pPos,3));
+      pGeom.setAttribute('color', new THREE.BufferAttribute(pCol,3));
+      const pMat = new THREE.PointsMaterial({ size:4.5, sizeAttenuation:true, transparent:true, opacity:0.35, depthWrite:false, vertexColors:true, blending:THREE.AdditiveBlending });
+      parallaxStarsRef.current = new THREE.Points(pGeom,pMat); sceneRef.current!.add(parallaxStarsRef.current);
+      // Initialize schedules
+      const nowT = performance.now();
+      nextSupernovaAtRef.current = nowT + 45000 + Math.random()*45000; // 45-90s
+      nextLensBlinkAtRef.current = nowT + 8000 + Math.random()*7000;   // 8-15s
+      nextCometAtRef.current = nowT + 60000 + Math.random()*60000;     // 60-120s
+      nextRippleAtRef.current = nowT + 30000 + Math.random()*40000;    // 30-70s
       // Post chain (recreate composer & bloom)
       const composer = new EffectComposer(renderer);
       composer.addPass(new RenderPass(sceneRef.current!, camera));
@@ -1082,11 +1210,15 @@ function App() {
       composerRef.current = composer; bloomPassRef.current = bloom;
       // Custom post-processing pass (vignette + grain + chromatic aberration + radial glow)
       // After composer and bloom have been created
-  const customShader = { uniforms:{ tDiffuse:{value:null}, uTime:{value:0}, uGrain:{value:0.35}, uVignette:{value:0.85}, uAberration:{value:new THREE.Vector2(aberrationAmt,aberrationAmt)}, uRadialGlow:{value:0.15}, resolution:{value:new THREE.Vector2(window.innerWidth, window.innerHeight)}, uHazeColor:{value:new THREE.Color(hazeColor)}, uHazeIntensity:{value:hazeIntensity}, uHazeRadius:{value:hazeRadius} }, vertexShader:`varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`, fragmentShader:`uniform sampler2D tDiffuse; uniform float uTime; uniform float uGrain; uniform float uVignette; uniform float uRadialGlow; uniform vec2 uAberration; uniform vec2 resolution; uniform vec3 uHazeColor; uniform float uHazeIntensity; uniform float uHazeRadius; varying vec2 vUv; float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))+uTime*917.2)*43758.5453); } void main(){ vec2 centered = vUv - 0.5; float r = length(centered); vec2 offR = vUv + uAberration*vec2( 0.5 - vUv.y,  vUv.x-0.5); vec2 offB = vUv - uAberration*vec2( 0.5 - vUv.x,  vUv.y-0.5); vec3 col; col.r = texture2D(tDiffuse, offR).r; col.g = texture2D(tDiffuse, vUv).g; col.b = texture2D(tDiffuse, offB).b; float glow = smoothstep(0.7,0.0,r)*uRadialGlow; col += glow; float vig = smoothstep(0.8, uVignette, r); col *= (1.0 - 0.65*vig); // Full-screen capable haze: uHazeRadius 0..100 -> coverage across screen
+  const customShader = { uniforms:{ tDiffuse:{value:null}, uTime:{value:0}, uGrain:{value:0.35}, uVignette:{value:0.85}, uAberration:{value:new THREE.Vector2(aberrationAmt,aberrationAmt)}, uRadialGlow:{value:0.15}, resolution:{value:new THREE.Vector2(window.innerWidth, window.innerHeight)}, uHazeColor:{value:new THREE.Color(hazeColor)}, uHazeIntensity:{value:hazeIntensity}, uHazeRadius:{value:hazeRadius}, uNebulaShimmerAmp:{value:0.18} }, vertexShader:`varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`, fragmentShader:`uniform sampler2D tDiffuse; uniform float uTime; uniform float uGrain; uniform float uVignette; uniform float uRadialGlow; uniform vec2 uAberration; uniform vec2 resolution; uniform vec3 uHazeColor; uniform float uHazeIntensity; uniform float uHazeRadius; uniform float uNebulaShimmerAmp; varying vec2 vUv; float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))+uTime*917.2)*43758.5453); } void main(){ vec2 centered = vUv - 0.5; float r = length(centered); vec2 offR = vUv + uAberration*vec2( 0.5 - vUv.y,  vUv.x-0.5); vec2 offB = vUv - uAberration*vec2( 0.5 - vUv.x,  vUv.y-0.5); vec3 col; col.r = texture2D(tDiffuse, offR).r; col.g = texture2D(tDiffuse, vUv).g; col.b = texture2D(tDiffuse, offB).b; float glow = smoothstep(0.7,0.0,r)*uRadialGlow; col += glow; float vig = smoothstep(0.8, uVignette, r); col *= (1.0 - 0.65*vig); // Full-screen capable haze: uHazeRadius 0..100 -> coverage across screen
  float maxR = 0.70710678; // distance to corner in normalized space
 float coverage = max(uHazeRadius/100.0, 0.0005); // allow >1 to overfill for full-screen haze
  float rn = r / (maxR * coverage);
  float baseH = clamp(1.0 - rn, 0.0, 1.0); // linear falloff
+ // Nebula shimmer (soft temporal & spatial modulation)
+ float shimmer = 1.0 + (sin(uTime*0.35 + centered.x*6.0 + centered.y*5.0) * 0.5 + 0.5 - 0.5) * uNebulaShimmerAmp * 0.35;
+ shimmer += (hash(vUv*vec2(320.0,451.0)) - 0.5) * uNebulaShimmerAmp * 0.25;
+ baseH *= shimmer;
  vec3 haze = uHazeColor * (uHazeIntensity * baseH);
  col += haze; float g = (hash(floor(gl_FragCoord.xy)) - 0.5)*uGrain; col += g/255.0; gl_FragColor = vec4(col,1.0); }`};
       const pass = new ShaderPass(customShader as any); composer.addPass(pass); advancedPassRef.current = pass;
@@ -1099,6 +1231,11 @@ float coverage = max(uHazeRadius/100.0, 0.0005); // allow >1 to overfill for ful
   if(dustPointsRef.current){ dustPointsRef.current.geometry.dispose(); (dustPointsRef.current.material as THREE.Material).dispose(); sceneRef.current!.remove(dustPointsRef.current); dustPointsRef.current=null; }
   if(secondDustRef.current){ secondDustRef.current.geometry.dispose(); (secondDustRef.current.material as THREE.Material).dispose(); sceneRef.current!.remove(secondDustRef.current); secondDustRef.current=null; }
   if(meteorsGroupRef.current){ meteorsGroupRef.current.children.forEach(c=>{ const m=c as any; if(m.geometry) m.geometry.dispose(); if(m.material) m.material.dispose(); }); sceneRef.current!.remove(meteorsGroupRef.current); meteorsGroupRef.current=null; }
+  if(supernovaGroupRef.current){ supernovaGroupRef.current.children.forEach(c=>{ const m=c as any; m.geometry?.dispose?.(); m.material?.dispose?.();}); sceneRef.current!.remove(supernovaGroupRef.current); supernovaGroupRef.current=null; }
+  if(lensFlareGroupRef.current){ lensFlareGroupRef.current.children.forEach(c=>{ const m=c as any; m.geometry?.dispose?.(); m.material?.dispose?.();}); sceneRef.current!.remove(lensFlareGroupRef.current); lensFlareGroupRef.current=null; }
+  if(rippleGroupRef.current){ rippleGroupRef.current.children.forEach(c=>{ const m=c as any; m.geometry?.dispose?.(); m.material?.dispose?.();}); sceneRef.current!.remove(rippleGroupRef.current); rippleGroupRef.current=null; }
+  if(cometGroupRef.current){ cometGroupRef.current.children.forEach(c=>{ const m=c as any; m.geometry?.dispose?.(); m.material?.dispose?.();}); sceneRef.current!.remove(cometGroupRef.current); cometGroupRef.current=null; }
+  if(parallaxStarsRef.current){ parallaxStarsRef.current.geometry.dispose(); (parallaxStarsRef.current.material as THREE.Material).dispose(); sceneRef.current!.remove(parallaxStarsRef.current); parallaxStarsRef.current=null; }
       if(composerRef.current){ composerRef.current.passes.forEach(p=> (p as any).dispose?.()); (composerRef.current as any).dispose?.(); composerRef.current=null; bloomPassRef.current=null; }
       if(originalToneMappingRef.current!==null) renderer.toneMapping = originalToneMappingRef.current as any;
       if(originalExposureRef.current!==null) (renderer as any).toneMappingExposure = originalExposureRef.current;
