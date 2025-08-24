@@ -2052,7 +2052,7 @@ function App() {
     const DRAG_THRESHOLD = 5; // pixels
     const CLICK_TIME_THRESHOLD = 200; // milliseconds
 
-    const onPointerMove = (event: PointerEvent) => {
+  const onPointerMove = (event: PointerEvent) => {
       mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
       mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
 
@@ -2082,7 +2082,14 @@ function App() {
         const normalizedDistance = (clampedDistance - minDistance) / (maxDistance - minDistance);
         const dynamicThreshold = minThreshold + (maxThreshold - minThreshold) * normalizedDistance;
         raycaster.params.Points.threshold = dynamicThreshold;
-        const intersects = raycaster.intersectObject(starFieldRef.current);
+        let intersects = raycaster.intersectObject(starFieldRef.current);
+        // Fallback: if no hit, try with a very large threshold once (post-cinematic safety)
+        if(intersects.length===0){
+          const prevThresh = raycaster.params.Points.threshold;
+          raycaster.params.Points.threshold = Math.max(prevThresh, 1200);
+          intersects = raycaster.intersectObject(starFieldRef.current);
+          raycaster.params.Points.threshold = prevThresh; // restore
+        }
 
         let newHoveredSystem: SolarSystem | null = null;
         let hitStarObject: THREE.Object3D | null = null;
@@ -2202,7 +2209,7 @@ function App() {
   currentRenderer.domElement.removeEventListener('pointerup', onPointerUp);
   currentRenderer.domElement.removeEventListener('pointerleave', onPointerLeave);
     };
-    }, [isLoaded, hoveredSystem, isDraggingRef, mouseDownPosRef, mouseDownTimeRef, createSystemLabelElement, selectSystem, isPlanetCountActive, showDistance, highlightedSystem]);
+  }, [isLoaded, hoveredSystem, isDraggingRef, mouseDownPosRef, mouseDownTimeRef, createSystemLabelElement, selectSystem, isPlanetCountActive, showDistance, highlightedSystem, cinematicMode]);
 
   const handleSearch = (event: React.KeyboardEvent<HTMLInputElement>, systemNameFromSelection?: string) => {
     if (event.key === 'Enter' && mapData) {
