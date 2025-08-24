@@ -131,15 +131,18 @@ function App() {
   const [maxPlanets, setMaxPlanets] = useState(0);
   // Cinematic mode + locked parameters (UI removed)
   const [cinematicMode, setCinematicMode] = useState(false);
-  const bloomStrength = 0.8;
+  // Bloom strength (committed) and draft for deferred apply (performance)
+  const [bloomStrength, setBloomStrength] = useState(0.6); // committed default
+  const [bloomStrengthDraft, setBloomStrengthDraft] = useState(0.6); // draft default
+  const bloomStrengthRef = useRef(0.6);
   const dustAmount = 0.6; // 0..1
   const cinExposure = 1.0;
   const bgIntensity = 0.3;
   const starColorStrength = 0.85; // rollback to earlier value
-  const vignette = 0.85;
+  const vignette = 1.0; // raised to remove center/edge contrast
   const grain = 0.35;
   const aberration = 0.002;
-  const radialGlow = 0.15;
+  const radialGlow = 0.0; // disabled to remove central bright spot
   const bloomPulseEnabled = true;
   const bloomPulseAmp = 0.05;
   const cameraDriftEnabled = true;
@@ -148,13 +151,13 @@ function App() {
   const secondDustEnabled = true;
   // Cinematic user-exposed controls (initial minimal set)
   const [cinematicExpanded, setCinematicExpanded] = useState(false);
-  const [starColorMode, setStarColorMode] = useState<'purple'|'white'|'blue'|'red'|'yellow'|'random'>('purple');
+  const [starColorMode, setStarColorMode] = useState<'purple'|'white'|'blue'|'red'|'yellow'|'random'>('blue');
   // Haze: separate draft states to avoid perf spikes on continuous drag
-  const [hazeColor, setHazeColor] = useState('#294d8c'); // committed
-  const [hazeColorDraft, setHazeColorDraft] = useState('#294d8c'); // draft while picking
+  const [hazeColor, setHazeColor] = useState('#5d8fff'); // lighter colder blue default
   const [hazeIntensity, setHazeIntensity] = useState(0.12);
-  const [hazeRadius, setHazeRadius] = useState(1.0); // committed spread factor
-  const [hazeRadiusDraft, setHazeRadiusDraft] = useState(1.0);
+  const [hazeRadius, setHazeRadius] = useState(250); // committed spread factor default
+  const [hazeRadiusDraft, setHazeRadiusDraft] = useState(250);
+  const [hazePickerOpen,setHazePickerOpen] = useState(false);
   const [aberrationAmt, setAberrationAmt] = useState(0.002);
 
   // State for P2P Routing
@@ -903,7 +906,7 @@ function App() {
            if(sh.uniforms.uHueShift) sh.uniforms.uHueShift.value = (hueDriftEnabled? (performance.now()/1000)*0.04 : 0);
          }
          // Bloom pulse
-         if(bloomPassRef.current){ const base = bloomStrength; bloomPassRef.current.strength = base * (1 + (bloomPulseEnabled? bloomPulseAmp:0)*Math.sin(performance.now()/1000*0.35)); }
+         if(bloomPassRef.current){ const base = bloomStrengthRef.current; bloomPassRef.current.strength = base * (1 + (bloomPulseEnabled? bloomPulseAmp:0)*Math.sin(performance.now()/1000*0.35)); }
          // Camera idle drift
          if(cameraDriftEnabled){ const idleTime = (Date.now() - lastInteractionRef.current)/1000; if(idleTime > 6 && cameraRef.current){ const t = performance.now()/1000; cameraRef.current.position.x += Math.sin(t*0.07)*0.3; cameraRef.current.position.y += Math.cos(t*0.05)*0.25; cameraRef.current.position.z += Math.sin(t*0.04)*0.15; } }
          // Rotate dust layers
@@ -1039,46 +1042,22 @@ function App() {
       if(originalToneMappingRef.current===null) originalToneMappingRef.current = renderer.toneMapping as number;
       if(originalExposureRef.current===null) originalExposureRef.current = (renderer as any).toneMappingExposure ?? 1;
       originalStarMaterialRef.current = starFieldRef.current!.material as THREE.PointsMaterial;
-    const cineMat = new THREE.PointsMaterial({ size:2.6, sizeAttenuation:true, map:(originalStarMaterialRef.current as any).map, transparent:true, depthWrite:false, vertexColors:true, blending:THREE.AdditiveBlending });
+  const cineMat = new THREE.PointsMaterial({ size:2.6, sizeAttenuation:true, map:(originalStarMaterialRef.current as any).map, transparent:true, depthWrite:false, vertexColors:true, blending:THREE.AdditiveBlending });
       cineMat.onBeforeCompile = (shader)=>{ 
         shader.uniforms.uTime={value:0}; 
-        shader.uniforms.uAmp={value:0.22};
-        shader.uniforms.uColorStrength={value:starColorStrength};
-        shader.uniforms.uHueShift={value:0};
-        // Dynamic star palette uniforms (updated via effect when user changes selection)
-        shader.uniforms.uStarC1={ value: new THREE.Color(0.55,0.50,0.95) };
-        shader.uniforms.uStarC2={ value: new THREE.Color(0.50,0.65,1.00) };
-        shader.uniforms.uStarC3={ value: new THREE.Color(0.85,0.60,1.00) };
-        shader.fragmentShader = `uniform float uTime;\nuniform float uAmp;\nuniform float uColorStrength;\nuniform float uHueShift;\nuniform vec3 uStarC1;\nuniform vec3 uStarC2;\nuniform vec3 uStarC3;\n${shader.fragmentShader}`.replace(
+        shader.uniforms.uAmp={value:0.25};
+        shader.fragmentShader = `uniform float uTime;\nuniform float uAmp;\n${shader.fragmentShader}`.replace(
           'gl_FragColor = vec4( outgoingLight, diffuseColor.a );',
-      'float h = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898,78.233)))*43758.5453);\n'+
-      'float h2 = fract(h*5.0);\n'+
-          'vec3 c1 = uStarC1;\n'+
-          'vec3 c2 = uStarC2;\n'+
-          'vec3 c3 = uStarC3;\n'+
-      'vec3 base;\n'+
-      'if(h < 0.33) base = mix(c1,c2,h/0.33); else if(h < 0.66) base = mix(c2,c3,(h-0.33)/0.33); else base = mix(c3,c1,(h-0.66)/0.34);\n'+
-      'base = mix(base, mix(c1,c3,step(0.5,h2)), 0.22*abs(sin(h2*6.283)));\n'+
-      '// Apply global hue shift (approximate)\n'+
-          'float hs = uHueShift;\n'+
-          'mat3 rot = mat3(\n'+
-          '  0.299+0.701*cos(hs)+0.168*sin(hs), 0.587-0.587*cos(hs)+0.330*sin(hs), 0.114-0.114*cos(hs)-0.497*sin(hs),\n'+
-          '  0.299-0.299*cos(hs)-0.328*sin(hs), 0.587+0.413*cos(hs)+0.035*sin(hs), 0.114-0.114*cos(hs)+0.292*sin(hs),\n'+
-          '  0.299-0.300*cos(hs)+1.250*sin(hs), 0.587-0.588*cos(hs)-1.050*sin(hs), 0.114+0.886*cos(hs)-0.203*sin(hs) );\n'+
-          'base = clamp(rot * base, 0.0, 1.0);\n'+
-          'float tw = sin(uTime*2.6 + gl_FragCoord.x*0.05 + gl_FragCoord.y*0.05);\n'+
-          'float f = 1.0 + (tw*0.5)*uAmp;\n'+
-          'float luma = dot(base, vec3(0.299,0.587,0.114));\n'+
-          'vec3 tint = mix(vec3(luma), base, uColorStrength);\n'+
-          'tint = pow(tint, vec3(0.90));\n'+
-          'vec3 col = outgoingLight * tint * f;\n'+
-          'col = clamp(col,0.0,5.0);\n'+
-          'col = col / (1.0 + max(0.0, max(col.r,max(col.g,col.b)))*0.18);\n'+
+          'float tw = sin(uTime*3.0 + gl_FragCoord.x*0.07 + gl_FragCoord.y*0.07);\n'+
+          'float f = 1.0 + tw*0.35*uAmp;\n'+
+          'vec3 col = outgoingLight * f;\n'+
           'gl_FragColor = vec4(col, diffuseColor.a);'
         );
         (cineMat as any).userData.shader = shader; 
       };
       cinematicStarMaterialRef.current = cineMat; starFieldRef.current!.material = cineMat;
+  // Apply star palette immediately on enable (even if mode already set to default)
+  try { applyStarPalette(starColorMode); requestAnimationFrame(()=>{ applyStarPalette(starColorMode); }); } catch(e){ /* ignore */ }
       if(stargateLinesRef.current) stargateLinesRef.current.visible = false;
       // Dust
       const count=1000; const pos=new Float32Array(count*3); const col=new Float32Array(count*3);
@@ -1103,7 +1082,13 @@ function App() {
       composerRef.current = composer; bloomPassRef.current = bloom;
       // Custom post-processing pass (vignette + grain + chromatic aberration + radial glow)
       // After composer and bloom have been created
-  const customShader = { uniforms:{ tDiffuse:{value:null}, uTime:{value:0}, uGrain:{value:0.35}, uVignette:{value:0.85}, uAberration:{value:new THREE.Vector2(aberrationAmt,aberrationAmt)}, uRadialGlow:{value:0.15}, resolution:{value:new THREE.Vector2(window.innerWidth, window.innerHeight)}, uHazeColor:{value:new THREE.Color(hazeColor)}, uHazeIntensity:{value:hazeIntensity}, uHazeRadius:{value:hazeRadius} }, vertexShader:`varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`, fragmentShader:`uniform sampler2D tDiffuse; uniform float uTime; uniform float uGrain; uniform float uVignette; uniform float uRadialGlow; uniform vec2 uAberration; uniform vec2 resolution; uniform vec3 uHazeColor; uniform float uHazeIntensity; uniform float uHazeRadius; varying vec2 vUv; float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))+uTime*917.2)*43758.5453); } void main(){ vec2 centered = vUv - 0.5; float r = length(centered); vec2 offR = vUv + uAberration*vec2( 0.5 - vUv.y,  vUv.x-0.5); vec2 offB = vUv - uAberration*vec2( 0.5 - vUv.x,  vUv.y-0.5); vec3 col; col.r = texture2D(tDiffuse, offR).r; col.g = texture2D(tDiffuse, vUv).g; col.b = texture2D(tDiffuse, offB).b; float glow = smoothstep(0.7,0.0,r)*uRadialGlow; col += glow; float vig = smoothstep(0.8, uVignette, r); col *= (1.0 - 0.65*vig); float scaled = r / max(0.0001,uHazeRadius); float ellipse = smoothstep(0.0,1.0,1.0 - scaled*scaled); vec3 haze = uHazeColor * (uHazeIntensity * ellipse); col += haze; float g = (hash(floor(gl_FragCoord.xy)) - 0.5)*uGrain; col += g/255.0; gl_FragColor = vec4(col,1.0); }`};
+  const customShader = { uniforms:{ tDiffuse:{value:null}, uTime:{value:0}, uGrain:{value:0.35}, uVignette:{value:0.85}, uAberration:{value:new THREE.Vector2(aberrationAmt,aberrationAmt)}, uRadialGlow:{value:0.15}, resolution:{value:new THREE.Vector2(window.innerWidth, window.innerHeight)}, uHazeColor:{value:new THREE.Color(hazeColor)}, uHazeIntensity:{value:hazeIntensity}, uHazeRadius:{value:hazeRadius} }, vertexShader:`varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`, fragmentShader:`uniform sampler2D tDiffuse; uniform float uTime; uniform float uGrain; uniform float uVignette; uniform float uRadialGlow; uniform vec2 uAberration; uniform vec2 resolution; uniform vec3 uHazeColor; uniform float uHazeIntensity; uniform float uHazeRadius; varying vec2 vUv; float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))+uTime*917.2)*43758.5453); } void main(){ vec2 centered = vUv - 0.5; float r = length(centered); vec2 offR = vUv + uAberration*vec2( 0.5 - vUv.y,  vUv.x-0.5); vec2 offB = vUv - uAberration*vec2( 0.5 - vUv.x,  vUv.y-0.5); vec3 col; col.r = texture2D(tDiffuse, offR).r; col.g = texture2D(tDiffuse, vUv).g; col.b = texture2D(tDiffuse, offB).b; float glow = smoothstep(0.7,0.0,r)*uRadialGlow; col += glow; float vig = smoothstep(0.8, uVignette, r); col *= (1.0 - 0.65*vig); // Full-screen capable haze: uHazeRadius 0..100 -> coverage across screen
+ float maxR = 0.70710678; // distance to corner in normalized space
+float coverage = max(uHazeRadius/100.0, 0.0005); // allow >1 to overfill for full-screen haze
+ float rn = r / (maxR * coverage);
+ float baseH = clamp(1.0 - rn, 0.0, 1.0); // linear falloff
+ vec3 haze = uHazeColor * (uHazeIntensity * baseH);
+ col += haze; float g = (hash(floor(gl_FragCoord.xy)) - 0.5)*uGrain; col += g/255.0; gl_FragColor = vec4(col,1.0); }`};
       const pass = new ShaderPass(customShader as any); composer.addPass(pass); advancedPassRef.current = pass;
       renderer.toneMapping = THREE.ACESFilmicToneMapping as any; (renderer as any).toneMappingExposure = cinExposure;
       const onResize=()=>{ composer.setSize(window.innerWidth, window.innerHeight); bloom.setSize(window.innerWidth, window.innerHeight); }; window.addEventListener('resize', onResize); (enable as any)._resize = onResize;
@@ -1121,26 +1106,51 @@ function App() {
     };
     if(cinematicMode) enable(); else disable();
     return ()=>{ if(cinematicMode) disable(); };
-  }, [cinematicMode, bloomStrength, dustAmount, cinExposure, aberrationAmt, hazeColor, hazeIntensity, hazeRadius]);
+  // Cinematic enable/disable lifecycle (exclude bloomStrength so slider changes don't recreate composer)
+  }, [cinematicMode, /* bloomStrength removed */ dustAmount, cinExposure]);
+
+  // Star palette application via geometry colors (overrides any previous per-star coloring while in cinematic mode)
+  const applyStarPalette = useCallback((mode: typeof starColorMode)=>{
+    if(!cinematicMode) return; // only apply in cinematic
+    if(!starFieldRef.current) return;
+    const geom = starFieldRef.current.geometry as THREE.BufferGeometry;
+    const attr = geom.getAttribute('color') as THREE.BufferAttribute;
+    if(!attr) return;
+    const count = attr.count;
+    const palettes: Record<string, [number,number,number][]> = {
+      purple: [[0.70,0.55,1.0],[0.55,0.50,0.95],[0.85,0.60,1.0]],
+      white:  [[0.95,0.95,0.95],[1.0,1.0,1.0],[0.95,0.95,0.95]],
+  // Make blue palette visibly distinct (deeper blues)
+  // Lighter, colder blue palette (soft stellar blues)
+  blue:   [[0.65,0.80,1.0],[0.55,0.75,1.0],[0.75,0.88,1.0]],
+      red:    [[1.0,0.35,0.20],[1.0,0.50,0.28],[1.0,0.70,0.45]],
+      yellow: [[1.0,0.82,0.05],[1.0,0.90,0.30],[1.0,0.97,0.60]],
+      random: [[1.0,0.35,0.20],[0.55,0.65,1.0],[1.0,0.82,0.05]]
+    };
+    const sel = palettes[mode]; if(!sel) return;
+    for(let i=0;i<count;i++){
+      const h = (Math.sin(i*12.9898)*43758.5453) % 1; // deterministic pseudo-random
+      let c: [number,number,number];
+      if(h < 0.33) c = sel[0]; else if(h < 0.66) c = sel[1]; else c = sel[2];
+      attr.setX(i,c[0]); attr.setY(i,c[1]); attr.setZ(i,c[2]);
+    }
+    attr.needsUpdate = true;
+  }, [cinematicMode]);
+
+  // Re-apply palette when mode changes or when cinematic toggles on
+  useEffect(()=>{ applyStarPalette(starColorMode); }, [starColorMode, cinematicMode, applyStarPalette]);
 
   // Respond to user cinematic color control changes
   useEffect(()=>{
     if(!cinematicMode) return;
-    // Update haze / aberration uniforms
-  if(advancedPassRef.current){ const u = advancedPassRef.current.uniforms; if(u.uHazeColor) u.uHazeColor.value.set(hazeColor); if(u.uHazeIntensity) u.uHazeIntensity.value = hazeIntensity; if(u.uHazeRadius) u.uHazeRadius.value = hazeRadius; if(u.uAberration) u.uAberration.value.set(aberrationAmt,aberrationAmt); }
-    // Update star palette
-    if(cinematicStarMaterialRef.current){ const shader=(cinematicStarMaterialRef.current as any).userData?.shader; if(shader){ const palettes:Record<string,[number,number,number][]>={
-      purple:[[0.55,0.50,0.95],[0.50,0.65,1.00],[0.85,0.60,1.00]],
-      white:[[0.98,0.98,0.98],[1.0,1.0,1.0],[0.98,0.98,0.98]],
-      blue:[[0.40,0.58,1.00],[0.30,0.52,1.00],[0.60,0.82,1.00]],
-      red:[[1.0,0.32,0.15],[1.0,0.50,0.28],[1.0,0.74,0.48]],
-      yellow:[[1.0,0.78,0.10],[1.0,0.90,0.36],[1.0,0.97,0.62]],
-      random:[[1.0,0.32,0.15],[0.55,0.65,1.0],[1.0,0.78,0.10]]
-    }; const strength:Record<string,number>={white:0.0,purple:0.85,blue:1.0,red:1.0,yellow:1.0,random:1.0}; const sel=palettes[starColorMode]; if(sel){ shader.uniforms.uStarC1.value.set(sel[0][0],sel[0][1],sel[0][2]); shader.uniforms.uStarC2.value.set(sel[1][0],sel[1][1],sel[1][2]); shader.uniforms.uStarC3.value.set(sel[2][0],sel[2][1],sel[2][2]); if(shader.uniforms.uColorStrength) shader.uniforms.uColorStrength.value = strength[starColorMode]; (cinematicStarMaterialRef.current as any).needsUpdate = true; }} }
-  }, [cinematicMode, starColorMode, hazeColor, hazeIntensity, hazeRadius, aberrationAmt]);
+    if(advancedPassRef.current){ const u = advancedPassRef.current.uniforms; if(u.uHazeColor) u.uHazeColor.value.set(hazeColor); if(u.uHazeIntensity) u.uHazeIntensity.value = hazeIntensity; if(u.uHazeRadius) u.uHazeRadius.value = hazeRadius; if(u.uAberration) u.uAberration.value.set(aberrationAmt,aberrationAmt); }
+  }, [cinematicMode, hazeColor, hazeIntensity, hazeRadius, aberrationAmt]);
 
   // Live slider updates
-  useEffect(()=>{ if(!cinematicMode) return; if(bloomPassRef.current) bloomPassRef.current.strength = bloomStrength; if(rendererRef.current) (rendererRef.current as any).toneMappingExposure = cinExposure; if(dustPointsRef.current) (dustPointsRef.current.material as THREE.PointsMaterial).opacity = 0.28*dustAmount; if(secondDustRef.current) (secondDustRef.current.material as THREE.PointsMaterial).opacity = 0.12*dustAmount * (secondDustEnabled?1:0); if(backgroundMeshRef.current) (backgroundMeshRef.current.material as THREE.MeshBasicMaterial).opacity = bgIntensity; if(cinematicStarMaterialRef.current){ const shader=(cinematicStarMaterialRef.current as any).userData?.shader; if(shader && shader.uniforms.uColorStrength){ shader.uniforms.uColorStrength.value = starColorStrength; }} }, [bloomStrength, dustAmount, cinExposure, bgIntensity, starColorStrength, secondDustEnabled, cinematicMode]);
+  // Update bloom strength when committed value changes
+  useEffect(()=>{ if(!cinematicMode) return; bloomStrengthRef.current = bloomStrength; if(bloomPassRef.current) bloomPassRef.current.strength = bloomStrength; }, [bloomStrength, cinematicMode]);
+  // Other live updates that are still fine to apply immediately
+  useEffect(()=>{ if(!cinematicMode) return; if(rendererRef.current) (rendererRef.current as any).toneMappingExposure = cinExposure; if(dustPointsRef.current) (dustPointsRef.current.material as THREE.PointsMaterial).opacity = 0.28*dustAmount; if(secondDustRef.current) (secondDustRef.current.material as THREE.PointsMaterial).opacity = 0.12*dustAmount * (secondDustEnabled?1:0); if(backgroundMeshRef.current) (backgroundMeshRef.current.material as THREE.MeshBasicMaterial).opacity = bgIntensity; }, [dustAmount, cinExposure, bgIntensity, secondDustEnabled, cinematicMode]);
 
   // Update custom pass uniforms when sliders change
   useEffect(()=>{ if(!cinematicMode) return; if(advancedPassRef.current){ const u=advancedPassRef.current.uniforms; u.uVignette.value = vignette; u.uGrain.value = grain; u.uAberration.value.set(aberration,aberration); u.uRadialGlow.value = radialGlow; } }, [vignette, grain, aberration, radialGlow, cinematicMode]);
@@ -1151,6 +1161,10 @@ function App() {
   // This useLayoutEffect handles all dynamic star and stargate line coloring based on the pipeline.
   useLayoutEffect(() => {
     if (!mapData || !starFieldRef.current || !sceneRef.current) return;
+    // If cinematic mode active, skip planet/region color pipeline and rely on palette coloring
+    if(cinematicMode){
+      return; // palette applied elsewhere
+    }
 
     const starColorsAttribute = starFieldRef.current.geometry.attributes.color as THREE.BufferAttribute;
     const currentStarColors = starColorsAttribute.array as Float32Array;
@@ -1452,7 +1466,7 @@ function App() {
       // ignore
     }
 
-  }, [isRegionHighlighterActive, highlightedSystem, mapData, isPlanetCountActive, getPlanetCountColor, getTransformedPosition, ringTexture, planetBinsActive]);
+  }, [isRegionHighlighterActive, highlightedSystem, mapData, isPlanetCountActive, getPlanetCountColor, getTransformedPosition, ringTexture, planetBinsActive, cinematicMode]);
 
   // Draw Route Lines (supports P2P or Scout route; Scout takes precedence when present)
   useEffect(() => {
@@ -2069,8 +2083,7 @@ function App() {
         <div className="ef-control-group" style={{ marginTop: '10px' }}>
           <label className="module-toggle-label" style={{ display:'flex', gap:'6px', alignItems:'center', cursor:'pointer' }}>
             <input type="checkbox" checked={cinematicMode} onChange={e=> { setCinematicMode(e.target.checked); if(e.target.checked) setCinematicExpanded(true); }} />
-            <span onClick={()=> cinematicMode && setCinematicExpanded(v=> !v)} style={{ display:'flex', alignItems:'center', gap:4 }}>
-              <span style={{ transform:`rotate(${cinematicExpanded?90:0}deg)`, display:'inline-block', transition:'transform .25s' }}>▶</span>
+            <span onClick={()=> cinematicMode && setCinematicExpanded(v=> !v)} style={{ display:'flex', alignItems:'center' }}>
               Cinematic Mode
             </span>
           </label>
@@ -2088,20 +2101,36 @@ function App() {
                 </select>
               </div>
               <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+                <label style={{ fontSize:12, fontWeight:600 }}>Bloom Strength <span style={{ opacity:.65 }}>({bloomStrengthDraft.toFixed(2)})</span></label>
+                <input type="range" min={0} max={1.0} step={0.01} value={bloomStrengthDraft} onChange={e=> setBloomStrengthDraft(parseFloat(e.target.value))} onPointerUp={e=> { const v=parseFloat((e.target as HTMLInputElement).value); setBloomStrength(v); }} onBlur={e=> { const v=parseFloat((e.target as HTMLInputElement).value); setBloomStrength(v); }} />
+                <small style={{ fontSize:10, opacity:.55 }}>Applies on release</small>
+              </div>
+              <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
                 <label style={{ fontSize:12, fontWeight:600 }}>Chromatic Aberration <span style={{ opacity:.65 }}>({aberrationAmt.toFixed(3)})</span></label>
                 <input type="range" min={0} max={0.006} step={0.0005} value={aberrationAmt} onChange={e=> setAberrationAmt(parseFloat(e.target.value))} />
               </div>
               <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
                 <label style={{ fontSize:12, fontWeight:600 }}>Haze Color</label>
-                <input type="color" value={hazeColorDraft} onInput={e=> setHazeColorDraft((e.target as HTMLInputElement).value)} onChange={e=> { const v=(e.target as HTMLInputElement).value; setHazeColorDraft(v); setHazeColor(v); (e.target as HTMLInputElement).blur(); }} style={{ width:50, height:30, border:'none', background:'transparent', cursor:'pointer' }} />
+                <div style={{ position:'relative', display:'flex', flexDirection:'column', alignItems:'flex-start', gap:4 }}>
+                  <div onClick={()=> setHazePickerOpen(o=>!o)} style={{ width:44, height:22, background:hazeColor, border:'1px solid #666', cursor:'pointer', borderRadius:4 }} title={hazePickerOpen? 'Click to close':'Click to pick color'} />
+                  {hazePickerOpen && (
+                    <div style={{ position:'absolute', top:28, left:0, background:'#111', padding:'8px 10px', border:'1px solid #444', borderRadius:6, zIndex:50, display:'flex', flexDirection:'column', gap:8, boxShadow:'0 4px 12px rgba(0,0,0,0.5)' }}>
+                      <div style={{ display:'grid', gridTemplateColumns:'repeat(6,18px)', gap:6 }}>
+                        {['#5d8fff','#7aa8ff','#a0c2ff','#cde0ff','#ffffff','#ffd700','#ffcc55','#ff8844','#ff5555','#55aaff','#55ffcc','#aa88ff'].map(c=> (
+                          <div key={c} onClick={()=>{ setHazeColor(c); setHazePickerOpen(false); }} style={{ width:18, height:18, background:c, border:'1px solid #777', cursor:'pointer', borderRadius:3 }} />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
               <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
                 <label style={{ fontSize:12, fontWeight:600 }}>Haze Intensity <span style={{ opacity:.65 }}>({hazeIntensity.toFixed(2)})</span></label>
                 <input type="range" min={0} max={0.4} step={0.01} value={hazeIntensity} onChange={e=> setHazeIntensity(parseFloat(e.target.value))} />
               </div>
               <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
-                <label style={{ fontSize:12, fontWeight:600 }}>Haze Radius <span style={{ opacity:.65 }}>({hazeRadiusDraft.toFixed(2)})</span></label>
-                <input type="range" min={0.5} max={2.5} step={0.05} value={hazeRadiusDraft} onChange={e=> setHazeRadiusDraft(parseFloat(e.target.value))} onPointerUp={e=> setHazeRadius(parseFloat((e.target as HTMLInputElement).value))} onBlur={e=> setHazeRadius(parseFloat((e.target as HTMLInputElement).value))} />
+                <label style={{ fontSize:12, fontWeight:600 }}>Haze Radius <span style={{ opacity:.65 }}>({hazeRadiusDraft.toFixed(1)})</span></label>
+                <input type="range" min={0} max={500} step={1} value={hazeRadiusDraft} onChange={e=> setHazeRadiusDraft(parseFloat(e.target.value))} onPointerUp={e=> setHazeRadius(parseFloat((e.target as HTMLInputElement).value))} onBlur={e=> setHazeRadius(parseFloat((e.target as HTMLInputElement).value))} />
               </div>
             </div>
           )}
