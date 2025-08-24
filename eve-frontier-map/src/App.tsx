@@ -17,6 +17,7 @@ import AutoCompleteInput from './components/AutoCompleteInput/AutoCompleteInput'
 import HelpPanel from './components/HelpPanel/HelpPanel';
 import { encodeShare, decodeShare } from './utils/share';
 import { createShortShare, fetchShortShare } from './utils/shortShare';
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 
 // Small referral badge component with copy-to-clipboard
 const ReferralBadge: React.FC = () => {
@@ -124,12 +125,23 @@ function App() {
   const [showDistance, setShowDistance] = useState(false);
   const [minPlanets, setMinPlanets] = useState(0);
   const [maxPlanets, setMaxPlanets] = useState(0);
-  // Cinematic mode controls
+  // Cinematic mode + locked parameters (UI removed)
   const [cinematicMode, setCinematicMode] = useState(false);
-  const [bloomStrength, setBloomStrength] = useState(0.8);
-  const [dustAmount, setDustAmount] = useState(0.6); // 0..1
-  const [cinExposure, setCinExposure] = useState(1.0);
-  const [bgIntensity, setBgIntensity] = useState(0.3);
+  const bloomStrength = 0.8;
+  const dustAmount = 0.6; // 0..1
+  const cinExposure = 1.0;
+  const bgIntensity = 0.3;
+  const starColorStrength = 0.85; // rollback to earlier value
+  const vignette = 0.85;
+  const grain = 0.35;
+  const aberration = 0.002;
+  const radialGlow = 0.15;
+  const bloomPulseEnabled = true;
+  const bloomPulseAmp = 0.05;
+  const cameraDriftEnabled = true;
+  const shootingStarsEnabled = true;
+  const hueDriftEnabled = true; // rollback
+  const secondDustEnabled = true;
 
   // State for P2P Routing
   const routingWorkerRef = useRef<Worker | null>(null);
@@ -154,6 +166,8 @@ function App() {
   const hoverPointRef = useRef<THREE.Points | null>(null);
   const stargateLinesRef = useRef<THREE.LineSegments | null>(null);
   const routeLinesRef = useRef<THREE.Group | null>(null); // New ref for route lines
+  const cinematicModeRef = useRef(false);
+  useEffect(()=>{ cinematicModeRef.current = cinematicMode; }, [cinematicMode]);
   // Track which module produced the currently drawn route ('scout' or 'p2p')
   const routeSourceRef = useRef<'scout'|'p2p'|null>(null);
   const clearCurrentRoute = useCallback(() => {
@@ -202,7 +216,11 @@ function App() {
   const cinematicStarMaterialRef = useRef<THREE.PointsMaterial | null>(null);
   const dustPointsRef = useRef<THREE.Points | null>(null);
   const backgroundMeshRef = useRef<THREE.Mesh | null>(null);
-
+  const advancedPassRef = useRef<any>(null);
+  const secondDustRef = useRef<THREE.Points|null>(null);
+  const meteorsGroupRef = useRef<THREE.Group|null>(null);
+  const lastMeteorSpawnRef = useRef<number>(0);
+  const lastInteractionRef = useRef<number>(Date.now());
 
   const isDraggingRef = useRef(false);
   const mouseDownPosRef = useRef(new THREE.Vector2());
@@ -841,38 +859,74 @@ function App() {
     hoverPointRef.current.visible = false;
     sceneRef.current.add(hoverPointRef.current);
 
+    let running = true; let rafId = 0;
     const animate = () => {
-      requestAnimationFrame(animate);
-      const anim = animationRef.current;
-      if (anim.isAnimating) {
-        const now = Date.now();
-        const progress = Math.min((now - anim.startTime) / anim.duration, 1);
-        cameraRef.current?.position.lerpVectors(anim.startPos, anim.endPos, progress);
-        controlsRef.current?.target.lerpVectors(anim.startTarget, anim.endTarget, progress);
-        if (progress >= 1) {
-          anim.isAnimating = false;
-        }
-      }
-      // Run route animation updaters
-      try {
-        const updaters = routeAnimUpdatersRef.current;
-        for (let i = 0; i < updaters.length; i++) updaters[i]();
-      } catch (e) {
-        // ignore
-      }
-      controls.update();
-      if (cinematicMode) {
-        if (cinematicStarMaterialRef.current && (cinematicStarMaterialRef.current as any).userData?.shader) {
-          (cinematicStarMaterialRef.current as any).userData.shader.uniforms.uTime.value = performance.now()/1000;
-        }
-        if (dustPointsRef.current) dustPointsRef.current.rotation.y += 0.0004;
-        composerRef.current ? composerRef.current.render() : rendererRef.current?.render(sceneRef.current!, cameraRef.current!);
-      } else {
+      if(!running) return;
+      rafId = requestAnimationFrame(animate);
+       const anim = animationRef.current;
+       if (anim.isAnimating) {
+         const now = Date.now();
+         const progress = Math.min((now - anim.startTime) / anim.duration, 1);
+         cameraRef.current?.position.lerpVectors(anim.startPos, anim.endPos, progress);
+         controlsRef.current?.target.lerpVectors(anim.startTarget, anim.endTarget, progress);
+         if (progress >= 1) {
+           anim.isAnimating = false;
+         }
+       }
+       // Run route animation updaters
+       try {
+         const updaters = routeAnimUpdatersRef.current;
+         for (let i = 0; i < updaters.length; i++) updaters[i]();
+       } catch (e) {
+         // ignore
+       }
+  controls.update();
+  if (cinematicModeRef.current || cinematicMode) {
+         if (cinematicStarMaterialRef.current && (cinematicStarMaterialRef.current as any).userData?.shader) {
+           const sh = (cinematicStarMaterialRef.current as any).userData.shader;
+           sh.uniforms.uTime.value = performance.now()/1000;
+           if(sh.uniforms.uColorStrength) sh.uniforms.uColorStrength.value = starColorStrength;
+           if(sh.uniforms.uHueShift) sh.uniforms.uHueShift.value = (hueDriftEnabled? (performance.now()/1000)*0.04 : 0);
+         }
+         // Bloom pulse
+         if(bloomPassRef.current){ const base = bloomStrength; bloomPassRef.current.strength = base * (1 + (bloomPulseEnabled? bloomPulseAmp:0)*Math.sin(performance.now()/1000*0.35)); }
+         // Camera idle drift
+         if(cameraDriftEnabled){ const idleTime = (Date.now() - lastInteractionRef.current)/1000; if(idleTime > 6 && cameraRef.current){ const t = performance.now()/1000; cameraRef.current.position.x += Math.sin(t*0.07)*0.3; cameraRef.current.position.y += Math.cos(t*0.05)*0.25; cameraRef.current.position.z += Math.sin(t*0.04)*0.15; } }
+         // Rotate dust layers
+         if (dustPointsRef.current) dustPointsRef.current.rotation.y += 0.0004;
+         if (secondDustEnabled && secondDustRef.current) secondDustRef.current.rotation.y -= 0.00025;
+         // Meteors (shooting stars)
+         const now = performance.now();
+         if(shootingStarsEnabled && meteorsGroupRef.current){
+           // spawn every 12-25 s random
+           if(now - lastMeteorSpawnRef.current > 12000 + Math.random()*13000){
+             lastMeteorSpawnRef.current = now;
+             const geo = new THREE.BufferGeometry();
+             const start = new THREE.Vector3((Math.random()-0.5)*20000, (Math.random()-0.5)*20000, -8000 - Math.random()*4000);
+             const dir = new THREE.Vector3(Math.random()*4000+4000, Math.random()*2000-1000, Math.random()*2000-1000).multiplyScalar(0.8*(Math.random()<0.5?-1:1));
+             const end = start.clone().add(dir);
+             geo.setAttribute('position', new THREE.Float32BufferAttribute([start.x,start.y,start.z,end.x,end.y,end.z],3));
+             const mat = new THREE.LineBasicMaterial({ color:0x99aaff, transparent:true, opacity:1, blending:THREE.AdditiveBlending});
+             const line = new THREE.Line(geo,mat);
+             (line as any).birth = now;
+             meteorsGroupRef.current.add(line);
+           }
+           const children = [...meteorsGroupRef.current.children];
+            for(const m of children){ const age = now - (m as any).birth; if(age>1200){ // fade then remove
+              meteorsGroupRef.current.remove(m); (m as any).geometry.dispose(); (m as any).material.dispose(); continue; }
+              const op = 1 - age/1200; (m as any).material.opacity = op; const posAttr = (m as any).geometry.attributes.position; // simple streak elongation
+              if(age<400){ const arr = posAttr.array as Float32Array; // extend end point
+                arr[3] += 12; arr[4]+=2; arr[5]+=2; posAttr.needsUpdate=true; }
+            }
+         }
+         if(advancedPassRef.current){ advancedPassRef.current.uniforms.uTime.value = performance.now()/1000; }
+         composerRef.current ? composerRef.current.render() : rendererRef.current?.render(sceneRef.current!, cameraRef.current!);
+       } else {
         rendererRef.current?.render(sceneRef.current!, cameraRef.current!);
-      }
-      labelRenderer.render(sceneRef.current!, cameraRef.current!); // Render CSS2DRenderer
-    };
-    animate();
+       }
+       labelRenderer.render(sceneRef.current!, cameraRef.current!); // Render CSS2DRenderer
+     };
+     animate();
 
     const handleResize = () => {
       if (cameraRef.current && rendererRef.current) {
@@ -885,13 +939,14 @@ function App() {
     window.addEventListener('resize', handleResize);
 
     return () => {
-      window.removeEventListener('resize', handleResize);
-      controls.dispose();
-      rendererRef.current?.dispose();
-      if (rendererRef.current) {
-        currentMount.removeChild(rendererRef.current!.domElement);
-      }
-      currentMount.removeChild(labelRenderer.domElement); // New: Clean up label renderer DOM
+      running = false; if(rafId) cancelAnimationFrame(rafId);
+       window.removeEventListener('resize', handleResize);
+       controls.dispose();
+       rendererRef.current?.dispose();
+       if (rendererRef.current) {
+         currentMount.removeChild(rendererRef.current!.domElement);
+       }
+       currentMount.removeChild(labelRenderer.domElement); // New: Clean up label renderer DOM
     };
   }, [isLoaded, ringTexture, cinematicMode]);
 
@@ -965,26 +1020,77 @@ function App() {
   useEffect(()=>{
     if(!rendererRef.current || !sceneRef.current || !cameraRef.current || !starFieldRef.current) return;
     const renderer = rendererRef.current;
-    const camera = cameraRef.current;
+    const camera = cameraRef.current; // camera used later in passes
     const enable = () => {
       if(originalToneMappingRef.current===null) originalToneMappingRef.current = renderer.toneMapping as number;
       if(originalExposureRef.current===null) originalExposureRef.current = (renderer as any).toneMappingExposure ?? 1;
       originalStarMaterialRef.current = starFieldRef.current!.material as THREE.PointsMaterial;
-      const cineMat = new THREE.PointsMaterial({ size:2.6, sizeAttenuation:true, map:(originalStarMaterialRef.current as any).map, transparent:true, depthWrite:false, vertexColors:true, blending:THREE.AdditiveBlending });
-      cineMat.onBeforeCompile = (shader)=>{ shader.uniforms.uTime={value:0}; shader.uniforms.uAmp={value:0.15}; shader.fragmentShader = `uniform float uTime;\nuniform float uAmp;\n${shader.fragmentShader}`.replace('gl_FragColor = vec4( outgoingLight, diffuseColor.a );','float tw = sin(uTime*2.0 + gl_FragCoord.x*0.04 + gl_FragCoord.y*0.04); float f = 1.0 + (tw*0.5)*uAmp; gl_FragColor = vec4(outgoingLight*f, diffuseColor.a);'); (cineMat as any).userData.shader = shader; };
+    const cineMat = new THREE.PointsMaterial({ size:2.6, sizeAttenuation:true, map:(originalStarMaterialRef.current as any).map, transparent:true, depthWrite:false, vertexColors:true, blending:THREE.AdditiveBlending });
+      cineMat.onBeforeCompile = (shader)=>{ 
+        shader.uniforms.uTime={value:0}; 
+        shader.uniforms.uAmp={value:0.22};
+        shader.uniforms.uColorStrength={value:starColorStrength};
+        shader.uniforms.uHueShift={value:0};
+        shader.fragmentShader = `uniform float uTime;\nuniform float uAmp;\nuniform float uColorStrength;\nuniform float uHueShift;\n${shader.fragmentShader}`.replace(
+          'gl_FragColor = vec4( outgoingLight, diffuseColor.a );',
+      'float h = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898,78.233)))*43758.5453);\n'+
+      'float h2 = fract(h*5.0);\n'+
+          // Cool purple/blue shift (mild) palette
+          'vec3 c1 = vec3(0.55,0.50,0.95);\n'+ // soft lavender
+          'vec3 c2 = vec3(0.50,0.65,1.00);\n'+ // blue accent
+          'vec3 c3 = vec3(0.85,0.60,1.00);\n'+ // magenta-lilac highlight
+      'vec3 base;\n'+
+      'if(h < 0.33) base = mix(c1,c2,h/0.33); else if(h < 0.66) base = mix(c2,c3,(h-0.33)/0.33); else base = mix(c3,c1,(h-0.66)/0.34);\n'+
+      'base = mix(base, mix(c1,c3,step(0.5,h2)), 0.22*abs(sin(h2*6.283)));\n'+
+      '// Apply global hue shift (approximate)\n'+
+          'float hs = uHueShift;\n'+
+          'mat3 rot = mat3(\n'+
+          '  0.299+0.701*cos(hs)+0.168*sin(hs), 0.587-0.587*cos(hs)+0.330*sin(hs), 0.114-0.114*cos(hs)-0.497*sin(hs),\n'+
+          '  0.299-0.299*cos(hs)-0.328*sin(hs), 0.587+0.413*cos(hs)+0.035*sin(hs), 0.114-0.114*cos(hs)+0.292*sin(hs),\n'+
+          '  0.299-0.300*cos(hs)+1.250*sin(hs), 0.587-0.588*cos(hs)-1.050*sin(hs), 0.114+0.886*cos(hs)-0.203*sin(hs) );\n'+
+          'base = clamp(rot * base, 0.0, 1.0);\n'+
+          'float tw = sin(uTime*2.6 + gl_FragCoord.x*0.05 + gl_FragCoord.y*0.05);\n'+
+          'float f = 1.0 + (tw*0.5)*uAmp;\n'+
+          'float luma = dot(base, vec3(0.299,0.587,0.114));\n'+
+          'vec3 tint = mix(vec3(luma), base, uColorStrength);\n'+
+          'tint = pow(tint, vec3(0.90));\n'+
+          'vec3 col = outgoingLight * tint * f;\n'+
+          // Subtle purple / blue shift (reduce green, lift blue & red slightly)
+          'col.g *= 0.90;\n'+
+          'col.b = mix(col.b, col.b*1.05 + col.r*0.02, 0.6);\n'+
+          'col.r = mix(col.r, col.r*1.02 + col.b*0.03, 0.4);\n'+
+          'col = col / (1.0 + max(0.0, max(col.r,max(col.g,col.b)))*0.18);\n'+
+          'gl_FragColor = vec4(col, diffuseColor.a);'
+        );
+        (cineMat as any).userData.shader = shader; 
+      };
       cinematicStarMaterialRef.current = cineMat; starFieldRef.current!.material = cineMat;
       if(stargateLinesRef.current) stargateLinesRef.current.visible = false;
       // Dust
       const count=1000; const pos=new Float32Array(count*3); const col=new Float32Array(count*3);
-      for(let i=0;i<count;i++){ const r=22000*Math.cbrt(Math.random()); const th=Math.random()*Math.PI*2; const ph=Math.acos(2*Math.random()-1); pos[i*3]=r*Math.sin(ph)*Math.cos(th); pos[i*3+1]=r*Math.sin(ph)*Math.sin(th); pos[i*3+2]=r*Math.cos(ph); const tint=new THREE.Color().setHSL(0.76+Math.random()*0.1,0.45,0.55+Math.random()*0.15); col[i*3]=tint.r; col[i*3+1]=tint.g; col[i*3+2]=tint.b; }
+  for(let i=0;i<count;i++){ const r=22000*Math.cbrt(Math.random()); const th=Math.random()*Math.PI*2; const ph=Math.acos(2*Math.random()-1); pos[i*3]=r*Math.sin(ph)*Math.cos(th); pos[i*3+1]=r*Math.sin(ph)*Math.sin(th); pos[i*3+2]=r*Math.cos(ph); const tint=new THREE.Color().setHSL(0.76+Math.random()*0.1,0.45,0.55+Math.random()*0.15); col[i*3]=tint.r; col[i*3+1]=tint.g; col[i*3+2]=tint.b; }
       const g=new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos,3)); g.setAttribute('color', new THREE.BufferAttribute(col,3));
       const dMat=new THREE.PointsMaterial({ size:14, sizeAttenuation:true, transparent:true, opacity:0.28*dustAmount, depthWrite:false, vertexColors:true, blending:THREE.AdditiveBlending });
   dustPointsRef.current=new THREE.Points(g,dMat); sceneRef.current!.add(dustPointsRef.current);
-      // Background gradient sphere
-  const makeGrad=()=>{ const w=256,h=1024; const c=document.createElement('canvas'); c.width=w; c.height=h; const ctx=c.getContext('2d')!; const grd=ctx.createLinearGradient(0,0,0,h); grd.addColorStop(0,'#010104'); grd.addColorStop(0.4,'#050516'); grd.addColorStop(0.7,'#0b0730'); grd.addColorStop(1,'#120038'); ctx.fillStyle=grd; ctx.fillRect(0,0,w,h); const img=ctx.getImageData(0,0,w,h); for(let y=0;y<h;y+=2){ for(let x=0;x<w;x+=2){ const i=(y*w+x)*4; const n=(Math.random()-0.5)*6; img.data[i]+=n; img.data[i+1]+=n; img.data[i+2]+=n; } } ctx.putImageData(img,0,0); const tex=new THREE.CanvasTexture(c); tex.needsUpdate=true; return tex; };
-  const bg=new THREE.Mesh(new THREE.SphereGeometry(120000,48,48), new THREE.MeshBasicMaterial({ map: makeGrad(), side:THREE.BackSide, transparent:true, opacity:bgIntensity })); backgroundMeshRef.current=bg; sceneRef.current!.add(bg);
-      // Post chain
-      const composer=new EffectComposer(renderer); composer.addPass(new RenderPass(sceneRef.current!, camera)); const bloom=new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), bloomStrength, 0.4, 0.85); bloom.threshold=0; composer.addPass(bloom); composerRef.current=composer; bloomPassRef.current=bloom;
+      // Second dust layer (larger, sparser)
+      const count2=400; const pos2=new Float32Array(count2*3); const col2=new Float32Array(count2*3);
+  for(let i=0;i<count2;i++){ const r=30000*Math.cbrt(Math.random()); const th=Math.random()*Math.PI*2; const ph=Math.acos(2*Math.random()-1); pos2[i*3]=r*Math.sin(ph)*Math.cos(th); pos2[i*3+1]=r*Math.sin(ph)*Math.sin(th); pos2[i*3+2]=r*Math.cos(ph); const tint=new THREE.Color().setHSL(0.70+Math.random()*0.15,0.35,0.35+Math.random()*0.15); col2[i*3]=tint.r; col2[i*3+1]=tint.g; col2[i*3+2]=tint.b; }
+      const g2=new THREE.BufferGeometry(); g2.setAttribute('position', new THREE.BufferAttribute(pos2,3)); g2.setAttribute('color', new THREE.BufferAttribute(col2,3));
+      const dMat2=new THREE.PointsMaterial({ size:24, sizeAttenuation:true, transparent:true, opacity:0.12*dustAmount, depthWrite:false, vertexColors:true, blending:THREE.AdditiveBlending });
+      secondDustRef.current=new THREE.Points(g2,dMat2); sceneRef.current!.add(secondDustRef.current);
+      // Meteors group
+      meteorsGroupRef.current = new THREE.Group(); sceneRef.current!.add(meteorsGroupRef.current);
+      lastMeteorSpawnRef.current = performance.now();
+      // Post chain (recreate composer & bloom)
+      const composer = new EffectComposer(renderer);
+      composer.addPass(new RenderPass(sceneRef.current!, camera));
+      const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), bloomStrength, 0.4, 0.85); bloom.threshold = 0;
+      composer.addPass(bloom);
+      composerRef.current = composer; bloomPassRef.current = bloom;
+      // Custom post-processing pass (vignette + grain + chromatic aberration + radial glow)
+      // After composer and bloom have been created
+  const customShader = { uniforms:{ tDiffuse:{value:null}, uTime:{value:0}, uGrain:{value:0.35}, uVignette:{value:0.85}, uAberration:{value:new THREE.Vector2(0.002,0.002)}, uRadialGlow:{value:0.15}, resolution:{value:new THREE.Vector2(window.innerWidth, window.innerHeight)} }, vertexShader:`varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`, fragmentShader:`uniform sampler2D tDiffuse; uniform float uTime; uniform float uGrain; uniform float uVignette; uniform float uRadialGlow; uniform vec2 uAberration; uniform vec2 resolution; varying vec2 vUv; float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))+uTime*917.2)*43758.5453); } void main(){ vec2 centered = vUv - 0.5; float r = length(centered); vec2 offR = vUv + uAberration*vec2( 0.5 - vUv.y,  vUv.x-0.5); vec2 offB = vUv - uAberration*vec2( 0.5 - vUv.x,  vUv.y-0.5); vec3 col; col.r = texture2D(tDiffuse, offR).r; col.g = texture2D(tDiffuse, vUv).g; col.b = texture2D(tDiffuse, offB).b; float glow = smoothstep(0.7,0.0,r)*uRadialGlow; col += glow; float vig = smoothstep(0.8, uVignette, r); col *= (1.0 - 0.65*vig); float g = (hash(floor(gl_FragCoord.xy)) - 0.5)*uGrain; col += g/255.0; gl_FragColor = vec4(col,1.0); }`};
+      const pass = new ShaderPass(customShader as any); composer.addPass(pass); advancedPassRef.current = pass;
       renderer.toneMapping = THREE.ACESFilmicToneMapping as any; (renderer as any).toneMappingExposure = cinExposure;
       const onResize=()=>{ composer.setSize(window.innerWidth, window.innerHeight); bloom.setSize(window.innerWidth, window.innerHeight); }; window.addEventListener('resize', onResize); (enable as any)._resize = onResize;
     };
@@ -992,7 +1098,8 @@ function App() {
       if(starFieldRef.current && originalStarMaterialRef.current) starFieldRef.current.material = originalStarMaterialRef.current;
       if(stargateLinesRef.current) stargateLinesRef.current.visible = true;
   if(dustPointsRef.current){ dustPointsRef.current.geometry.dispose(); (dustPointsRef.current.material as THREE.Material).dispose(); sceneRef.current!.remove(dustPointsRef.current); dustPointsRef.current=null; }
-  if(backgroundMeshRef.current){ backgroundMeshRef.current.geometry.dispose(); (backgroundMeshRef.current.material as THREE.Material).dispose(); sceneRef.current!.remove(backgroundMeshRef.current); backgroundMeshRef.current=null; }
+  if(secondDustRef.current){ secondDustRef.current.geometry.dispose(); (secondDustRef.current.material as THREE.Material).dispose(); sceneRef.current!.remove(secondDustRef.current); secondDustRef.current=null; }
+  if(meteorsGroupRef.current){ meteorsGroupRef.current.children.forEach(c=>{ const m=c as any; if(m.geometry) m.geometry.dispose(); if(m.material) m.material.dispose(); }); sceneRef.current!.remove(meteorsGroupRef.current); meteorsGroupRef.current=null; }
       if(composerRef.current){ composerRef.current.passes.forEach(p=> (p as any).dispose?.()); (composerRef.current as any).dispose?.(); composerRef.current=null; bloomPassRef.current=null; }
       if(originalToneMappingRef.current!==null) renderer.toneMapping = originalToneMappingRef.current as any;
       if(originalExposureRef.current!==null) (renderer as any).toneMappingExposure = originalExposureRef.current;
@@ -1003,7 +1110,13 @@ function App() {
   }, [cinematicMode, bloomStrength, dustAmount, cinExposure]);
 
   // Live slider updates
-  useEffect(()=>{ if(!cinematicMode) return; if(bloomPassRef.current) bloomPassRef.current.strength = bloomStrength; if(rendererRef.current) (rendererRef.current as any).toneMappingExposure = cinExposure; if(dustPointsRef.current) (dustPointsRef.current.material as THREE.PointsMaterial).opacity = 0.28*dustAmount; if(backgroundMeshRef.current) (backgroundMeshRef.current.material as THREE.MeshBasicMaterial).opacity = bgIntensity; }, [bloomStrength, dustAmount, cinExposure, bgIntensity, cinematicMode]);
+  useEffect(()=>{ if(!cinematicMode) return; if(bloomPassRef.current) bloomPassRef.current.strength = bloomStrength; if(rendererRef.current) (rendererRef.current as any).toneMappingExposure = cinExposure; if(dustPointsRef.current) (dustPointsRef.current.material as THREE.PointsMaterial).opacity = 0.28*dustAmount; if(secondDustRef.current) (secondDustRef.current.material as THREE.PointsMaterial).opacity = 0.12*dustAmount * (secondDustEnabled?1:0); if(backgroundMeshRef.current) (backgroundMeshRef.current.material as THREE.MeshBasicMaterial).opacity = bgIntensity; if(cinematicStarMaterialRef.current){ const shader=(cinematicStarMaterialRef.current as any).userData?.shader; if(shader && shader.uniforms.uColorStrength){ shader.uniforms.uColorStrength.value = starColorStrength; }} }, [bloomStrength, dustAmount, cinExposure, bgIntensity, starColorStrength, secondDustEnabled, cinematicMode]);
+
+  // Update custom pass uniforms when sliders change
+  useEffect(()=>{ if(!cinematicMode) return; if(advancedPassRef.current){ const u=advancedPassRef.current.uniforms; u.uVignette.value = vignette; u.uGrain.value = grain; u.uAberration.value.set(aberration,aberration); u.uRadialGlow.value = radialGlow; } }, [vignette, grain, aberration, radialGlow, cinematicMode]);
+
+  // Handle creating/destroying second dust on toggle while active
+  useEffect(()=>{ if(!cinematicMode) return; if(!sceneRef.current) return; if(secondDustEnabled && !secondDustRef.current){ const count2=400; const pos2=new Float32Array(count2*3); const col2=new Float32Array(count2*3); for(let i=0;i<count2;i++){ const r=30000*Math.cbrt(Math.random()); const th=Math.random()*Math.PI*2; const ph=Math.acos(2*Math.random()-1); pos2[i*3]=r*Math.sin(ph)*Math.cos(th); pos2[i*3+1]=r*Math.sin(ph)*Math.sin(th); pos2[i*3+2]=r*Math.cos(ph); const tint=new THREE.Color().setHSL(0.70+Math.random()*0.15,0.35,0.35+Math.random()*0.15); col2[i*3]=tint.r; col2[i*3+1]=tint.g; col2[i*3+2]=tint.b; } const g2=new THREE.BufferGeometry(); g2.setAttribute('position', new THREE.BufferAttribute(pos2,3)); g2.setAttribute('color', new THREE.BufferAttribute(col2,3)); const dMat2=new THREE.PointsMaterial({ size:24, sizeAttenuation:true, transparent:true, opacity:0.12*dustAmount, depthWrite:false, vertexColors:true, blending:THREE.AdditiveBlending }); secondDustRef.current=new THREE.Points(g2,dMat2); sceneRef.current.add(secondDustRef.current); } else if(!secondDustEnabled && secondDustRef.current){ secondDustRef.current.geometry.dispose(); (secondDustRef.current.material as THREE.Material).dispose(); sceneRef.current.remove(secondDustRef.current); secondDustRef.current=null; } }, [secondDustEnabled, cinematicMode, dustAmount]);
 
   // This useLayoutEffect handles all dynamic star and stargate line coloring based on the pipeline.
   useLayoutEffect(() => {
@@ -1918,26 +2031,6 @@ function App() {
           <label className="module-toggle-label" style={{ display:'flex', gap:'6px', alignItems:'center' }}>
             <input type="checkbox" checked={cinematicMode} onChange={e=> setCinematicMode(e.target.checked)} /> Cinematic Mode
           </label>
-          {cinematicMode && (
-            <div style={{ marginTop:'8px', display:'flex', flexDirection:'column', gap:'8px', fontSize:'12px' }}>
-              <label style={{ display:'flex', flexDirection:'column', gap:'4px' }}>
-                <span>Bloom Strength: {bloomStrength.toFixed(2)}</span>
-                <input type="range" min={0} max={1.2} step={0.01} value={bloomStrength} onChange={e=> setBloomStrength(parseFloat(e.target.value))} />
-              </label>
-              <label style={{ display:'flex', flexDirection:'column', gap:'4px' }}>
-                <span>Dust Amount: {(dustAmount*100).toFixed(0)}%</span>
-                <input type="range" min={0} max={1} step={0.01} value={dustAmount} onChange={e=> setDustAmount(parseFloat(e.target.value))} />
-              </label>
-              <label style={{ display:'flex', flexDirection:'column', gap:'4px' }}>
-                <span>Exposure: {cinExposure.toFixed(2)}</span>
-                <input type="range" min={0.6} max={1.6} step={0.01} value={cinExposure} onChange={e=> setCinExposure(parseFloat(e.target.value))} />
-              </label>
-              <label style={{ display:'flex', flexDirection:'column', gap:'4px' }}>
-                <span>Background Intensity: {(bgIntensity*100).toFixed(0)}%</span>
-                <input type="range" min={0} max={1} step={0.01} value={bgIntensity} onChange={e=> setBgIntensity(parseFloat(e.target.value))} />
-              </label>
-            </div>
-          )}
         </div>
         <P2PRouting 
           onCalculateRoute={calculateRoute}
