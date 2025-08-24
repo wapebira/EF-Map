@@ -118,7 +118,7 @@ function App() {
   const [resetToken, setResetToken] = useState(0); // increments to signal UI reset
   // UI visibility + scaling
   const [hideUI, setHideUI] = useState(false);
-  const uiScaleStops = [0.5, 0.75, 1, 1.25];
+  const uiScaleStops = [0.5,0.6,0.7,0.8,0.9,1.0,1.1,1.2,1.3];
   const [uiScale, setUiScale] = useState(1); // active scale (applies only to main panels + toolbar)
   const [highlightedSystem, setHighlightedSystem] = useState<SolarSystem | null>(null);
   const [hoveredSystem, setHoveredSystem] = useState<SolarSystem | null>(null);
@@ -1913,7 +1913,8 @@ function App() {
     <>
   {/* Referral code copy state */}
   {/* ...existing code... */}
-  <div className="ef-top-toolbar" style={hideUI?{display:'none'}:scaleStyle}>
+  <div className="ef-top-toolbar" style={hideUI?{display:'none'}:{}}>
+    <div style={scaleStyle} className="ef-top-toolbar-inner">
     <div className="ef-toolbar-shifting">
       <button
         className="share-route-btn"
@@ -1957,8 +1958,9 @@ function App() {
         {shareFeedback && <span className="share-feedback">{shareFeedback}</span>}
       </button>
       <ReferralBadge />
+      </div>
+      <HelpPanel accentIsBlue={accentIsBlue} />
     </div>
-    <HelpPanel accentIsBlue={accentIsBlue} />
   </div>
   <div style={hideUI?{display:'none'}:{ position: 'absolute', top: 10, left: 10, zIndex: 1, color: 'white', backgroundColor: 'rgba(0,0,0,0.5)', padding: '10px', borderRadius: '5px', ...scaleStyle }}>
         <div style={{ display:'flex', alignItems:'stretch', gap:'6px' }}>
