@@ -70,6 +70,23 @@ const createRingTexture = () => {
   return new THREE.CanvasTexture(canvas);
 };
 
+// Radial gradient texture (white core -> transparent edge) for supernova / lens sprites
+const createRadialGradientTexture = (size = 256, innerAlpha = 1, midAlpha = 0.55) => {
+  const canvas = document.createElement('canvas');
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  if(ctx){
+    const g = ctx.createRadialGradient(size/2,size/2,0,size/2,size/2,size/2);
+    g.addColorStop(0,`rgba(255,255,255,${innerAlpha})`);
+    g.addColorStop(0.55,`rgba(255,255,255,${midAlpha})`);
+    g.addColorStop(1,'rgba(255,255,255,0)');
+    ctx.fillStyle = g; ctx.fillRect(0,0,size,size);
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.minFilter = THREE.LinearFilter; tex.magFilter = THREE.LinearFilter; tex.needsUpdate = true;
+  return tex;
+};
+
 interface SolarSystem {
   id: number;
   name: string;
@@ -163,8 +180,8 @@ function App() {
   const cometGroupRef = useRef<THREE.Group|null>(null);
   const parallaxStarsRef = useRef<THREE.Points|null>(null);
   // Simple object pools for reuse
-  const supernovaPoolRef = useRef<THREE.Mesh[]>([]);
-  const lensPoolRef = useRef<THREE.Mesh[]>([]);
+  const supernovaPoolRef = useRef<(THREE.Sprite|THREE.Mesh)[]>([]);
+  const lensPoolRef = useRef<(THREE.Sprite|THREE.Mesh)[]>([]);
   const ripplePoolRef = useRef<THREE.Mesh[]>([]);
   const cometPoolRef = useRef<THREE.Line[]>([]);
   // Cinematic user-exposed controls (initial minimal set)
@@ -959,30 +976,30 @@ function App() {
            const tSec = now/1000;
            // Parallax stars subtle rotation & counter drift for depth illusion
            if(parallaxStarsRef.current){ parallaxStarsRef.current.rotation.y += 0.00005; }
-           // Supernova spawn
+           // Supernova spawn (sprite with radial gradient)
            if(supernovaGroupRef.current && now > nextSupernovaAtRef.current){
              nextSupernovaAtRef.current = now + 45000 + Math.random()*45000;
-             // Pick random star position near center-ish (lerp between camera target and random distant point)
              const base = new THREE.Vector3((Math.random()-0.5)*15000, (Math.random()-0.5)*15000, (Math.random()-0.5)*15000);
-             const geom = new THREE.SphereGeometry(40, 16, 16);
-             const mat = new THREE.MeshBasicMaterial({ color:0xffffff, transparent:true, opacity:1, blending:THREE.AdditiveBlending });
-             const mesh = supernovaPoolRef.current.pop() || new THREE.Mesh(geom, mat);
-             mesh.position.copy(base);
-             (mesh as any).birth = now; (mesh as any).phase='expand';
-             if(!(mesh.geometry instanceof THREE.SphereGeometry)) { mesh.geometry.dispose(); mesh.geometry = geom; }
-             if(!(mesh.material instanceof THREE.MeshBasicMaterial)) { (mesh.material as any).dispose(); mesh.material = mat; }
-             supernovaGroupRef.current.add(mesh);
+             if(!supernovaTexRef.current) supernovaTexRef.current = createRadialGradientTexture(256,1,0.5);
+             const mat = new THREE.SpriteMaterial({ map: supernovaTexRef.current, color:0xffffff, transparent:true, opacity:1, blending:THREE.AdditiveBlending, depthWrite:false });
+             const spr = supernovaPoolRef.current.pop() as THREE.Sprite || new THREE.Sprite(mat);
+             if(!(spr.material instanceof THREE.SpriteMaterial)){ (spr.material as any).dispose?.(); spr.material = mat; }
+             spr.position.copy(base);
+             spr.scale.set(120,120,120);
+             (spr as any).birth = now; (spr as any).ttl = 4000;
+             supernovaGroupRef.current.add(spr);
            }
-           // Lens flare blink spawn
+           // Lens flare blink spawn (sprite)
            if(lensFlareGroupRef.current && now > nextLensBlinkAtRef.current){
              nextLensBlinkAtRef.current = now + 8000 + Math.random()*7000;
-             const geom = new THREE.PlaneGeometry(160,160);
-             const mat = new THREE.MeshBasicMaterial({ color:0x88aaff, transparent:true, opacity:0, blending:THREE.AdditiveBlending, depthWrite:false });
-             const m = lensPoolRef.current.pop() || new THREE.Mesh(geom, mat);
-             m.position.set((Math.random()-0.5)*25000, (Math.random()-0.5)*25000, (Math.random()-0.5)*25000);
-             m.lookAt(cameraRef.current!.position);
-             (m as any).birth = now; (m as any).ttl = 1400;
-             lensFlareGroupRef.current.add(m);
+             if(!lensFlareTexRef.current) lensFlareTexRef.current = createRadialGradientTexture(192,1,0.35);
+             const mat = new THREE.SpriteMaterial({ map:lensFlareTexRef.current, color:0x88bbff, transparent:true, opacity:0, blending:THREE.AdditiveBlending, depthWrite:false });
+             const spr = lensPoolRef.current.pop() as THREE.Sprite || new THREE.Sprite(mat);
+             if(!(spr.material instanceof THREE.SpriteMaterial)){ (spr.material as any).dispose?.(); spr.material = mat; }
+             spr.position.set((Math.random()-0.5)*25000, (Math.random()-0.5)*25000, (Math.random()-0.5)*25000);
+             spr.scale.set(250,250,250);
+             (spr as any).birth = now; (spr as any).ttl = 1400;
+             lensFlareGroupRef.current.add(spr);
            }
            // Comet trail (longer, slower than meteor, reused logic)
            if(cometGroupRef.current && now > nextCometAtRef.current){
@@ -1013,14 +1030,11 @@ function App() {
            // Update & recycle supernovae
            if(supernovaGroupRef.current){
              const snChildren = [...supernovaGroupRef.current.children];
-             for(const s of snChildren){ const age = now - (s as any).birth; if(age>4000){ supernovaGroupRef.current.remove(s); supernovaPoolRef.current.push(s as any); continue; }
-               const tAge = age/4000; const scale = 1 + tAge*15; s.scale.set(scale,scale,scale);
-               const mat:any = (s as any).material; mat.opacity = 1.0 - tAge; }
+             for(const s of snChildren){ const ttl = (s as any).ttl; const age = now - (s as any).birth; if(age>ttl){ supernovaGroupRef.current.remove(s); supernovaPoolRef.current.push(s as any); continue; } const tAge = age/ttl; const base=120; const scl = base + tAge* base * 8.5; s.scale.set(scl,scl,scl); const mat:any = (s as any).material; mat.opacity = 1.0 - tAge; }
            }
-           // Update lens flare blinks
            if(lensFlareGroupRef.current){
              const lfChildren = [...lensFlareGroupRef.current.children];
-             for(const l of lfChildren){ const ttl = (l as any).ttl; const age = now - (l as any).birth; if(age>ttl){ lensFlareGroupRef.current.remove(l); lensPoolRef.current.push(l as any); continue; } const half=ttl/2; const mat:any = (l as any).material; if(age<half){ mat.opacity = age/half * 0.55; } else { mat.opacity = (1-(age-half)/half)*0.55; } l.lookAt(cameraRef.current!.position); }
+             for(const l of lfChildren){ const ttl = (l as any).ttl; const age = now - (l as any).birth; if(age>ttl){ lensFlareGroupRef.current.remove(l); lensPoolRef.current.push(l as any); continue; } const half=ttl/2; const mat:any = (l as any).material; if(age<half){ mat.opacity = age/half * 0.65; } else { mat.opacity = (1-(age-half)/half)*0.65; } }
            }
            // Update comets
            if(cometGroupRef.current){
