@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import './App.css';
 import RegionHighlighterModule, { setRegionHighlightColors } from './modules/RegionHighlighter';
@@ -121,6 +124,11 @@ function App() {
   const [showDistance, setShowDistance] = useState(false);
   const [minPlanets, setMinPlanets] = useState(0);
   const [maxPlanets, setMaxPlanets] = useState(0);
+  // Cinematic mode controls
+  const [cinematicMode, setCinematicMode] = useState(false);
+  const [bloomStrength, setBloomStrength] = useState(0.8);
+  const [dustAmount, setDustAmount] = useState(0.6); // 0..1
+  const [cinExposure, setCinExposure] = useState(1.0);
 
   // State for P2P Routing
   const routingWorkerRef = useRef<Worker | null>(null);
@@ -184,6 +192,15 @@ function App() {
   // New refs for managing overlays
   const selectedStarHaloRef = useRef<THREE.Points | null>(null);
   const regionOutlineGroupRef = useRef<THREE.Group | null>(null);
+  // Cinematic refs
+  const composerRef = useRef<EffectComposer | null>(null);
+  const bloomPassRef = useRef<UnrealBloomPass | null>(null);
+  const originalToneMappingRef = useRef<number | null>(null);
+  const originalExposureRef = useRef<number | null>(null);
+  const originalStarMaterialRef = useRef<THREE.PointsMaterial | null>(null);
+  const cinematicStarMaterialRef = useRef<THREE.PointsMaterial | null>(null);
+  const dustPointsRef = useRef<THREE.Points | null>(null);
+  const backgroundMeshRef = useRef<THREE.Mesh | null>(null);
 
 
   const isDraggingRef = useRef(false);
@@ -843,7 +860,15 @@ function App() {
         // ignore
       }
       controls.update();
-      rendererRef.current?.render(sceneRef.current!, cameraRef.current!);
+      if (cinematicMode) {
+        if (cinematicStarMaterialRef.current && (cinematicStarMaterialRef.current as any).userData?.shader) {
+          (cinematicStarMaterialRef.current as any).userData.shader.uniforms.uTime.value = performance.now()/1000;
+        }
+        if (dustPointsRef.current) dustPointsRef.current.rotation.y += 0.0004;
+        composerRef.current ? composerRef.current.render() : rendererRef.current?.render(sceneRef.current!, cameraRef.current!);
+      } else {
+        rendererRef.current?.render(sceneRef.current!, cameraRef.current!);
+      }
       labelRenderer.render(sceneRef.current!, cameraRef.current!); // Render CSS2DRenderer
     };
     animate();
@@ -867,7 +892,7 @@ function App() {
       }
       currentMount.removeChild(labelRenderer.domElement); // New: Clean up label renderer DOM
     };
-  }, [isLoaded, ringTexture]);
+  }, [isLoaded, ringTexture, cinematicMode]);
 
   // Create and update starfield and stargates
   useEffect(() => {
@@ -929,10 +954,55 @@ function App() {
       stargateGeometry.userData = { stargateData };
 
       const stargateLines = new THREE.LineSegments(stargateGeometry, stargateMaterial);
+      stargateLines.visible = !cinematicMode; // hide when cinematic
       sceneRef.current?.add(stargateLines);
       stargateLinesRef.current = stargateLines;
     }
-  }, [mapData, getTransformedPosition, pointsMaterial, stargateMaterial]);
+  }, [mapData, getTransformedPosition, pointsMaterial, stargateMaterial, cinematicMode]);
+
+  // Cinematic enable/disable lifecycle
+  useEffect(()=>{
+    if(!rendererRef.current || !sceneRef.current || !cameraRef.current || !starFieldRef.current) return;
+    const renderer = rendererRef.current;
+    const camera = cameraRef.current;
+    const enable = () => {
+      if(originalToneMappingRef.current===null) originalToneMappingRef.current = renderer.toneMapping as number;
+      if(originalExposureRef.current===null) originalExposureRef.current = (renderer as any).toneMappingExposure ?? 1;
+      originalStarMaterialRef.current = starFieldRef.current!.material as THREE.PointsMaterial;
+      const cineMat = new THREE.PointsMaterial({ size:2.6, sizeAttenuation:true, map:(originalStarMaterialRef.current as any).map, transparent:true, depthWrite:false, vertexColors:true, blending:THREE.AdditiveBlending });
+      cineMat.onBeforeCompile = (shader)=>{ shader.uniforms.uTime={value:0}; shader.uniforms.uAmp={value:0.15}; shader.fragmentShader = `uniform float uTime;\nuniform float uAmp;\n${shader.fragmentShader}`.replace('gl_FragColor = vec4( outgoingLight, diffuseColor.a );','float tw = sin(uTime*2.0 + gl_FragCoord.x*0.04 + gl_FragCoord.y*0.04); float f = 1.0 + (tw*0.5)*uAmp; gl_FragColor = vec4(outgoingLight*f, diffuseColor.a);'); (cineMat as any).userData.shader = shader; };
+      cinematicStarMaterialRef.current = cineMat; starFieldRef.current!.material = cineMat;
+      if(stargateLinesRef.current) stargateLinesRef.current.visible = false;
+      // Dust
+      const count=1000; const pos=new Float32Array(count*3); const col=new Float32Array(count*3);
+      for(let i=0;i<count;i++){ const r=22000*Math.cbrt(Math.random()); const th=Math.random()*Math.PI*2; const ph=Math.acos(2*Math.random()-1); pos[i*3]=r*Math.sin(ph)*Math.cos(th); pos[i*3+1]=r*Math.sin(ph)*Math.sin(th); pos[i*3+2]=r*Math.cos(ph); const tint=new THREE.Color().setHSL(0.76+Math.random()*0.1,0.45,0.55+Math.random()*0.15); col[i*3]=tint.r; col[i*3+1]=tint.g; col[i*3+2]=tint.b; }
+      const g=new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos,3)); g.setAttribute('color', new THREE.BufferAttribute(col,3));
+      const dMat=new THREE.PointsMaterial({ size:14, sizeAttenuation:true, transparent:true, opacity:0.28*dustAmount, depthWrite:false, vertexColors:true, blending:THREE.AdditiveBlending });
+  dustPointsRef.current=new THREE.Points(g,dMat); sceneRef.current!.add(dustPointsRef.current);
+      // Background gradient sphere
+      const makeGrad=()=>{ const c=document.createElement('canvas'); c.width=2; c.height=512; const ctx=c.getContext('2d')!; const grd=ctx.createLinearGradient(0,0,0,512); grd.addColorStop(0,'#0c0d25'); grd.addColorStop(0.55,'#14124b'); grd.addColorStop(1,'#3d0a46'); ctx.fillStyle=grd; ctx.fillRect(0,0,2,512); return new THREE.CanvasTexture(c); };
+  const bg=new THREE.Mesh(new THREE.SphereGeometry(120000,32,32), new THREE.MeshBasicMaterial({ map: makeGrad(), side:THREE.BackSide })); backgroundMeshRef.current=bg; sceneRef.current!.add(bg);
+      // Post chain
+      const composer=new EffectComposer(renderer); composer.addPass(new RenderPass(sceneRef.current!, camera)); const bloom=new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), bloomStrength, 0.4, 0.85); bloom.threshold=0; composer.addPass(bloom); composerRef.current=composer; bloomPassRef.current=bloom;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping as any; (renderer as any).toneMappingExposure = cinExposure;
+      const onResize=()=>{ composer.setSize(window.innerWidth, window.innerHeight); bloom.setSize(window.innerWidth, window.innerHeight); }; window.addEventListener('resize', onResize); (enable as any)._resize = onResize;
+    };
+    const disable = () => {
+      if(starFieldRef.current && originalStarMaterialRef.current) starFieldRef.current.material = originalStarMaterialRef.current;
+      if(stargateLinesRef.current) stargateLinesRef.current.visible = true;
+  if(dustPointsRef.current){ dustPointsRef.current.geometry.dispose(); (dustPointsRef.current.material as THREE.Material).dispose(); sceneRef.current!.remove(dustPointsRef.current); dustPointsRef.current=null; }
+  if(backgroundMeshRef.current){ backgroundMeshRef.current.geometry.dispose(); (backgroundMeshRef.current.material as THREE.Material).dispose(); sceneRef.current!.remove(backgroundMeshRef.current); backgroundMeshRef.current=null; }
+      if(composerRef.current){ composerRef.current.passes.forEach(p=> (p as any).dispose?.()); (composerRef.current as any).dispose?.(); composerRef.current=null; bloomPassRef.current=null; }
+      if(originalToneMappingRef.current!==null) renderer.toneMapping = originalToneMappingRef.current as any;
+      if(originalExposureRef.current!==null) (renderer as any).toneMappingExposure = originalExposureRef.current;
+      if((enable as any)._resize) window.removeEventListener('resize', (enable as any)._resize);
+    };
+    if(cinematicMode) enable(); else disable();
+    return ()=>{ if(cinematicMode) disable(); };
+  }, [cinematicMode, bloomStrength, dustAmount, cinExposure]);
+
+  // Live slider updates
+  useEffect(()=>{ if(!cinematicMode) return; if(bloomPassRef.current) bloomPassRef.current.strength = bloomStrength; if(rendererRef.current) (rendererRef.current as any).toneMappingExposure = cinExposure; if(dustPointsRef.current) (dustPointsRef.current.material as THREE.PointsMaterial).opacity = 0.28*dustAmount; }, [bloomStrength, dustAmount, cinExposure, cinematicMode]);
 
   // This useLayoutEffect handles all dynamic star and stargate line coloring based on the pipeline.
   useLayoutEffect(() => {
@@ -1842,6 +1912,27 @@ function App() {
             />
             Show Distance
           </label>
+        </div>
+        <div className="ef-control-group" style={{ marginTop: '10px' }}>
+          <label className="module-toggle-label" style={{ display:'flex', gap:'6px', alignItems:'center' }}>
+            <input type="checkbox" checked={cinematicMode} onChange={e=> setCinematicMode(e.target.checked)} /> Cinematic Mode
+          </label>
+          {cinematicMode && (
+            <div style={{ marginTop:'8px', display:'flex', flexDirection:'column', gap:'8px', fontSize:'12px' }}>
+              <label style={{ display:'flex', flexDirection:'column', gap:'4px' }}>
+                <span>Bloom Strength: {bloomStrength.toFixed(2)}</span>
+                <input type="range" min={0} max={1.2} step={0.01} value={bloomStrength} onChange={e=> setBloomStrength(parseFloat(e.target.value))} />
+              </label>
+              <label style={{ display:'flex', flexDirection:'column', gap:'4px' }}>
+                <span>Dust Amount: {(dustAmount*100).toFixed(0)}%</span>
+                <input type="range" min={0} max={1} step={0.01} value={dustAmount} onChange={e=> setDustAmount(parseFloat(e.target.value))} />
+              </label>
+              <label style={{ display:'flex', flexDirection:'column', gap:'4px' }}>
+                <span>Exposure: {cinExposure.toFixed(2)}</span>
+                <input type="range" min={0.6} max={1.6} step={0.01} value={cinExposure} onChange={e=> setCinExposure(parseFloat(e.target.value))} />
+              </label>
+            </div>
+          )}
         </div>
         <P2PRouting 
           onCalculateRoute={calculateRoute}
