@@ -453,6 +453,11 @@ function App() {
     // Set the highlighted system for camera animation and the main rendering effect
     setHighlightedSystem(system);
 
+    // Skip label creation while in cinematic mode (immersive)
+    if(cinematicModeRef.current){
+      return;
+    }
+
     // Clear previous persistent label
     if (selectedLabelObj.current && selectedLabelObj.current.parent) {
       selectedLabelObj.current.parent.remove(selectedLabelObj.current);
@@ -1449,6 +1454,41 @@ function App() {
   useEffect(()=>{ if(!cinematicMode) return; if(rendererRef.current) (rendererRef.current as any).toneMappingExposure = cinExposure; if(dustPointsRef.current) (dustPointsRef.current.material as THREE.PointsMaterial).opacity = 0.28*dustAmount; if(secondDustRef.current) (secondDustRef.current.material as THREE.PointsMaterial).opacity = 0.12*dustAmount * (secondDustEnabled?1:0); if(backgroundMeshRef.current){ const mat = backgroundMeshRef.current.material as THREE.ShaderMaterial; if(mat.uniforms.uStrength){ const _n=Math.min(Math.max(bgIntensity/1.5,0),1); const mapped = _n < 0.025 ? 0 : 1.5 * Math.pow(_n, 2.8); mat.uniforms.uStrength.value = mapped; } } }, [dustAmount, cinExposure, bgIntensity, secondDustEnabled, cinematicMode]);
 
   useEffect(()=>{ if(!cinematicMode) return; const vis = showAurora; if(backgroundMeshRef.current) backgroundMeshRef.current.visible = vis; if(auroraMeshRef.current) auroraMeshRef.current.visible = vis; }, [showAurora, cinematicMode]);
+
+  // Suppress labels & hover ring during cinematic mode; restore after
+  useEffect(()=>{
+    if(cinematicMode){
+      // Hide hover
+      if(hoverPointRef.current) hoverPointRef.current.visible = false;
+      if(hoverLabelObj.current){
+        hoverLabelObj.current.visible = false;
+        if(hoverLabelObj.current.parent){
+          hoverLabelObj.current.parent.remove(hoverLabelObj.current);
+          if(sceneRef.current && hoverLabelObj.current.parent instanceof THREE.Object3D){ sceneRef.current.remove(hoverLabelObj.current.parent); }
+        }
+      }
+      if(selectedLabelObj.current){
+        selectedLabelObj.current.visible = false;
+        if(selectedLabelObj.current.parent){
+          selectedLabelObj.current.parent.remove(selectedLabelObj.current);
+          if(sceneRef.current && selectedLabelObj.current.parent instanceof THREE.Object3D){ sceneRef.current.remove(selectedLabelObj.current.parent); }
+        }
+      }
+    } else {
+      // Recreate selection label if a system is highlighted and no label exists
+      if(highlightedSystem && !selectedLabelObj.current){
+        const newParent = new THREE.Object3D();
+        const pos = getTransformedPosition(highlightedSystem.position);
+        newParent.position.set(pos.x,pos.y,pos.z);
+        sceneRef.current?.add(newParent);
+        const el = createSystemLabelElement(highlightedSystem.name, true, highlightedSystem.planets);
+        selectedLabelObj.current = new CSS2DObject(el);
+        selectedLabelObj.current.position.set(0,0,0);
+        newParent.add(selectedLabelObj.current);
+        selectedLabelObj.current.visible = true;
+      }
+    }
+  }, [cinematicMode, highlightedSystem, getTransformedPosition, createSystemLabelElement]);
   useEffect(()=>{ if(!cinematicMode) return; if(auroraMatRef.current){ auroraMatRef.current.uniforms.uGlobalAlpha.value = auroraIntensity; } }, [auroraIntensity, cinematicMode]);
 
   // Update custom pass uniforms when sliders change
