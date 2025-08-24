@@ -154,7 +154,9 @@ function App() {
   const bloomStrengthRef = useRef(0.6);
   const dustAmount = 0.6; // 0..1
   const cinExposure = 1.0;
-  const bgIntensity = 0.3;
+  const [bgIntensity, setBgIntensity] = useState(0); // default 0 per request
+  const [auroraIntensity, setAuroraIntensity] = useState(0.55);
+  const [showAurora, setShowAurora] = useState(true);
   const starColorStrength = 0.85; // rollback to earlier value
   const vignette = 1.0; // raised to remove center/edge contrast
   const grain = 0.35;
@@ -166,6 +168,10 @@ function App() {
   const shootingStarsEnabled = true;
   const hueDriftEnabled = true; // rollback
   const secondDustEnabled = true;
+  // Pause automated camera drift (user control)
+  const [autoCamPaused, setAutoCamPaused] = useState(false);
+  const autoCamPausedRef = useRef(false);
+  useEffect(()=>{ autoCamPausedRef.current = autoCamPaused; }, [autoCamPaused]);
   // Ambient effects master toggle
   const ambientEffectsEnabled = true;
   // Effect scheduling refs
@@ -173,6 +179,9 @@ function App() {
   const nextLensBlinkAtRef = useRef<number>(0);
   const nextCometAtRef = useRef<number>(0);
   const nextRippleAtRef = useRef<number>(0);
+  // Cached textures for radial sprites
+  const supernovaTexRef = useRef<THREE.Texture|null>(null);
+  const lensFlareTexRef = useRef<THREE.Texture|null>(null);
   // Groups / pools
   const supernovaGroupRef = useRef<THREE.Group|null>(null);
   const lensFlareGroupRef = useRef<THREE.Group|null>(null);
@@ -191,8 +200,8 @@ function App() {
   const [cinematicExpanded, setCinematicExpanded] = useState(false);
   const [starColorMode, setStarColorMode] = useState<'purple'|'white'|'blue'|'red'|'yellow'|'random'>('blue');
   // Haze: separate draft states to avoid perf spikes on continuous drag
-  const [hazeColor, setHazeColor] = useState('#5d8fff'); // lighter colder blue default
-  const [hazeIntensity, setHazeIntensity] = useState(0.12);
+  const [hazeColor, setHazeColor] = useState('#ff5555'); // default red from picker
+  const [hazeIntensity, setHazeIntensity] = useState(0.05); // default lowered per request
   const [hazeRadius, setHazeRadius] = useState(250); // committed spread factor default
   const [hazeRadiusDraft, setHazeRadiusDraft] = useState(250);
   const [hazePickerOpen,setHazePickerOpen] = useState(false);
@@ -946,7 +955,7 @@ function App() {
          // Bloom pulse
          if(bloomPassRef.current){ const base = bloomStrengthRef.current; bloomPassRef.current.strength = base * (1 + (bloomPulseEnabled? bloomPulseAmp:0)*Math.sin(performance.now()/1000*0.35)); }
          // Camera idle drift
-         if(cameraDriftEnabled){ const idleTime = (Date.now() - lastInteractionRef.current)/1000; if(idleTime > 6 && cameraRef.current){ const t = performance.now()/1000; cameraRef.current.position.x += Math.sin(t*0.07)*0.3; cameraRef.current.position.y += Math.cos(t*0.05)*0.25; cameraRef.current.position.z += Math.sin(t*0.04)*0.15; } }
+         if(cameraDriftEnabled && !autoCamPausedRef.current){ const idleTime = (Date.now() - lastInteractionRef.current)/1000; if(idleTime > 6 && cameraRef.current){ const t = performance.now()/1000; cameraRef.current.position.x += Math.sin(t*0.07)*0.3; cameraRef.current.position.y += Math.cos(t*0.05)*0.25; cameraRef.current.position.z += Math.sin(t*0.04)*0.15; } }
          // Rotate dust layers
          if (dustPointsRef.current) dustPointsRef.current.rotation.y += 0.0004;
          if (secondDustEnabled && secondDustRef.current) secondDustRef.current.rotation.y -= 0.00025;
@@ -976,7 +985,7 @@ function App() {
          }
          // Ambient effects
          if(ambientEffectsEnabled){
-           const tSec = now/1000;
+           // tSec removed (unused)
            // Parallax stars subtle rotation & counter drift for depth illusion
            if(parallaxStarsRef.current){ parallaxStarsRef.current.rotation.y += 0.00005; }
            // Supernova spawn (sprite with radial gradient)
@@ -1053,19 +1062,18 @@ function App() {
              // Aurora animate (time + re-tint if star palette changed)
              if(auroraMeshRef.current && auroraMatRef.current){
                auroraMatRef.current.uniforms.uTime.value = now/1000;
-               // Periodically refresh tint every few seconds (cheap) to follow star palette changes
-               if((now % 5000) < 33){
-                 const mode = starColorMode; let tint:THREE.Color;
-                 switch(mode){ case 'purple': tint=new THREE.Color(0x8b6dff); break; case 'white': tint=new THREE.Color(0xbccfff); break; case 'blue': tint=new THREE.Color(0x5d8fff); break; case 'red': tint=new THREE.Color(0xff6b4b); break; case 'yellow': tint=new THREE.Color(0xffdd66); break; case 'random': tint=new THREE.Color(0x6fbaff); break; default: tint=new THREE.Color(0x5d8fff);} 
-                 auroraMatRef.current.uniforms.uTint.value.copy(tint);
-               }
                // Keep positioned behind camera target
                if(cameraRef.current && controlsRef.current){
                  const cam = cameraRef.current; const dir = new THREE.Vector3(); cam.getWorldDirection(dir);
                  const tgt = controlsRef.current.target.clone();
-                 auroraMeshRef.current.position.copy(tgt.add(dir.multiplyScalar(-30000)));
+                 // Place aurora plane in front of camera (along view direction) so it's within frustum at all zoom levels
+                 auroraMeshRef.current.position.copy(tgt.add(dir.multiplyScalar(25000)));
                  auroraMeshRef.current.quaternion.copy(cam.quaternion);
                }
+                // Recenter background sphere to camera (acts as sky dome)
+                if(backgroundMeshRef.current && cameraRef.current){
+                  backgroundMeshRef.current.position.copy(cameraRef.current.position);
+                }
              }
          }
          if(advancedPassRef.current){ advancedPassRef.current.uniforms.uTime.value = performance.now()/1000; }
@@ -1203,17 +1211,34 @@ function App() {
       const g2=new THREE.BufferGeometry(); g2.setAttribute('position', new THREE.BufferAttribute(pos2,3)); g2.setAttribute('color', new THREE.BufferAttribute(col2,3));
       const dMat2=new THREE.PointsMaterial({ size:24, sizeAttenuation:true, transparent:true, opacity:0.12*dustAmount, depthWrite:false, vertexColors:true, blending:THREE.AdditiveBlending });
       secondDustRef.current=new THREE.Points(g2,dMat2); sceneRef.current!.add(secondDustRef.current);
-      // Aurora veil (experimental) behind everything
+      // Aurora veil (experimental) + faint gradient background to help visibility
       const auroraTintForMode = (mode:string)=>{ switch(mode){ case 'purple': return new THREE.Color(0x8b6dff); case 'white': return new THREE.Color(0xbccfff); case 'blue': return new THREE.Color(0x5d8fff); case 'red': return new THREE.Color(0xff6b4b); case 'yellow': return new THREE.Color(0xffdd66); case 'random': return new THREE.Color(0x6fbaff); default: return new THREE.Color(0x5d8fff);} };
-      const auroraGeo = new THREE.PlaneGeometry(60000, 40000, 1,1);
-      const auroraUniforms = { uTime:{value:0}, uTint:{value: auroraTintForMode(starColorMode)}, uGlobalAlpha:{value:0.28} };
+      if(!backgroundMeshRef.current){
+        const backgroundTintForMode = (mode:string)=>{ switch(mode){ case 'purple': return new THREE.Color(0x0c0820); case 'white': return new THREE.Color(0x0d1116); case 'blue': return new THREE.Color(0x06101c); case 'red': return new THREE.Color(0x190806); case 'yellow': return new THREE.Color(0x161307); case 'random': return new THREE.Color(0x0b101c); default: return new THREE.Color(0x06101c);} };
+        const bgGeo = new THREE.SphereGeometry(120000, 48, 32);
+  // Aggressive easing so low slider values are almost black
+  const _norm0 = Math.min(Math.max(bgIntensity/1.5,0),1);
+  const initialBgStrength = _norm0 < 0.025 ? 0 : 1.5 * Math.pow(_norm0, 2.8);
+        const bgMat = new THREE.ShaderMaterial({
+          uniforms:{ uTint:{ value: backgroundTintForMode(starColorMode)}, uStrength:{ value: initialBgStrength } },
+          vertexShader: 'varying vec3 vPos; void main(){ vPos = position; gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0); }',
+          // Vertical gradient based on normal.y so we get variation even when camera is near center. Amplified brightness for visibility.
+          fragmentShader: 'varying vec3 vPos; uniform vec3 uTint; uniform float uStrength; void main(){ if(uStrength<=0.0){ gl_FragColor=vec4(0.0); return; } vec3 n = normalize(vPos); float y = n.y * 0.5 + 0.5; float glow = smoothstep(0.0,1.0,y); vec3 col = uTint * (0.30 + 0.70*glow) * uStrength; gl_FragColor = vec4(col,1.0); }',
+          side: THREE.BackSide,
+          depthWrite:false,
+          transparent:true
+        });
+  const bgMesh = new THREE.Mesh(bgGeo, bgMat); bgMesh.renderOrder = -1000; bgMesh.frustumCulled = false; backgroundMeshRef.current = bgMesh; sceneRef.current!.add(bgMesh);
+      }
+      const auroraGeo = new THREE.PlaneGeometry(100000, 70000, 1,1);
+  const auroraUniforms = { uTime:{value:0}, uTint:{value: auroraTintForMode(starColorMode)}, uGlobalAlpha:{value:auroraIntensity} };
       const auroraMat = new THREE.ShaderMaterial({
         uniforms: auroraUniforms,
         vertexShader: 'varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }',
-        fragmentShader: `varying vec2 vUv; uniform float uTime; uniform vec3 uTint; uniform float uGlobalAlpha;\nfloat hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7)))*43758.5453); }\nfloat noise(vec2 p){ vec2 i=floor(p); vec2 f=fract(p); float a=hash(i); float b=hash(i+vec2(1,0)); float c=hash(i+vec2(0,1)); float d=hash(i+vec2(1,1)); vec2 u=f*f*(3.0-2.0*f); return mix(a,b,u.x)+ (c-a)*u.y*(1.0-u.x)+(d-b)*u.x*u.y; }\nfloat fbm(vec2 p){ float v=0.0; float a=0.5; for(int i=0;i<5;i++){ v+=a*noise(p); p*=2.02; a*=0.52; } return v; }\nvoid main(){ vec2 uv=vUv*vec2(2.0,1.2); uv.x+=uTime*0.01; uv.y+=sin(uTime*0.05)*0.1; float n=fbm(uv); float band=smoothstep(0.25,0.85,n); float flick=0.5+0.5*sin(uTime*0.4); float alpha=band*(0.35+0.25*flick); alpha=pow(alpha,1.2); alpha*=uGlobalAlpha; if(alpha<0.015) discard; vec3 col=uTint*(0.6+0.4*n); gl_FragColor=vec4(col,alpha); }`,
+        fragmentShader: `varying vec2 vUv; uniform float uTime; uniform vec3 uTint; uniform float uGlobalAlpha;\nfloat hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7)))*43758.5453); }\nfloat noise(vec2 p){ vec2 i=floor(p); vec2 f=fract(p); float a=hash(i); float b=hash(i+vec2(1,0)); float c=hash(i+vec2(0,1)); float d=hash(i+vec2(1,1)); vec2 u=f*f*(3.0-2.0*f); return mix(a,b,u.x)+ (c-a)*u.y*(1.0-u.x)+(d-b)*u.x*u.y; }\nfloat fbm(vec2 p){ float v=0.0; float a=0.5; for(int i=0;i<5;i++){ v+=a*noise(p); p*=2.02; a*=0.52; } return v; }\nvoid main(){ vec2 uv=vUv*vec2(2.0,1.2); uv.x+=uTime*0.01; uv.y+=sin(uTime*0.05)*0.1; float n=fbm(uv); float band=smoothstep(0.25,0.85,n); float flick=0.5+0.5*sin(uTime*0.4); float alpha=band*(0.35+0.25*flick); alpha=pow(alpha,1.2); alpha*=uGlobalAlpha; alpha = max(alpha, 0.05); vec3 col = uTint*(0.25 + 0.75*(0.6+0.4*n)); gl_FragColor=vec4(col,alpha); }`,
         transparent:true, depthWrite:false, blending:THREE.AdditiveBlending, side:THREE.DoubleSide
       });
-      const auroraMesh = new THREE.Mesh(auroraGeo, auroraMat); auroraMesh.position.set(0,0,-45000); auroraMeshRef.current = auroraMesh; auroraMatRef.current = auroraMat; sceneRef.current!.add(auroraMesh);
+      const auroraMesh = new THREE.Mesh(auroraGeo, auroraMat); auroraMesh.position.set(0,0,-30000); auroraMeshRef.current = auroraMesh; auroraMatRef.current = auroraMat; sceneRef.current!.add(auroraMesh);
       // Meteors group
       meteorsGroupRef.current = new THREE.Group(); sceneRef.current!.add(meteorsGroupRef.current);
       lastMeteorSpawnRef.current = performance.now();
@@ -1255,17 +1280,7 @@ function App() {
       composerRef.current = composer; bloomPassRef.current = bloom;
       // Custom post-processing pass (vignette + grain + chromatic aberration + radial glow)
       // After composer and bloom have been created
-  const customShader = { uniforms:{ tDiffuse:{value:null}, uTime:{value:0}, uGrain:{value:0.35}, uVignette:{value:0.85}, uAberration:{value:new THREE.Vector2(aberrationAmt,aberrationAmt)}, uRadialGlow:{value:0.15}, resolution:{value:new THREE.Vector2(window.innerWidth, window.innerHeight)}, uHazeColor:{value:new THREE.Color(hazeColor)}, uHazeIntensity:{value:hazeIntensity}, uHazeRadius:{value:hazeRadius}, uNebulaShimmerAmp:{value:0.18} }, vertexShader:`varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`, fragmentShader:`uniform sampler2D tDiffuse; uniform float uTime; uniform float uGrain; uniform float uVignette; uniform float uRadialGlow; uniform vec2 uAberration; uniform vec2 resolution; uniform vec3 uHazeColor; uniform float uHazeIntensity; uniform float uHazeRadius; uniform float uNebulaShimmerAmp; varying vec2 vUv; float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))+uTime*917.2)*43758.5453); } void main(){ vec2 centered = vUv - 0.5; float r = length(centered); vec2 offR = vUv + uAberration*vec2( 0.5 - vUv.y,  vUv.x-0.5); vec2 offB = vUv - uAberration*vec2( 0.5 - vUv.x,  vUv.y-0.5); vec3 col; col.r = texture2D(tDiffuse, offR).r; col.g = texture2D(tDiffuse, vUv).g; col.b = texture2D(tDiffuse, offB).b; float glow = smoothstep(0.7,0.0,r)*uRadialGlow; col += glow; float vig = smoothstep(0.8, uVignette, r); col *= (1.0 - 0.65*vig); // Full-screen capable haze: uHazeRadius 0..100 -> coverage across screen
- float maxR = 0.70710678; // distance to corner in normalized space
-float coverage = max(uHazeRadius/100.0, 0.0005); // allow >1 to overfill for full-screen haze
- float rn = r / (maxR * coverage);
- float baseH = clamp(1.0 - rn, 0.0, 1.0); // linear falloff
- // Nebula shimmer (soft temporal & spatial modulation)
- float shimmer = 1.0 + (sin(uTime*0.35 + centered.x*6.0 + centered.y*5.0) * 0.5 + 0.5 - 0.5) * uNebulaShimmerAmp * 0.35;
- shimmer += (hash(vUv*vec2(320.0,451.0)) - 0.5) * uNebulaShimmerAmp * 0.25;
- baseH *= shimmer;
- vec3 haze = uHazeColor * (uHazeIntensity * baseH);
- col += haze; float g = (hash(floor(gl_FragCoord.xy)) - 0.5)*uGrain; col += g/255.0; gl_FragColor = vec4(col,1.0); }`};
+  const customShader = { uniforms:{ tDiffuse:{value:null}, uTime:{value:0}, uGrain:{value:0.35}, uVignette:{value:0.85}, uAberration:{value:new THREE.Vector2(aberrationAmt,aberrationAmt)}, uRadialGlow:{value:0.15}, resolution:{value:new THREE.Vector2(window.innerWidth, window.innerHeight)}, uHazeColor:{value:new THREE.Color(hazeColor)}, uHazeIntensity:{value:hazeIntensity}, uHazeRadius:{value:hazeRadius}, uNebulaShimmerAmp:{value:0.18} }, vertexShader:`varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`, fragmentShader:`uniform sampler2D tDiffuse; uniform float uTime; uniform float uGrain; uniform float uVignette; uniform float uRadialGlow; uniform vec2 uAberration; uniform vec2 resolution; uniform vec3 uHazeColor; uniform float uHazeIntensity; uniform float uHazeRadius; uniform float uNebulaShimmerAmp; varying vec2 vUv; float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))+uTime*917.2)*43758.5453); } void main(){ vec2 centered = vUv - 0.5; float r = length(centered); vec2 offR = vUv + uAberration*vec2( 0.5 - vUv.y,  vUv.x-0.5); vec2 offB = vUv - uAberration*vec2( 0.5 - vUv.x,  vUv.y-0.5); vec3 col; col.r = texture2D(tDiffuse, offR).r; col.g = texture2D(tDiffuse, vUv).g; col.b = texture2D(tDiffuse, offB).b; float glow = smoothstep(0.7,0.0,r)*uRadialGlow; col += glow; float vig = smoothstep(0.8, uVignette, r); col *= (1.0 - 0.65*vig); float maxR = 0.70710678; float coverage = max(uHazeRadius/100.0, 0.0005); float rn = r / (maxR * coverage); float baseH = clamp(1.0 - rn, 0.0, 1.0); float shimmer = 1.0 + (sin(uTime*0.35 + centered.x*6.0 + centered.y*5.0) * 0.5 + 0.5 - 0.5) * uNebulaShimmerAmp * 0.35; shimmer += (hash(vUv*vec2(320.0,451.0)) - 0.5) * uNebulaShimmerAmp * 0.25; baseH *= shimmer; vec3 haze = uHazeColor * (uHazeIntensity * baseH); col += haze; float g = (hash(floor(gl_FragCoord.xy)) - 0.5)*uGrain; col += g/255.0; gl_FragColor = vec4(col,1.0); }`};
       const pass = new ShaderPass(customShader as any); composer.addPass(pass); advancedPassRef.current = pass;
       renderer.toneMapping = THREE.ACESFilmicToneMapping as any; (renderer as any).toneMappingExposure = cinExposure;
       const onResize=()=>{ composer.setSize(window.innerWidth, window.innerHeight); bloom.setSize(window.innerWidth, window.innerHeight); }; window.addEventListener('resize', onResize); (enable as any)._resize = onResize;
@@ -1322,6 +1337,19 @@ float coverage = max(uHazeRadius/100.0, 0.0005); // allow >1 to overfill for ful
 
   // Re-apply palette when mode changes or when cinematic toggles on
   useEffect(()=>{ applyStarPalette(starColorMode); }, [starColorMode, cinematicMode, applyStarPalette]);
+  // Retint background & aurora when palette changes (if present)
+  useEffect(()=>{
+    if(!cinematicMode) return;
+    if(backgroundMeshRef.current){
+      const backgroundTintForMode = (mode:string)=>{ switch(mode){ case 'purple': return new THREE.Color(0x0c0820); case 'white': return new THREE.Color(0x0d1116); case 'blue': return new THREE.Color(0x06101c); case 'red': return new THREE.Color(0x190806); case 'yellow': return new THREE.Color(0x161307); case 'random': return new THREE.Color(0x0b101c); default: return new THREE.Color(0x06101c);} };
+      const mat = backgroundMeshRef.current.material as THREE.ShaderMaterial;
+      if(mat.uniforms.uTint) mat.uniforms.uTint.value = backgroundTintForMode(starColorMode);
+    }
+    if(auroraMatRef.current){
+      const auroraTintForMode = (mode:string)=>{ switch(mode){ case 'purple': return new THREE.Color(0x8b6dff); case 'white': return new THREE.Color(0xbccfff); case 'blue': return new THREE.Color(0x5d8fff); case 'red': return new THREE.Color(0xff6b4b); case 'yellow': return new THREE.Color(0xffdd66); case 'random': return new THREE.Color(0x6fbaff); default: return new THREE.Color(0x5d8fff);} };
+      if(auroraMatRef.current.uniforms.uTint) auroraMatRef.current.uniforms.uTint.value = auroraTintForMode(starColorMode);
+    }
+  }, [starColorMode, cinematicMode]);
 
   // Respond to user cinematic color control changes
   useEffect(()=>{
@@ -1333,7 +1361,10 @@ float coverage = max(uHazeRadius/100.0, 0.0005); // allow >1 to overfill for ful
   // Update bloom strength when committed value changes
   useEffect(()=>{ if(!cinematicMode) return; bloomStrengthRef.current = bloomStrength; if(bloomPassRef.current) bloomPassRef.current.strength = bloomStrength; }, [bloomStrength, cinematicMode]);
   // Other live updates that are still fine to apply immediately
-  useEffect(()=>{ if(!cinematicMode) return; if(rendererRef.current) (rendererRef.current as any).toneMappingExposure = cinExposure; if(dustPointsRef.current) (dustPointsRef.current.material as THREE.PointsMaterial).opacity = 0.28*dustAmount; if(secondDustRef.current) (secondDustRef.current.material as THREE.PointsMaterial).opacity = 0.12*dustAmount * (secondDustEnabled?1:0); if(backgroundMeshRef.current) (backgroundMeshRef.current.material as THREE.MeshBasicMaterial).opacity = bgIntensity; }, [dustAmount, cinExposure, bgIntensity, secondDustEnabled, cinematicMode]);
+  useEffect(()=>{ if(!cinematicMode) return; if(rendererRef.current) (rendererRef.current as any).toneMappingExposure = cinExposure; if(dustPointsRef.current) (dustPointsRef.current.material as THREE.PointsMaterial).opacity = 0.28*dustAmount; if(secondDustRef.current) (secondDustRef.current.material as THREE.PointsMaterial).opacity = 0.12*dustAmount * (secondDustEnabled?1:0); if(backgroundMeshRef.current){ const mat = backgroundMeshRef.current.material as THREE.ShaderMaterial; if(mat.uniforms.uStrength){ const _n=Math.min(Math.max(bgIntensity/1.5,0),1); const mapped = _n < 0.025 ? 0 : 1.5 * Math.pow(_n, 2.8); mat.uniforms.uStrength.value = mapped; } } }, [dustAmount, cinExposure, bgIntensity, secondDustEnabled, cinematicMode]);
+
+  useEffect(()=>{ if(!cinematicMode) return; const vis = showAurora; if(backgroundMeshRef.current) backgroundMeshRef.current.visible = vis; if(auroraMeshRef.current) auroraMeshRef.current.visible = vis; }, [showAurora, cinematicMode]);
+  useEffect(()=>{ if(!cinematicMode) return; if(auroraMatRef.current){ auroraMatRef.current.uniforms.uGlobalAlpha.value = auroraIntensity; } }, [auroraIntensity, cinematicMode]);
 
   // Update custom pass uniforms when sliders change
   useEffect(()=>{ if(!cinematicMode) return; if(advancedPassRef.current){ const u=advancedPassRef.current.uniforms; u.uVignette.value = vignette; u.uGrain.value = grain; u.uAberration.value.set(aberration,aberration); u.uRadialGlow.value = radialGlow; } }, [vignette, grain, aberration, radialGlow, cinematicMode]);
@@ -2294,10 +2325,13 @@ float coverage = max(uHazeRadius/100.0, 0.0005); // allow >1 to overfill for ful
               </div>
               <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
                 <label style={{ fontSize:12, fontWeight:600 }}>Haze Color</label>
-                <div style={{ position:'relative', display:'flex', flexDirection:'column', alignItems:'flex-start', gap:4 }}>
+                <div style={{ position:'relative', display:'flex', alignItems:'center', gap:8 }}>
                   <div onClick={()=> setHazePickerOpen(o=>!o)} style={{ width:44, height:22, background:hazeColor, border:'1px solid #666', cursor:'pointer', borderRadius:4 }} title={hazePickerOpen? 'Click to close':'Click to pick color'} />
+                  <button onClick={()=> setAutoCamPaused(p=> !p)} style={{ background:'#111', color:'#fff', border:'1px solid var(--accent)', borderRadius:4, fontSize:11, padding:'4px 8px', cursor:'pointer', marginLeft:12 }} title={autoCamPaused? 'Resume auto camera drift':'Pause auto camera drift'}>
+                    {autoCamPaused? 'Resume' : 'Pause'}
+                  </button>
                   {hazePickerOpen && (
-                    <div style={{ position:'absolute', top:28, left:0, background:'#111', padding:'8px 10px', border:'1px solid #444', borderRadius:6, zIndex:50, display:'flex', flexDirection:'column', gap:8, boxShadow:'0 4px 12px rgba(0,0,0,0.5)' }}>
+                    <div style={{ position:'absolute', top:26, left:0, background:'#111', padding:'8px 10px', border:'1px solid #444', borderRadius:6, zIndex:50, display:'flex', flexDirection:'column', gap:8, boxShadow:'0 4px 12px rgba(0,0,0,0.5)' }}>
                       <div style={{ display:'grid', gridTemplateColumns:'repeat(6,18px)', gap:6 }}>
                         {['#5d8fff','#7aa8ff','#a0c2ff','#cde0ff','#ffffff','#ffd700','#ffcc55','#ff8844','#ff5555','#55aaff','#55ffcc','#aa88ff'].map(c=> (
                           <div key={c} onClick={()=>{ setHazeColor(c); setHazePickerOpen(false); }} style={{ width:18, height:18, background:c, border:'1px solid #777', cursor:'pointer', borderRadius:3 }} />
@@ -2314,6 +2348,19 @@ float coverage = max(uHazeRadius/100.0, 0.0005); // allow >1 to overfill for ful
               <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
                 <label style={{ fontSize:12, fontWeight:600 }}>Haze Radius <span style={{ opacity:.65 }}>({hazeRadiusDraft.toFixed(1)})</span></label>
                 <input type="range" min={0} max={500} step={1} value={hazeRadiusDraft} onChange={e=> setHazeRadiusDraft(parseFloat(e.target.value))} onPointerUp={e=> setHazeRadius(parseFloat((e.target as HTMLInputElement).value))} onBlur={e=> setHazeRadius(parseFloat((e.target as HTMLInputElement).value))} />
+              </div>
+              <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+                <label style={{ fontSize:11, display:'flex', gap:6, alignItems:'center' }}>
+                  <input type="checkbox" checked={showAurora} onChange={e=> setShowAurora(e.target.checked)} /> Aurora
+                </label>
+              </div>
+              <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+                <label style={{ fontSize:12, fontWeight:600 }}>Background Intensity <span style={{ opacity:.65 }}>({bgIntensity.toFixed(2)})</span></label>
+                <input type="range" min={0} max={1.5} step={0.01} value={bgIntensity} onChange={e=> setBgIntensity(parseFloat(e.target.value))} />
+              </div>
+              <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+                <label style={{ fontSize:12, fontWeight:600 }}>Aurora Intensity <span style={{ opacity:.65 }}>({auroraIntensity.toFixed(2)})</span></label>
+                <input type="range" min={0} max={1.0} step={0.01} value={auroraIntensity} onChange={e=> setAuroraIntensity(parseFloat(e.target.value))} />
               </div>
             </div>
           )}
