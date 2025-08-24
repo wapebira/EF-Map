@@ -1309,6 +1309,24 @@ function App() {
           }
         }
       } catch { /* ignore */ }
+      // Force restore of base star material properties (in case palette / additive blending lingered)
+      try {
+        if(starFieldRef.current){
+          const mat = starFieldRef.current.material as THREE.PointsMaterial;
+          mat.blending = THREE.NormalBlending;
+          mat.depthWrite = true;
+          mat.transparent = true;
+          mat.opacity = 1.0;
+          (mat as any).needsUpdate = true;
+          // Reapply color buffer to plain white (actual pipeline effect will recolor next frame)
+          const geom = starFieldRef.current.geometry as THREE.BufferGeometry;
+          const colAttr = geom.getAttribute('color') as THREE.BufferAttribute;
+          if(colAttr){
+            for(let i=0;i<colAttr.count;i++){ colAttr.setXYZ(i,1,1,1); }
+            colAttr.needsUpdate = true;
+          }
+        }
+      } catch { /* ignore */ }
   if(dustPointsRef.current){ dustPointsRef.current.geometry.dispose(); (dustPointsRef.current.material as THREE.Material).dispose(); sceneRef.current!.remove(dustPointsRef.current); dustPointsRef.current=null; }
   if(secondDustRef.current){ secondDustRef.current.geometry.dispose(); (secondDustRef.current.material as THREE.Material).dispose(); sceneRef.current!.remove(secondDustRef.current); secondDustRef.current=null; }
   if(meteorsGroupRef.current){ meteorsGroupRef.current.children.forEach(c=>{ const m=c as any; if(m.geometry) m.geometry.dispose(); if(m.material) m.material.dispose(); }); sceneRef.current!.remove(meteorsGroupRef.current); meteorsGroupRef.current=null; }
