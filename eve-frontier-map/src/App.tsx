@@ -2079,7 +2079,7 @@ function App() {
     const renderer = rendererRef.current;
 
     if (hoverPoint && camera && renderer) {
-      if (hoveredSystem) {
+      if (hoveredSystem && !cinematicModeRef.current) {
         const pos = getTransformedPosition(hoveredSystem.position);
         hoverPoint.position.set(pos.x, pos.y, pos.z);
 
@@ -2095,7 +2095,7 @@ function App() {
         (hoverPoint.material as THREE.PointsMaterial).size = newRingSize;
 
         hoverPoint.visible = true;
-      } else {
+    } else {
         hoverPoint.visible = false;
       }
     }
@@ -2113,7 +2113,7 @@ function App() {
     const DRAG_THRESHOLD = 5; // pixels
     const CLICK_TIME_THRESHOLD = 200; // milliseconds
 
-    const onPointerMove = (event: PointerEvent) => {
+  const onPointerMove = (event: PointerEvent) => {
       // Mark that user has moved mouse; before this we won't show hover
       if(!firstMoveRef.current){ firstMoveRef.current = true; }
       mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
@@ -2133,7 +2133,22 @@ function App() {
       }
 
       // Only perform expensive raycast when no buttons are pressed (pure hover)
-  if (!isDraggingRef.current && !anyButtonDown && firstMoveRef.current) {
+      // Suppress all hover work during cinematic mode for immersion
+      if(cinematicModeRef.current){
+        // Clear any existing hover state once
+        if(hoverPointRef.current) hoverPointRef.current.visible = false;
+        if(hoverLabelObj.current){
+          hoverLabelObj.current.visible = false;
+          if(hoverLabelObj.current.parent){
+            hoverLabelObj.current.parent.remove(hoverLabelObj.current);
+            if(sceneRef.current && hoverLabelObj.current.parent instanceof THREE.Object3D){ sceneRef.current.remove(hoverLabelObj.current.parent); }
+          }
+        }
+        if(hoveredSystem) setHoveredSystem(null);
+        return;
+      }
+
+      if (!isDraggingRef.current && !anyButtonDown && firstMoveRef.current) {
         raycaster.setFromCamera(mouse, cameraRef.current);
   // Dynamic threshold based on camera distance (tighter range to avoid false positives)
   const distance = cameraRef.current.position.distanceTo(controlsRef.current.target);
