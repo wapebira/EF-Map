@@ -1296,6 +1296,19 @@ function App() {
       } catch(e){ /* ignore */ }
       backgroundMeshRef.current = null;
     }
+      // Reset hover state so interactions resume cleanly after exiting cinematic mode
+      try {
+        setHoveredSystem(null);
+        if(hoverLabelObj.current){
+          hoverLabelObj.current.visible = false;
+          if(hoverLabelObj.current.parent){
+            hoverLabelObj.current.parent.remove(hoverLabelObj.current);
+            if(sceneRef.current && hoverLabelObj.current.parent instanceof THREE.Object3D){
+              sceneRef.current.remove(hoverLabelObj.current.parent);
+            }
+          }
+        }
+      } catch { /* ignore */ }
   if(dustPointsRef.current){ dustPointsRef.current.geometry.dispose(); (dustPointsRef.current.material as THREE.Material).dispose(); sceneRef.current!.remove(dustPointsRef.current); dustPointsRef.current=null; }
   if(secondDustRef.current){ secondDustRef.current.geometry.dispose(); (secondDustRef.current.material as THREE.Material).dispose(); sceneRef.current!.remove(secondDustRef.current); secondDustRef.current=null; }
   if(meteorsGroupRef.current){ meteorsGroupRef.current.children.forEach(c=>{ const m=c as any; if(m.geometry) m.geometry.dispose(); if(m.material) m.material.dispose(); }); sceneRef.current!.remove(meteorsGroupRef.current); meteorsGroupRef.current=null; }
