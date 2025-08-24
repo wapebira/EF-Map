@@ -1907,15 +1907,17 @@ function App() {
 
   // Compose a style wrapper scaler for UI (exclude the 3D canvas)
   // Scale applied ONLY to primary UI panels (not the persistent bottom-left quick controls)
+  // Scale origin top-right so toolbar shrinks toward the corner; left panel still from top-left
   const scaleStyle: React.CSSProperties = { transform:`scale(${uiScale})`, transformOrigin:'top left' };
+  const topRightScaleStyle: React.CSSProperties = { transform:`scale(${uiScale})`, transformOrigin:'top right', display:'flex', alignItems:'stretch', gap:'8px' };
 
   return (
     <>
   {/* Referral code copy state */}
   {/* ...existing code... */}
   <div className="ef-top-toolbar" style={hideUI?{display:'none'}:{}}>
-    <div style={scaleStyle} className="ef-top-toolbar-inner">
-    <div className="ef-toolbar-shifting">
+    <div style={topRightScaleStyle} className="ef-top-toolbar-inner">
+      <div className="ef-toolbar-shifting">
       <button
         className="share-route-btn"
         onClick={async () => {
@@ -1958,8 +1960,9 @@ function App() {
         {shareFeedback && <span className="share-feedback">{shareFeedback}</span>}
       </button>
       <ReferralBadge />
-      </div>
-      <HelpPanel accentIsBlue={accentIsBlue} />
+  </div>
+  {/* Help button should remain to the right of referral always */}
+  <HelpPanel accentIsBlue={accentIsBlue} />
     </div>
   </div>
   <div style={hideUI?{display:'none'}:{ position: 'absolute', top: 10, left: 10, zIndex: 1, color: 'white', backgroundColor: 'rgba(0,0,0,0.5)', padding: '10px', borderRadius: '5px', ...scaleStyle }}>
