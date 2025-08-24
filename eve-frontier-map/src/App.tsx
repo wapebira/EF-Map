@@ -118,15 +118,8 @@ function App() {
   const [resetToken, setResetToken] = useState(0); // increments to signal UI reset
   // UI visibility + scaling
   const [hideUI, setHideUI] = useState(false);
-  const [uiScale, setUiScale] = useState(1); // 0.5,0.75,1,1.25
   const uiScaleStops = [0.5, 0.75, 1, 1.25];
-  const snapUiScale = (v:number)=>{
-    // Find nearest stop
-    let nearest = uiScaleStops[0];
-    let best = Math.abs(v - nearest);
-    for(const s of uiScaleStops){ const d=Math.abs(v-s); if(d<best){ best=d; nearest=s; } }
-    setUiScale(nearest);
-  };
+  const [uiScale, setUiScale] = useState(1); // active scale (applies only to main panels + toolbar)
   const [highlightedSystem, setHighlightedSystem] = useState<SolarSystem | null>(null);
   const [hoveredSystem, setHoveredSystem] = useState<SolarSystem | null>(null);
   const [isRegionHighlighterActive, setIsRegionHighlighterActive] = useState(false);
@@ -1913,6 +1906,7 @@ function App() {
   }
 
   // Compose a style wrapper scaler for UI (exclude the 3D canvas)
+  // Scale applied ONLY to primary UI panels (not the persistent bottom-left quick controls)
   const scaleStyle: React.CSSProperties = { transform:`scale(${uiScale})`, transformOrigin:'top left' };
 
   return (
@@ -2090,8 +2084,9 @@ function App() {
         />
         {isPlanetCountActive && generatePlanetCountLegend()}
       </div>
-      <div style={hideUI?{display:'none'}:{ position: 'fixed', left: 10, bottom: 10, zIndex: 2000, ...scaleStyle }}>
-        <div style={{ display:'flex', gap:'10px', alignItems:'center' }}>
+      {/* Persistent quick controls (never hidden so user can un-hide UI; not scaled for pointer stability) */}
+      <div style={{ position: 'fixed', left: 10, bottom: 10, zIndex: 2000 }}>
+        <div style={{ display:'flex', gap:'10px', alignItems:'center', flexWrap:'wrap' }}>
           <label style={{ color: 'white', backgroundColor: 'rgba(0,0,0,0.5)', padding: '6px 8px', borderRadius: '6px', display: 'flex', alignItems: 'center', gap: '8px' }}>
             <input type="checkbox" checked={accentIsBlue} onChange={(e) => setAccentIsBlue(e.target.checked)} />
             <span style={{ fontSize: '12px' }}>Use blue accent</span>
@@ -2106,27 +2101,13 @@ function App() {
               type="range"
               min={0}
               max={uiScaleStops.length-1}
-              step={0.01}
-              value={(()=>{ // map uiScale back to approximate index
-                const idx = uiScaleStops.indexOf(uiScale);
-                return idx>=0?idx: uiScaleStops.reduce((acc,cur,i)=> Math.abs(cur-uiScale)<Math.abs(uiScaleStops[acc]-uiScale)?i:acc,0);
-              })()}
-              onChange={(e)=>{
-                const floatIndex = parseFloat(e.target.value);
-                // allow free slide then snap on mouseup
-                const lower = Math.floor(floatIndex);
-                const upper = Math.ceil(floatIndex);
-                const t = floatIndex - lower;
-                const a = uiScaleStops[lower];
-                const b = uiScaleStops[upper] ?? uiScaleStops[uiScaleStops.length-1];
-                setUiScale(a + (b-a)*t);
-              }}
-              onMouseUp={()=>{ snapUiScale(uiScale); }}
-              onTouchEnd={()=> snapUiScale(uiScale)}
-              style={{ cursor:'pointer' }}
-              aria-label="Adjust UI scale"
+              step={1}
+              value={uiScaleStops.indexOf(uiScale)}
+              onChange={(e)=>{ const idx=parseInt(e.target.value); setUiScale(uiScaleStops[idx]||1); }}
+              style={{ cursor:'pointer', width:'110px' }}
+              aria-label="Adjust UI scale (50/75/100/125%)"
             />
-            <span style={{ fontSize:'12px', minWidth:'42px', textAlign:'right' }}>{Math.round(uiScale*100)}%</span>
+            <span style={{ fontSize:'12px', minWidth:'46px', textAlign:'right' }}>{Math.round(uiScale*100)}%</span>
           </div>
         </div>
       </div>
