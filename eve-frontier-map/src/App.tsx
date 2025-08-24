@@ -1288,6 +1288,14 @@ function App() {
     const disable = () => {
       if(starFieldRef.current && originalStarMaterialRef.current) starFieldRef.current.material = originalStarMaterialRef.current;
       if(stargateLinesRef.current) stargateLinesRef.current.visible = true;
+    if(backgroundMeshRef.current){
+      try {
+        sceneRef.current?.remove(backgroundMeshRef.current);
+        (backgroundMeshRef.current.geometry as any)?.dispose?.();
+        (backgroundMeshRef.current.material as any)?.dispose?.();
+      } catch(e){ /* ignore */ }
+      backgroundMeshRef.current = null;
+    }
   if(dustPointsRef.current){ dustPointsRef.current.geometry.dispose(); (dustPointsRef.current.material as THREE.Material).dispose(); sceneRef.current!.remove(dustPointsRef.current); dustPointsRef.current=null; }
   if(secondDustRef.current){ secondDustRef.current.geometry.dispose(); (secondDustRef.current.material as THREE.Material).dispose(); sceneRef.current!.remove(secondDustRef.current); secondDustRef.current=null; }
   if(meteorsGroupRef.current){ meteorsGroupRef.current.children.forEach(c=>{ const m=c as any; if(m.geometry) m.geometry.dispose(); if(m.material) m.material.dispose(); }); sceneRef.current!.remove(meteorsGroupRef.current); meteorsGroupRef.current=null; }
