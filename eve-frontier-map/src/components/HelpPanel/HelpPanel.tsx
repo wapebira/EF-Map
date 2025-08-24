@@ -241,6 +241,23 @@ const sections: SectionDef[] = [
       },
     ],
   },
+  {
+    id: 'cinematic-mode',
+    title: 'Cinematic Mode',
+    subsections: [
+      {
+        id: 'cinematic-overview',
+        title: 'Overview',
+        content: (
+          <div>
+            <p>Applies a stylized presentation layer for screenshots, streaming, or passive viewing. Stars gain subtle twinkle & palette tinting; bloom, chromatic aberration, vignette, grain, and a configurable nebula-like haze are added. Optional aurora + gradient background, parallax distant stars, dust layers, and occasional ambient events (meteors, flares, ripples, supernova flashes) enhance depth.</p>
+            <p>Controls inside the Cinematic panel let you adjust star palette, bloom strength (applies on release), aberration, haze color/intensity/radius, background intensity, aurora visibility & intensity, and pause/resume gentle idle camera drift. Toggling the mode off restores the normal interactive map (routing, region/planet coloring, precise hover behavior).</p>
+            <p>Tip: Keep haze modest for readability; use pause before composing a screenshot; disable aurora if palette clarity is needed.</p>
+          </div>
+        ),
+      },
+    ],
+  },
 ];
 
 const HelpPanel: React.FC<HelpPanelProps> = ({ accentIsBlue }) => {
