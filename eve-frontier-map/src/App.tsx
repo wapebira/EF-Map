@@ -289,6 +289,7 @@ function App() {
   const isDraggingRef = useRef(false);
   const mouseDownPosRef = useRef(new THREE.Vector2());
   const mouseDownTimeRef = useRef(0);
+  const firstMoveRef = useRef(false); // suppress initial phantom hover until user moves
 
   const circleTexture = useMemo(() => createCircleTexture(), []);
   const ringTexture = useMemo(() => createRingTexture(), []);
@@ -1308,6 +1309,7 @@ function App() {
             }
           }
         }
+    firstMoveRef.current = false;
       } catch { /* ignore */ }
       // Force restore of base star material properties (in case palette / additive blending lingered)
       try {
@@ -2052,7 +2054,9 @@ function App() {
     const DRAG_THRESHOLD = 5; // pixels
     const CLICK_TIME_THRESHOLD = 200; // milliseconds
 
-  const onPointerMove = (event: PointerEvent) => {
+    const onPointerMove = (event: PointerEvent) => {
+      // Mark that user has moved mouse; before this we won't show hover
+      if(!firstMoveRef.current){ firstMoveRef.current = true; }
       mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
       mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
 
@@ -2070,26 +2074,19 @@ function App() {
       }
 
       // Only perform expensive raycast when no buttons are pressed (pure hover)
-      if (!isDraggingRef.current && !anyButtonDown) {
+  if (!isDraggingRef.current && !anyButtonDown && firstMoveRef.current) {
         raycaster.setFromCamera(mouse, cameraRef.current);
-        // Dynamic threshold based on camera distance
-        const distance = cameraRef.current.position.distanceTo(controlsRef.current.target);
-        const minDistance = 100; // Adjust as needed
-        const maxDistance = 50000; // Adjust as needed
-        const minThreshold = 1; // Precise for zoomed in
-        const maxThreshold = 300; // Forgiving for zoomed out
-        const clampedDistance = Math.max(minDistance, Math.min(maxDistance, distance));
-        const normalizedDistance = (clampedDistance - minDistance) / (maxDistance - minDistance);
-        const dynamicThreshold = minThreshold + (maxThreshold - minThreshold) * normalizedDistance;
-        raycaster.params.Points.threshold = dynamicThreshold;
-        let intersects = raycaster.intersectObject(starFieldRef.current);
-        // Fallback: if no hit, try with a very large threshold once (post-cinematic safety)
-        if(intersects.length===0){
-          const prevThresh = raycaster.params.Points.threshold;
-          raycaster.params.Points.threshold = Math.max(prevThresh, 1200);
-          intersects = raycaster.intersectObject(starFieldRef.current);
-          raycaster.params.Points.threshold = prevThresh; // restore
-        }
+  // Dynamic threshold based on camera distance (tighter range to avoid false positives)
+  const distance = cameraRef.current.position.distanceTo(controlsRef.current.target);
+  const minDistance = 100;
+  const maxDistance = 50000;
+  const minThreshold = 1;   // near = very precise
+  const maxThreshold = 75;  // far = modest radius (avoid grabbing distant stars off-cursor)
+  const clampedDistance = Math.max(minDistance, Math.min(maxDistance, distance));
+  const normalizedDistance = (clampedDistance - minDistance) / (maxDistance - minDistance);
+  const dynamicThreshold = minThreshold + (maxThreshold - minThreshold) * normalizedDistance;
+  raycaster.params.Points.threshold = dynamicThreshold;
+  const intersects = raycaster.intersectObject(starFieldRef.current);
 
         let newHoveredSystem: SolarSystem | null = null;
         let hitStarObject: THREE.Object3D | null = null;
