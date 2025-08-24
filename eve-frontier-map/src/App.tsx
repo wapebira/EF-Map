@@ -216,7 +216,7 @@ function App() {
   const [hazePickerOpen,setHazePickerOpen] = useState(false);
   const [aberrationAmt, setAberrationAmt] = useState(0.002);
   // Optional display of labels while in cinematic mode
-  const [cinematicLabels, setCinematicLabels] = useState(false);
+  const [cinematicLabels, setCinematicLabels] = useState(false); // Toggle to optionally show hover & selection labels during cinematic mode
   const cinematicLabelsRef = useRef(false);
   useEffect(()=>{ cinematicLabelsRef.current = cinematicLabels; }, [cinematicLabels]);
 
