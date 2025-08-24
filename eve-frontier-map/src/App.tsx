@@ -184,6 +184,9 @@ function App() {
   const lensPoolRef = useRef<(THREE.Sprite|THREE.Mesh)[]>([]);
   const ripplePoolRef = useRef<THREE.Mesh[]>([]);
   const cometPoolRef = useRef<THREE.Line[]>([]);
+  // Experimental aurora veil refs
+  const auroraMeshRef = useRef<THREE.Mesh|null>(null);
+  const auroraMatRef = useRef<THREE.ShaderMaterial|null>(null);
   // Cinematic user-exposed controls (initial minimal set)
   const [cinematicExpanded, setCinematicExpanded] = useState(false);
   const [starColorMode, setStarColorMode] = useState<'purple'|'white'|'blue'|'red'|'yellow'|'random'>('blue');
@@ -1047,6 +1050,23 @@ function App() {
              const rpChildren = [...rippleGroupRef.current.children];
              for(const rMesh of rpChildren){ const ttl=(rMesh as any).ttl; const age = now - (rMesh as any).birth; if(age>ttl){ rippleGroupRef.current.remove(rMesh); ripplePoolRef.current.push(rMesh as any); continue; } const t = age/ttl; const scl = 1 + t*60; rMesh.scale.set(scl,scl,scl); const mat:any = (rMesh as any).material; mat.opacity = (1-t)*0.7; }
            }
+             // Aurora animate (time + re-tint if star palette changed)
+             if(auroraMeshRef.current && auroraMatRef.current){
+               auroraMatRef.current.uniforms.uTime.value = now/1000;
+               // Periodically refresh tint every few seconds (cheap) to follow star palette changes
+               if((now % 5000) < 33){
+                 const mode = starColorMode; let tint:THREE.Color;
+                 switch(mode){ case 'purple': tint=new THREE.Color(0x8b6dff); break; case 'white': tint=new THREE.Color(0xbccfff); break; case 'blue': tint=new THREE.Color(0x5d8fff); break; case 'red': tint=new THREE.Color(0xff6b4b); break; case 'yellow': tint=new THREE.Color(0xffdd66); break; case 'random': tint=new THREE.Color(0x6fbaff); break; default: tint=new THREE.Color(0x5d8fff);} 
+                 auroraMatRef.current.uniforms.uTint.value.copy(tint);
+               }
+               // Keep positioned behind camera target
+               if(cameraRef.current && controlsRef.current){
+                 const cam = cameraRef.current; const dir = new THREE.Vector3(); cam.getWorldDirection(dir);
+                 const tgt = controlsRef.current.target.clone();
+                 auroraMeshRef.current.position.copy(tgt.add(dir.multiplyScalar(-30000)));
+                 auroraMeshRef.current.quaternion.copy(cam.quaternion);
+               }
+             }
          }
          if(advancedPassRef.current){ advancedPassRef.current.uniforms.uTime.value = performance.now()/1000; }
          composerRef.current ? composerRef.current.render() : rendererRef.current?.render(sceneRef.current!, cameraRef.current!);
@@ -1183,6 +1203,17 @@ function App() {
       const g2=new THREE.BufferGeometry(); g2.setAttribute('position', new THREE.BufferAttribute(pos2,3)); g2.setAttribute('color', new THREE.BufferAttribute(col2,3));
       const dMat2=new THREE.PointsMaterial({ size:24, sizeAttenuation:true, transparent:true, opacity:0.12*dustAmount, depthWrite:false, vertexColors:true, blending:THREE.AdditiveBlending });
       secondDustRef.current=new THREE.Points(g2,dMat2); sceneRef.current!.add(secondDustRef.current);
+      // Aurora veil (experimental) behind everything
+      const auroraTintForMode = (mode:string)=>{ switch(mode){ case 'purple': return new THREE.Color(0x8b6dff); case 'white': return new THREE.Color(0xbccfff); case 'blue': return new THREE.Color(0x5d8fff); case 'red': return new THREE.Color(0xff6b4b); case 'yellow': return new THREE.Color(0xffdd66); case 'random': return new THREE.Color(0x6fbaff); default: return new THREE.Color(0x5d8fff);} };
+      const auroraGeo = new THREE.PlaneGeometry(60000, 40000, 1,1);
+      const auroraUniforms = { uTime:{value:0}, uTint:{value: auroraTintForMode(starColorMode)}, uGlobalAlpha:{value:0.28} };
+      const auroraMat = new THREE.ShaderMaterial({
+        uniforms: auroraUniforms,
+        vertexShader: 'varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }',
+        fragmentShader: `varying vec2 vUv; uniform float uTime; uniform vec3 uTint; uniform float uGlobalAlpha;\nfloat hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7)))*43758.5453); }\nfloat noise(vec2 p){ vec2 i=floor(p); vec2 f=fract(p); float a=hash(i); float b=hash(i+vec2(1,0)); float c=hash(i+vec2(0,1)); float d=hash(i+vec2(1,1)); vec2 u=f*f*(3.0-2.0*f); return mix(a,b,u.x)+ (c-a)*u.y*(1.0-u.x)+(d-b)*u.x*u.y; }\nfloat fbm(vec2 p){ float v=0.0; float a=0.5; for(int i=0;i<5;i++){ v+=a*noise(p); p*=2.02; a*=0.52; } return v; }\nvoid main(){ vec2 uv=vUv*vec2(2.0,1.2); uv.x+=uTime*0.01; uv.y+=sin(uTime*0.05)*0.1; float n=fbm(uv); float band=smoothstep(0.25,0.85,n); float flick=0.5+0.5*sin(uTime*0.4); float alpha=band*(0.35+0.25*flick); alpha=pow(alpha,1.2); alpha*=uGlobalAlpha; if(alpha<0.015) discard; vec3 col=uTint*(0.6+0.4*n); gl_FragColor=vec4(col,alpha); }`,
+        transparent:true, depthWrite:false, blending:THREE.AdditiveBlending, side:THREE.DoubleSide
+      });
+      const auroraMesh = new THREE.Mesh(auroraGeo, auroraMat); auroraMesh.position.set(0,0,-45000); auroraMeshRef.current = auroraMesh; auroraMatRef.current = auroraMat; sceneRef.current!.add(auroraMesh);
       // Meteors group
       meteorsGroupRef.current = new THREE.Group(); sceneRef.current!.add(meteorsGroupRef.current);
       lastMeteorSpawnRef.current = performance.now();
@@ -1250,6 +1281,7 @@ float coverage = max(uHazeRadius/100.0, 0.0005); // allow >1 to overfill for ful
   if(rippleGroupRef.current){ rippleGroupRef.current.children.forEach(c=>{ const m=c as any; m.geometry?.dispose?.(); m.material?.dispose?.();}); sceneRef.current!.remove(rippleGroupRef.current); rippleGroupRef.current=null; }
   if(cometGroupRef.current){ cometGroupRef.current.children.forEach(c=>{ const m=c as any; m.geometry?.dispose?.(); m.material?.dispose?.();}); sceneRef.current!.remove(cometGroupRef.current); cometGroupRef.current=null; }
   if(parallaxStarsRef.current){ parallaxStarsRef.current.geometry.dispose(); (parallaxStarsRef.current.material as THREE.Material).dispose(); sceneRef.current!.remove(parallaxStarsRef.current); parallaxStarsRef.current=null; }
+  if(auroraMeshRef.current){ auroraMeshRef.current.geometry.dispose(); (auroraMeshRef.current.material as THREE.Material).dispose(); sceneRef.current!.remove(auroraMeshRef.current); auroraMeshRef.current=null; auroraMatRef.current=null; }
       if(composerRef.current){ composerRef.current.passes.forEach(p=> (p as any).dispose?.()); (composerRef.current as any).dispose?.(); composerRef.current=null; bloomPassRef.current=null; }
       if(originalToneMappingRef.current!==null) renderer.toneMapping = originalToneMappingRef.current as any;
       if(originalExposureRef.current!==null) (renderer as any).toneMappingExposure = originalExposureRef.current;
