@@ -980,7 +980,7 @@ function App() {
       const dMat=new THREE.PointsMaterial({ size:14, sizeAttenuation:true, transparent:true, opacity:0.28*dustAmount, depthWrite:false, vertexColors:true, blending:THREE.AdditiveBlending });
   dustPointsRef.current=new THREE.Points(g,dMat); sceneRef.current!.add(dustPointsRef.current);
       // Background gradient sphere
-      const makeGrad=()=>{ const c=document.createElement('canvas'); c.width=2; c.height=512; const ctx=c.getContext('2d')!; const grd=ctx.createLinearGradient(0,0,0,512); grd.addColorStop(0,'#0c0d25'); grd.addColorStop(0.55,'#14124b'); grd.addColorStop(1,'#3d0a46'); ctx.fillStyle=grd; ctx.fillRect(0,0,2,512); return new THREE.CanvasTexture(c); };
+  const makeGrad=()=>{ const c=document.createElement('canvas'); c.width=2; c.height=512; const ctx=c.getContext('2d')!; const grd=ctx.createLinearGradient(0,0,0,512); grd.addColorStop(0,'#04040a'); grd.addColorStop(0.55,'#0d0830'); grd.addColorStop(1,'#180022'); ctx.fillStyle=grd; ctx.fillRect(0,0,2,512); return new THREE.CanvasTexture(c); };
   const bg=new THREE.Mesh(new THREE.SphereGeometry(120000,32,32), new THREE.MeshBasicMaterial({ map: makeGrad(), side:THREE.BackSide })); backgroundMeshRef.current=bg; sceneRef.current!.add(bg);
       // Post chain
       const composer=new EffectComposer(renderer); composer.addPass(new RenderPass(sceneRef.current!, camera)); const bloom=new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), bloomStrength, 0.4, 0.85); bloom.threshold=0; composer.addPass(bloom); composerRef.current=composer; bloomPassRef.current=bloom;
