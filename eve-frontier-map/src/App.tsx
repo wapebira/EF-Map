@@ -215,6 +215,10 @@ function App() {
   const [hazeRadiusDraft, setHazeRadiusDraft] = useState(250);
   const [hazePickerOpen,setHazePickerOpen] = useState(false);
   const [aberrationAmt, setAberrationAmt] = useState(0.002);
+  // Optional display of labels while in cinematic mode
+  const [cinematicLabels, setCinematicLabels] = useState(false);
+  const cinematicLabelsRef = useRef(false);
+  useEffect(()=>{ cinematicLabelsRef.current = cinematicLabels; }, [cinematicLabels]);
 
   // State for P2P Routing
   const routingWorkerRef = useRef<Worker | null>(null);
@@ -453,8 +457,8 @@ function App() {
     // Set the highlighted system for camera animation and the main rendering effect
     setHighlightedSystem(system);
 
-    // Skip label creation while in cinematic mode (immersive)
-    if(cinematicModeRef.current){
+    // Skip label creation while in cinematic mode unless labels enabled
+    if(cinematicModeRef.current && !cinematicLabelsRef.current){
       return;
     }
 
@@ -1455,9 +1459,9 @@ function App() {
 
   useEffect(()=>{ if(!cinematicMode) return; const vis = showAurora; if(backgroundMeshRef.current) backgroundMeshRef.current.visible = vis; if(auroraMeshRef.current) auroraMeshRef.current.visible = vis; }, [showAurora, cinematicMode]);
 
-  // Suppress labels & hover ring during cinematic mode; restore after
+  // Suppress labels & hover ring during cinematic mode unless cinematicLabels enabled; restore after
   useEffect(()=>{
-    if(cinematicMode){
+    if(cinematicMode && !cinematicLabels){
       // Hide hover
       if(hoverPointRef.current) hoverPointRef.current.visible = false;
       if(hoverLabelObj.current){
@@ -1474,7 +1478,7 @@ function App() {
           if(sceneRef.current && selectedLabelObj.current.parent instanceof THREE.Object3D){ sceneRef.current.remove(selectedLabelObj.current.parent); }
         }
       }
-    } else {
+    } else if(!cinematicMode || (cinematicMode && cinematicLabels)) {
       // Recreate selection label if a system is highlighted and no label exists
       if(highlightedSystem && !selectedLabelObj.current){
         const newParent = new THREE.Object3D();
@@ -1486,9 +1490,12 @@ function App() {
         selectedLabelObj.current.position.set(0,0,0);
         newParent.add(selectedLabelObj.current);
         selectedLabelObj.current.visible = true;
+      } else if(highlightedSystem && selectedLabelObj.current){
+        // If we toggled labels on mid-session, ensure selected label is visible
+        selectedLabelObj.current.visible = true;
       }
     }
-  }, [cinematicMode, highlightedSystem, getTransformedPosition, createSystemLabelElement]);
+  }, [cinematicMode, cinematicLabels, highlightedSystem, getTransformedPosition, createSystemLabelElement]);
   useEffect(()=>{ if(!cinematicMode) return; if(auroraMatRef.current){ auroraMatRef.current.uniforms.uGlobalAlpha.value = auroraIntensity; } }, [auroraIntensity, cinematicMode]);
 
   // Update custom pass uniforms when sliders change
@@ -2079,7 +2086,7 @@ function App() {
     const renderer = rendererRef.current;
 
     if (hoverPoint && camera && renderer) {
-      if (hoveredSystem && !cinematicModeRef.current) {
+      if (hoveredSystem && !(cinematicModeRef.current && !cinematicLabelsRef.current)) {
         const pos = getTransformedPosition(hoveredSystem.position);
         hoverPoint.position.set(pos.x, pos.y, pos.z);
 
@@ -2099,7 +2106,7 @@ function App() {
         hoverPoint.visible = false;
       }
     }
-  }, [hoveredSystem, getTransformedPosition, pointsMaterial]);
+  }, [hoveredSystem, getTransformedPosition, pointsMaterial, cinematicLabels]);
 
   // Handle Pointer Events
   useEffect(() => {
@@ -2134,7 +2141,7 @@ function App() {
 
       // Only perform expensive raycast when no buttons are pressed (pure hover)
       // Suppress all hover work during cinematic mode for immersion
-      if(cinematicModeRef.current){
+  if(cinematicModeRef.current && !cinematicLabelsRef.current){
         // Clear any existing hover state once
         if(hoverPointRef.current) hoverPointRef.current.visible = false;
         if(hoverLabelObj.current){
@@ -2280,7 +2287,7 @@ function App() {
   currentRenderer.domElement.removeEventListener('pointerup', onPointerUp);
   currentRenderer.domElement.removeEventListener('pointerleave', onPointerLeave);
     };
-  }, [isLoaded, hoveredSystem, isDraggingRef, mouseDownPosRef, mouseDownTimeRef, createSystemLabelElement, selectSystem, isPlanetCountActive, showDistance, highlightedSystem, cinematicMode]);
+  }, [isLoaded, hoveredSystem, isDraggingRef, mouseDownPosRef, mouseDownTimeRef, createSystemLabelElement, selectSystem, isPlanetCountActive, showDistance, highlightedSystem, cinematicMode, cinematicLabels]);
 
   const handleSearch = (event: React.KeyboardEvent<HTMLInputElement>, systemNameFromSelection?: string) => {
     if (event.key === 'Enter' && mapData) {
@@ -2472,6 +2479,9 @@ function App() {
                   <button onClick={()=> setAutoCamPaused(p=> !p)} style={{ background:'#111', color:'#fff', border:'1px solid var(--accent)', borderRadius:4, fontSize:11, padding:'4px 8px', cursor:'pointer', marginLeft:12 }} title={autoCamPaused? 'Resume auto camera drift':'Pause auto camera drift'}>
                     {autoCamPaused? 'Resume' : 'Pause'}
                   </button>
+                  <label style={{ display:'flex', alignItems:'center', gap:4, fontSize:11, marginLeft:8 }} title="Show labels while in cinematic mode (hover + selection)">
+                    <input type="checkbox" checked={cinematicLabels} onChange={e=> setCinematicLabels(e.target.checked)} /> Labels
+                  </label>
                   {hazePickerOpen && (
                     <div style={{ position:'absolute', top:26, left:0, background:'#111', padding:'8px 10px', border:'1px solid #444', borderRadius:6, zIndex:50, display:'flex', flexDirection:'column', gap:8, boxShadow:'0 4px 12px rgba(0,0,0,0.5)' }}>
                       <div style={{ display:'grid', gridTemplateColumns:'repeat(6,18px)', gap:6 }}>
