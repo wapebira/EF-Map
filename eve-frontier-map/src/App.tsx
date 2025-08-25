@@ -982,7 +982,7 @@ function App() {
          // Bloom pulse
          if(bloomPassRef.current){ const base = bloomStrengthRef.current; bloomPassRef.current.strength = base * (1 + (bloomPulseEnabled? bloomPulseAmp:0)*Math.sin(performance.now()/1000*0.35)); }
          // Camera idle drift
-         if(cameraDriftEnabled && !autoCamPausedRef.current){ const idleTime = (Date.now() - lastInteractionRef.current)/1000; if(idleTime > 6 && cameraRef.current){ const t = performance.now()/1000; cameraRef.current.position.x += Math.sin(t*0.07)*0.3; cameraRef.current.position.y += Math.cos(t*0.05)*0.25; cameraRef.current.position.z += Math.sin(t*0.04)*0.15; } }
+         if(cameraDriftEnabled && !autoCamPausedRef.current && !(clusterAnimRef.current)){ const idleTime = (Date.now() - lastInteractionRef.current)/1000; if(idleTime > 6 && cameraRef.current){ const t = performance.now()/1000; cameraRef.current.position.x += Math.sin(t*0.07)*0.3; cameraRef.current.position.y += Math.cos(t*0.05)*0.25; cameraRef.current.position.z += Math.sin(t*0.04)*0.15; } }
          // Rotate dust layers
          if (dustPointsRef.current) dustPointsRef.current.rotation.y += 0.0004;
          if (secondDustEnabled && secondDustRef.current) secondDustRef.current.rotation.y -= 0.00025;
@@ -1019,7 +1019,21 @@ function App() {
                const t = Math.min(1, (nowMs - anim.start)/anim.travelDur);
                const et = t*t*(3-2*t);
                cameraRef.current.position.lerpVectors(anim.camStart, anim.camEnd, et);
-               controlsRef.current.target.lerp(anim.starPos, et);
+               // Smooth max turn rate: slerp current direction toward desired
+               const currentTarget = controlsRef.current.target.clone();
+               const desiredTarget = anim.starPos.clone();
+               const toDesired = desiredTarget.clone().sub(cameraRef.current.position);
+               const toCurrent = currentTarget.clone().sub(cameraRef.current.position);
+               const maxAngle = 0.8 * (Math.PI/180); // 0.8 deg per frame approx
+               const angle = toCurrent.angleTo(toDesired);
+               if(angle > maxAngle){
+                 const axis = new THREE.Vector3().crossVectors(toCurrent, toDesired).normalize();
+                 const q = new THREE.Quaternion().setFromAxisAngle(axis, maxAngle);
+                 toCurrent.applyQuaternion(q);
+                 controlsRef.current.target.copy(cameraRef.current.position.clone().add(toCurrent));
+               } else {
+                 controlsRef.current.target.lerp(desiredTarget, 0.15); // final ease in
+               }
                if(t>=1){
                  // Setup pan to center (origin)
                  anim.phase = 'panCenter';

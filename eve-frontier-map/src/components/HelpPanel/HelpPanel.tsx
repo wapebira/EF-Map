@@ -256,6 +256,22 @@ const sections: SectionDef[] = [
           </div>
         ),
       },
+      {
+        id: 'cinematic-auto-cluster-tour',
+        title: 'Auto Cluster Tour',
+        content: (
+          <div>
+            <p>When enabled, the camera periodically picks a random star and glides toward it, framing the star at a reasonable stand-off distance. After a brief hold the view smoothly pans back toward galactic center and idle drift resumes until the next hop. This creates a slow ambient “wandering” showcase without user input.</p>
+            <ul style={{ paddingLeft: '18px', margin: '6px 0' }}>
+              <li><strong>Timing:</strong> Travel (eased), short hold on the star, then pan to center; next hop scheduled after a cooldown.</li>
+              <li><strong>Drift Interaction:</strong> Idle drift pauses during travel / pan phases and resumes afterward.</li>
+              <li><strong>Smooth Turning:</strong> Target rotation toward the star is rate-limited for cinematic motion (no instant snaps).</li>
+              <li><strong>Disable Anytime:</strong> Uncheck the option to immediately abort the current sequence and return to standard drift.</li>
+            </ul>
+            <p>If labels are hidden you may only notice subtle parallax; enable labels (Cinematic “Labels” toggle) if you want extra confirmation of which star is being visited.</p>
+          </div>
+        ),
+      },
     ],
   },
 ];
