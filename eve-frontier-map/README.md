@@ -38,6 +38,7 @@ export default tseslint.config([
   },
 ])
 ```
+Deployment note: Trigger commit to test Netlify branch deploy (adds cinematic labels toggle verification) - ${new Date().toISOString().split('T')[0]}.
 
 You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
 

@@ -215,6 +215,10 @@ function App() {
   const [hazeRadiusDraft, setHazeRadiusDraft] = useState(250);
   const [hazePickerOpen,setHazePickerOpen] = useState(false);
   const [aberrationAmt, setAberrationAmt] = useState(0.002);
+  // Optional display of labels while in cinematic mode
+  const [cinematicLabels, setCinematicLabels] = useState(false); // Toggle to optionally show hover & selection labels during cinematic mode
+  const cinematicLabelsRef = useRef(false);
+  useEffect(()=>{ cinematicLabelsRef.current = cinematicLabels; }, [cinematicLabels]);
 
   // State for P2P Routing
   const routingWorkerRef = useRef<Worker | null>(null);
@@ -452,6 +456,11 @@ function App() {
   const selectSystem = useCallback((system: SolarSystem) => {
     // Set the highlighted system for camera animation and the main rendering effect
     setHighlightedSystem(system);
+
+    // Skip label creation while in cinematic mode unless labels enabled
+    if(cinematicModeRef.current && !cinematicLabelsRef.current){
+      return;
+    }
 
     // Clear previous persistent label
     if (selectedLabelObj.current && selectedLabelObj.current.parent) {
@@ -969,6 +978,10 @@ function App() {
          // Rotate dust layers
          if (dustPointsRef.current) dustPointsRef.current.rotation.y += 0.0004;
          if (secondDustEnabled && secondDustRef.current) secondDustRef.current.rotation.y -= 0.00025;
+         // Update dust twinkle shader time
+         const tSec = performance.now()/1000;
+         if(dustPointsRef.current){ const mat:any = dustPointsRef.current.material; if(mat.userData?.shader){ mat.userData.shader.uniforms.uTime.value = tSec; } }
+         if(secondDustRef.current){ const mat:any = secondDustRef.current.material; if(mat.userData?.shader){ mat.userData.shader.uniforms.uTime.value = tSec; } }
          // Meteors (shooting stars)
          const now = performance.now();
          if(shootingStarsEnabled && meteorsGroupRef.current){
@@ -1213,13 +1226,32 @@ function App() {
       const count=1000; const pos=new Float32Array(count*3); const col=new Float32Array(count*3);
   for(let i=0;i<count;i++){ const r=22000*Math.cbrt(Math.random()); const th=Math.random()*Math.PI*2; const ph=Math.acos(2*Math.random()-1); pos[i*3]=r*Math.sin(ph)*Math.cos(th); pos[i*3+1]=r*Math.sin(ph)*Math.sin(th); pos[i*3+2]=r*Math.cos(ph); const tint=new THREE.Color().setHSL(0.76+Math.random()*0.1,0.45,0.55+Math.random()*0.15); col[i*3]=tint.r; col[i*3+1]=tint.g; col[i*3+2]=tint.b; }
       const g=new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos,3)); g.setAttribute('color', new THREE.BufferAttribute(col,3));
-      const dMat=new THREE.PointsMaterial({ size:14, sizeAttenuation:true, transparent:true, opacity:0.28*dustAmount, depthWrite:false, vertexColors:true, blending:THREE.AdditiveBlending });
+      const dMat=new THREE.PointsMaterial({ size:14, sizeAttenuation:true, transparent:true, opacity:0.28*dustAmount, depthWrite:false, vertexColors:true, blending:THREE.AdditiveBlending, map: circleTexture, alphaTest:0.5 });
+      // Subtle twinkle shader for dust (lower amplitude than main stars)
+      dMat.onBeforeCompile = (shader)=>{
+        shader.uniforms.uTime={ value:0 };
+        shader.uniforms.uAmp={ value:0.15 }; // smaller than star twinkle
+        shader.fragmentShader = `uniform float uTime; uniform float uAmp;\n${shader.fragmentShader}`.replace(
+          'gl_FragColor = vec4( outgoingLight, diffuseColor.a );',
+          'float tw = sin(uTime*2.4 + gl_FragCoord.x*0.045 + gl_FragCoord.y*0.045);\nfloat f = 1.0 + tw*0.25*uAmp; vec3 col = outgoingLight * f; gl_FragColor = vec4(col, diffuseColor.a);'
+        );
+        (dMat as any).userData.shader = shader;
+      };
   dustPointsRef.current=new THREE.Points(g,dMat); sceneRef.current!.add(dustPointsRef.current);
       // Second dust layer (larger, sparser)
       const count2=400; const pos2=new Float32Array(count2*3); const col2=new Float32Array(count2*3);
   for(let i=0;i<count2;i++){ const r=30000*Math.cbrt(Math.random()); const th=Math.random()*Math.PI*2; const ph=Math.acos(2*Math.random()-1); pos2[i*3]=r*Math.sin(ph)*Math.cos(th); pos2[i*3+1]=r*Math.sin(ph)*Math.sin(th); pos2[i*3+2]=r*Math.cos(ph); const tint=new THREE.Color().setHSL(0.70+Math.random()*0.15,0.35,0.35+Math.random()*0.15); col2[i*3]=tint.r; col2[i*3+1]=tint.g; col2[i*3+2]=tint.b; }
       const g2=new THREE.BufferGeometry(); g2.setAttribute('position', new THREE.BufferAttribute(pos2,3)); g2.setAttribute('color', new THREE.BufferAttribute(col2,3));
-      const dMat2=new THREE.PointsMaterial({ size:24, sizeAttenuation:true, transparent:true, opacity:0.12*dustAmount, depthWrite:false, vertexColors:true, blending:THREE.AdditiveBlending });
+      const dMat2=new THREE.PointsMaterial({ size:24, sizeAttenuation:true, transparent:true, opacity:0.12*dustAmount, depthWrite:false, vertexColors:true, blending:THREE.AdditiveBlending, map: circleTexture, alphaTest:0.5 });
+      dMat2.onBeforeCompile = (shader)=>{
+        shader.uniforms.uTime={ value:0 };
+        shader.uniforms.uAmp={ value:0.12 }; // even softer
+        shader.fragmentShader = `uniform float uTime; uniform float uAmp;\n${shader.fragmentShader}`.replace(
+          'gl_FragColor = vec4( outgoingLight, diffuseColor.a );',
+          'float tw = sin(uTime*2.0 + gl_FragCoord.x*0.035 + gl_FragCoord.y*0.035);\nfloat f = 1.0 + tw*0.22*uAmp; vec3 col = outgoingLight * f; gl_FragColor = vec4(col, diffuseColor.a);'
+        );
+        (dMat2 as any).userData.shader = shader;
+      };
       secondDustRef.current=new THREE.Points(g2,dMat2); sceneRef.current!.add(secondDustRef.current);
       // Aurora veil (experimental) + faint gradient background to help visibility
       const auroraTintForMode = (mode:string)=>{ switch(mode){ case 'purple': return new THREE.Color(0x8b6dff); case 'white': return new THREE.Color(0xbccfff); case 'blue': return new THREE.Color(0x5d8fff); case 'red': return new THREE.Color(0xff6b4b); case 'yellow': return new THREE.Color(0xffdd66); case 'random': return new THREE.Color(0x6fbaff); default: return new THREE.Color(0x5d8fff);} };
@@ -1274,7 +1306,17 @@ function App() {
       const pGeom = new THREE.BufferGeometry();
       pGeom.setAttribute('position', new THREE.BufferAttribute(pPos,3));
       pGeom.setAttribute('color', new THREE.BufferAttribute(pCol,3));
-      const pMat = new THREE.PointsMaterial({ size:4.5, sizeAttenuation:true, transparent:true, opacity:0.35, depthWrite:false, vertexColors:true, blending:THREE.AdditiveBlending });
+      const pMat = new THREE.PointsMaterial({
+        size:4.5,
+        sizeAttenuation:true,
+        transparent:true,
+        opacity:0.35,
+        depthWrite:false,
+        vertexColors:true,
+        blending:THREE.AdditiveBlending,
+        map: circleTexture,
+        alphaTest: 0.5
+      });
       parallaxStarsRef.current = new THREE.Points(pGeom,pMat); sceneRef.current!.add(parallaxStarsRef.current);
       // Initialize schedules
       const nowT = performance.now();
@@ -1439,6 +1481,44 @@ function App() {
   useEffect(()=>{ if(!cinematicMode) return; if(rendererRef.current) (rendererRef.current as any).toneMappingExposure = cinExposure; if(dustPointsRef.current) (dustPointsRef.current.material as THREE.PointsMaterial).opacity = 0.28*dustAmount; if(secondDustRef.current) (secondDustRef.current.material as THREE.PointsMaterial).opacity = 0.12*dustAmount * (secondDustEnabled?1:0); if(backgroundMeshRef.current){ const mat = backgroundMeshRef.current.material as THREE.ShaderMaterial; if(mat.uniforms.uStrength){ const _n=Math.min(Math.max(bgIntensity/1.5,0),1); const mapped = _n < 0.025 ? 0 : 1.5 * Math.pow(_n, 2.8); mat.uniforms.uStrength.value = mapped; } } }, [dustAmount, cinExposure, bgIntensity, secondDustEnabled, cinematicMode]);
 
   useEffect(()=>{ if(!cinematicMode) return; const vis = showAurora; if(backgroundMeshRef.current) backgroundMeshRef.current.visible = vis; if(auroraMeshRef.current) auroraMeshRef.current.visible = vis; }, [showAurora, cinematicMode]);
+
+  // Suppress labels & hover ring during cinematic mode unless cinematicLabels enabled; restore after
+  useEffect(()=>{
+    if(cinematicMode && !cinematicLabels){
+      // Hide hover
+      if(hoverPointRef.current) hoverPointRef.current.visible = false;
+      if(hoverLabelObj.current){
+        hoverLabelObj.current.visible = false;
+        if(hoverLabelObj.current.parent){
+          hoverLabelObj.current.parent.remove(hoverLabelObj.current);
+          if(sceneRef.current && hoverLabelObj.current.parent instanceof THREE.Object3D){ sceneRef.current.remove(hoverLabelObj.current.parent); }
+        }
+      }
+      if(selectedLabelObj.current){
+        selectedLabelObj.current.visible = false;
+        if(selectedLabelObj.current.parent){
+          selectedLabelObj.current.parent.remove(selectedLabelObj.current);
+          if(sceneRef.current && selectedLabelObj.current.parent instanceof THREE.Object3D){ sceneRef.current.remove(selectedLabelObj.current.parent); }
+        }
+      }
+    } else if(!cinematicMode || (cinematicMode && cinematicLabels)) {
+      // Recreate selection label if a system is highlighted and no label exists
+      if(highlightedSystem && !selectedLabelObj.current){
+        const newParent = new THREE.Object3D();
+        const pos = getTransformedPosition(highlightedSystem.position);
+        newParent.position.set(pos.x,pos.y,pos.z);
+        sceneRef.current?.add(newParent);
+        const el = createSystemLabelElement(highlightedSystem.name, true, highlightedSystem.planets);
+        selectedLabelObj.current = new CSS2DObject(el);
+        selectedLabelObj.current.position.set(0,0,0);
+        newParent.add(selectedLabelObj.current);
+        selectedLabelObj.current.visible = true;
+      } else if(highlightedSystem && selectedLabelObj.current){
+        // If we toggled labels on mid-session, ensure selected label is visible
+        selectedLabelObj.current.visible = true;
+      }
+    }
+  }, [cinematicMode, cinematicLabels, highlightedSystem, getTransformedPosition, createSystemLabelElement]);
   useEffect(()=>{ if(!cinematicMode) return; if(auroraMatRef.current){ auroraMatRef.current.uniforms.uGlobalAlpha.value = auroraIntensity; } }, [auroraIntensity, cinematicMode]);
 
   // Update custom pass uniforms when sliders change
@@ -2029,7 +2109,7 @@ function App() {
     const renderer = rendererRef.current;
 
     if (hoverPoint && camera && renderer) {
-      if (hoveredSystem) {
+      if (hoveredSystem && !(cinematicModeRef.current && !cinematicLabelsRef.current)) {
         const pos = getTransformedPosition(hoveredSystem.position);
         hoverPoint.position.set(pos.x, pos.y, pos.z);
 
@@ -2045,11 +2125,11 @@ function App() {
         (hoverPoint.material as THREE.PointsMaterial).size = newRingSize;
 
         hoverPoint.visible = true;
-      } else {
+    } else {
         hoverPoint.visible = false;
       }
     }
-  }, [hoveredSystem, getTransformedPosition, pointsMaterial]);
+  }, [hoveredSystem, getTransformedPosition, pointsMaterial, cinematicLabels]);
 
   // Handle Pointer Events
   useEffect(() => {
@@ -2063,7 +2143,7 @@ function App() {
     const DRAG_THRESHOLD = 5; // pixels
     const CLICK_TIME_THRESHOLD = 200; // milliseconds
 
-    const onPointerMove = (event: PointerEvent) => {
+  const onPointerMove = (event: PointerEvent) => {
       // Mark that user has moved mouse; before this we won't show hover
       if(!firstMoveRef.current){ firstMoveRef.current = true; }
       mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
@@ -2083,7 +2163,22 @@ function App() {
       }
 
       // Only perform expensive raycast when no buttons are pressed (pure hover)
-  if (!isDraggingRef.current && !anyButtonDown && firstMoveRef.current) {
+      // Suppress all hover work during cinematic mode for immersion
+  if(cinematicModeRef.current && !cinematicLabelsRef.current){
+        // Clear any existing hover state once
+        if(hoverPointRef.current) hoverPointRef.current.visible = false;
+        if(hoverLabelObj.current){
+          hoverLabelObj.current.visible = false;
+          if(hoverLabelObj.current.parent){
+            hoverLabelObj.current.parent.remove(hoverLabelObj.current);
+            if(sceneRef.current && hoverLabelObj.current.parent instanceof THREE.Object3D){ sceneRef.current.remove(hoverLabelObj.current.parent); }
+          }
+        }
+        if(hoveredSystem) setHoveredSystem(null);
+        return;
+      }
+
+      if (!isDraggingRef.current && !anyButtonDown && firstMoveRef.current) {
         raycaster.setFromCamera(mouse, cameraRef.current);
   // Dynamic threshold based on camera distance (tighter range to avoid false positives)
   const distance = cameraRef.current.position.distanceTo(controlsRef.current.target);
@@ -2215,7 +2310,7 @@ function App() {
   currentRenderer.domElement.removeEventListener('pointerup', onPointerUp);
   currentRenderer.domElement.removeEventListener('pointerleave', onPointerLeave);
     };
-  }, [isLoaded, hoveredSystem, isDraggingRef, mouseDownPosRef, mouseDownTimeRef, createSystemLabelElement, selectSystem, isPlanetCountActive, showDistance, highlightedSystem, cinematicMode]);
+  }, [isLoaded, hoveredSystem, isDraggingRef, mouseDownPosRef, mouseDownTimeRef, createSystemLabelElement, selectSystem, isPlanetCountActive, showDistance, highlightedSystem, cinematicMode, cinematicLabels]);
 
   const handleSearch = (event: React.KeyboardEvent<HTMLInputElement>, systemNameFromSelection?: string) => {
     if (event.key === 'Enter' && mapData) {
@@ -2407,6 +2502,9 @@ function App() {
                   <button onClick={()=> setAutoCamPaused(p=> !p)} style={{ background:'#111', color:'#fff', border:'1px solid var(--accent)', borderRadius:4, fontSize:11, padding:'4px 8px', cursor:'pointer', marginLeft:12 }} title={autoCamPaused? 'Resume auto camera drift':'Pause auto camera drift'}>
                     {autoCamPaused? 'Resume' : 'Pause'}
                   </button>
+                  <label style={{ display:'flex', alignItems:'center', gap:4, fontSize:11, marginLeft:8 }} title="Show labels while in cinematic mode (hover + selection)">
+                    <input type="checkbox" checked={cinematicLabels} onChange={e=> setCinematicLabels(e.target.checked)} /> Labels
+                  </label>
                   {hazePickerOpen && (
                     <div style={{ position:'absolute', top:26, left:0, background:'#111', padding:'8px 10px', border:'1px solid #444', borderRadius:6, zIndex:50, display:'flex', flexDirection:'column', gap:8, boxShadow:'0 4px 12px rgba(0,0,0,0.5)' }}>
                       <div style={{ display:'grid', gridTemplateColumns:'repeat(6,18px)', gap:6 }}>
