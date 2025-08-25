@@ -1024,8 +1024,8 @@ function App() {
                const angle = toCurrent.angleTo(toDesired); // radians
                if(anim.initialAngle===undefined) anim.initialAngle = angle;
                const withinCone = angle <= Math.PI/2; // 90 deg
-               // Turn rate (slower) scaled by frame: base deg per frame ~0.35
-               const maxAngle = 0.35 * (Math.PI/180);
+               // Further slow turn rate by ~20% (was 0.35 deg/frame)
+               const maxAngle = 0.28 * (Math.PI/180);
                if(angle > 1e-3){
                  const step = Math.min(angle, maxAngle);
                  const axis = new THREE.Vector3().crossVectors(toCurrent, toDesired).normalize();
@@ -1035,17 +1035,20 @@ function App() {
                    controlsRef.current.target.copy(cameraRef.current.position.clone().add(toCurrent));
                  }
                }
+               // Start forward travel as soon as within cone; blend orientation progress & travel simultaneously
                if(withinCone && !anim.orientDone){
-                 anim.orientDone = true; anim.travelStart = nowMs; // mark start of forward movement
+                 anim.orientDone = true; anim.travelStart = nowMs; // mark travel start
                }
-               // Travel progress only after orientation complete
                let travelT = 0;
-               if(anim.orientDone && anim.travelStart){
+               if(anim.travelStart){
                  const raw = Math.min(1, (nowMs - anim.travelStart)/anim.travelDur);
-                 // Custom accelerate-decelerate curve (stronger mid speed): easeInOutCubic variant
-                 const accel = raw < 0.5 ? 4*raw*raw*raw : 1 - Math.pow(-2*raw + 2, 3)/2;
-                 travelT = accel;
+                 // Velocity profile: slow start -> accelerate -> slow end (quintic smoothstep for smoother).
+                 const v = raw*raw*raw*(raw*(6*raw - 15) + 10);
+                 travelT = v;
                  cameraRef.current.position.lerpVectors(anim.camStart, anim.camEnd, travelT);
+               } else if(withinCone){
+                 // Edge case: if travelStart not set due to race, set it now.
+                 anim.orientDone = true; anim.travelStart = nowMs;
                }
                // Once travel complete move to next phase
                if(travelT>=1){
