@@ -978,6 +978,10 @@ function App() {
          // Rotate dust layers
          if (dustPointsRef.current) dustPointsRef.current.rotation.y += 0.0004;
          if (secondDustEnabled && secondDustRef.current) secondDustRef.current.rotation.y -= 0.00025;
+         // Update dust twinkle shader time
+         const tSec = performance.now()/1000;
+         if(dustPointsRef.current){ const mat:any = dustPointsRef.current.material; if(mat.userData?.shader){ mat.userData.shader.uniforms.uTime.value = tSec; } }
+         if(secondDustRef.current){ const mat:any = secondDustRef.current.material; if(mat.userData?.shader){ mat.userData.shader.uniforms.uTime.value = tSec; } }
          // Meteors (shooting stars)
          const now = performance.now();
          if(shootingStarsEnabled && meteorsGroupRef.current){
@@ -1222,13 +1226,32 @@ function App() {
       const count=1000; const pos=new Float32Array(count*3); const col=new Float32Array(count*3);
   for(let i=0;i<count;i++){ const r=22000*Math.cbrt(Math.random()); const th=Math.random()*Math.PI*2; const ph=Math.acos(2*Math.random()-1); pos[i*3]=r*Math.sin(ph)*Math.cos(th); pos[i*3+1]=r*Math.sin(ph)*Math.sin(th); pos[i*3+2]=r*Math.cos(ph); const tint=new THREE.Color().setHSL(0.76+Math.random()*0.1,0.45,0.55+Math.random()*0.15); col[i*3]=tint.r; col[i*3+1]=tint.g; col[i*3+2]=tint.b; }
       const g=new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos,3)); g.setAttribute('color', new THREE.BufferAttribute(col,3));
-      const dMat=new THREE.PointsMaterial({ size:14, sizeAttenuation:true, transparent:true, opacity:0.28*dustAmount, depthWrite:false, vertexColors:true, blending:THREE.AdditiveBlending });
+      const dMat=new THREE.PointsMaterial({ size:14, sizeAttenuation:true, transparent:true, opacity:0.28*dustAmount, depthWrite:false, vertexColors:true, blending:THREE.AdditiveBlending, map: circleTexture, alphaTest:0.5 });
+      // Subtle twinkle shader for dust (lower amplitude than main stars)
+      dMat.onBeforeCompile = (shader)=>{
+        shader.uniforms.uTime={ value:0 };
+        shader.uniforms.uAmp={ value:0.15 }; // smaller than star twinkle
+        shader.fragmentShader = `uniform float uTime; uniform float uAmp;\n${shader.fragmentShader}`.replace(
+          'gl_FragColor = vec4( outgoingLight, diffuseColor.a );',
+          'float tw = sin(uTime*2.4 + gl_FragCoord.x*0.045 + gl_FragCoord.y*0.045);\nfloat f = 1.0 + tw*0.25*uAmp; vec3 col = outgoingLight * f; gl_FragColor = vec4(col, diffuseColor.a);'
+        );
+        (dMat as any).userData.shader = shader;
+      };
   dustPointsRef.current=new THREE.Points(g,dMat); sceneRef.current!.add(dustPointsRef.current);
       // Second dust layer (larger, sparser)
       const count2=400; const pos2=new Float32Array(count2*3); const col2=new Float32Array(count2*3);
   for(let i=0;i<count2;i++){ const r=30000*Math.cbrt(Math.random()); const th=Math.random()*Math.PI*2; const ph=Math.acos(2*Math.random()-1); pos2[i*3]=r*Math.sin(ph)*Math.cos(th); pos2[i*3+1]=r*Math.sin(ph)*Math.sin(th); pos2[i*3+2]=r*Math.cos(ph); const tint=new THREE.Color().setHSL(0.70+Math.random()*0.15,0.35,0.35+Math.random()*0.15); col2[i*3]=tint.r; col2[i*3+1]=tint.g; col2[i*3+2]=tint.b; }
       const g2=new THREE.BufferGeometry(); g2.setAttribute('position', new THREE.BufferAttribute(pos2,3)); g2.setAttribute('color', new THREE.BufferAttribute(col2,3));
-      const dMat2=new THREE.PointsMaterial({ size:24, sizeAttenuation:true, transparent:true, opacity:0.12*dustAmount, depthWrite:false, vertexColors:true, blending:THREE.AdditiveBlending });
+      const dMat2=new THREE.PointsMaterial({ size:24, sizeAttenuation:true, transparent:true, opacity:0.12*dustAmount, depthWrite:false, vertexColors:true, blending:THREE.AdditiveBlending, map: circleTexture, alphaTest:0.5 });
+      dMat2.onBeforeCompile = (shader)=>{
+        shader.uniforms.uTime={ value:0 };
+        shader.uniforms.uAmp={ value:0.12 }; // even softer
+        shader.fragmentShader = `uniform float uTime; uniform float uAmp;\n${shader.fragmentShader}`.replace(
+          'gl_FragColor = vec4( outgoingLight, diffuseColor.a );',
+          'float tw = sin(uTime*2.0 + gl_FragCoord.x*0.035 + gl_FragCoord.y*0.035);\nfloat f = 1.0 + tw*0.22*uAmp; vec3 col = outgoingLight * f; gl_FragColor = vec4(col, diffuseColor.a);'
+        );
+        (dMat2 as any).userData.shader = shader;
+      };
       secondDustRef.current=new THREE.Points(g2,dMat2); sceneRef.current!.add(secondDustRef.current);
       // Aurora veil (experimental) + faint gradient background to help visibility
       const auroraTintForMode = (mode:string)=>{ switch(mode){ case 'purple': return new THREE.Color(0x8b6dff); case 'white': return new THREE.Color(0xbccfff); case 'blue': return new THREE.Color(0x5d8fff); case 'red': return new THREE.Color(0xff6b4b); case 'yellow': return new THREE.Color(0xffdd66); case 'random': return new THREE.Color(0x6fbaff); default: return new THREE.Color(0x5d8fff);} };
