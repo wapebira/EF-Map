@@ -1016,41 +1016,49 @@ function App() {
            if(clusterAnimRef.current && clusterTargetRef.current && cameraRef.current && controlsRef.current){
              const anim = clusterAnimRef.current;
              if(anim.phase==='travelStar'){
-               // Orientation-first gating: only begin forward travel once target within 90 deg cone
+               // Continuous blended turn + forward motion. We begin moving immediately but scale forward progress
+               // by how aligned we are, so early motion is very slight and grows smoothly.
                const desiredTarget = anim.starPos.clone();
                const toDesired = desiredTarget.clone().sub(cameraRef.current.position);
                const currentTarget = controlsRef.current.target.clone();
                const toCurrent = currentTarget.clone().sub(cameraRef.current.position);
-               const angle = toCurrent.angleTo(toDesired); // radians
-               if(anim.initialAngle===undefined) anim.initialAngle = angle;
-               const withinCone = angle <= Math.PI/2; // 90 deg
-               // Further slow turn rate by ~20% (was 0.35 deg/frame)
-               const maxAngle = 0.28 * (Math.PI/180);
-               if(angle > 1e-3){
+               let angle = toCurrent.angleTo(toDesired); // radians (0 = aligned)
+               if(anim.initialAngle===undefined) anim.initialAngle = angle || 1e-6;
+               // Dynamic max turn: faster when large angle, slower when nearly aligned
+               const baseDeg = 0.3; // baseline deg per frame
+               const accelFactor = THREE.MathUtils.clamp(angle / Math.PI, 0, 1); // 1 when 180°, 0 when aligned
+               const maxAngle = (baseDeg + 0.25*accelFactor) * (Math.PI/180); // up to ~0.55° early, slows to 0.3°
+               if(angle > 1e-4){
                  const step = Math.min(angle, maxAngle);
                  const axis = new THREE.Vector3().crossVectors(toCurrent, toDesired).normalize();
                  if(axis.lengthSq()>0){
                    const q = new THREE.Quaternion().setFromAxisAngle(axis, step);
                    toCurrent.applyQuaternion(q);
                    controlsRef.current.target.copy(cameraRef.current.position.clone().add(toCurrent));
+                   // Recompute residual angle after partial turn for smoother progress metrics
+                   angle = toCurrent.angleTo(toDesired);
                  }
                }
-               // Start forward travel as soon as within cone; blend orientation progress & travel simultaneously
-               if(withinCone && !anim.orientDone){
-                 anim.orientDone = true; anim.travelStart = nowMs; // mark travel start
-               }
-               let travelT = 0;
-               if(anim.travelStart){
-                 const raw = Math.min(1, (nowMs - anim.travelStart)/anim.travelDur);
-                 // Velocity profile: slow start -> accelerate -> slow end (quintic smoothstep for smoother).
-                 const v = raw*raw*raw*(raw*(6*raw - 15) + 10);
-                 travelT = v;
-                 cameraRef.current.position.lerpVectors(anim.camStart, anim.camEnd, travelT);
-               } else if(withinCone){
-                 // Edge case: if travelStart not set due to race, set it now.
-                 anim.orientDone = true; anim.travelStart = nowMs;
-               }
-               // Once travel complete move to next phase
+               // Orientation progress (0..1)
+               const orientProgress = THREE.MathUtils.clamp(1 - (angle / anim.initialAngle), 0, 1);
+               // Time-based raw progress (continues even while turning) – we start counting from anim.start
+               const elapsed = nowMs - anim.start;
+               const rawTime = THREE.MathUtils.clamp(elapsed / anim.travelDur, 0, 1);
+               // Blend factor: allow only a small fraction of forward motion until orientationProgress grows.
+               // Use orientProgress^2 for smoother early suppression.
+               const orientFactor = orientProgress * orientProgress; // (quadratic)
+               // Velocity shaping: quintic smoothstep for time, then multiply by orientation factor
+               const timeEase = rawTime*rawTime*rawTime*(rawTime*(6*rawTime - 15) + 10);
+               const blended = timeEase * orientFactor;
+               // Apply a soft floor once within 90° cone so motion doesn't feel stalled.
+               // 90° cone check:
+               const withinCone = angle <= Math.PI/2;
+               const coneBoost = withinCone ? 0.08 : 0; // small nudge so travel visibly begins
+               let travelT = THREE.MathUtils.clamp(blended + coneBoost* (1 - orientFactor), 0, 1);
+               // Prevent overshoot due to boost
+               if(travelT > 1) travelT = 1;
+               cameraRef.current.position.lerpVectors(anim.camStart, anim.camEnd, travelT);
+               // Transition when complete
                if(travelT>=1){
                  // Setup pan to center (origin)
                  anim.phase = 'panCenter';
