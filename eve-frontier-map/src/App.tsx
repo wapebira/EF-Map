@@ -224,9 +224,11 @@ function App() {
   const autoClusterTourRef = useRef(false); useEffect(()=>{ autoClusterTourRef.current = autoClusterTour; }, [autoClusterTour]);
   const clusterTargetRef = useRef<THREE.Vector3|null>(null);
   const clusterStartRef = useRef<THREE.Vector3|null>(null);
+  const clusterApproachDirRef = useRef<THREE.Vector3|null>(null); // stable direction for travel positioning
   const clusterOrbitAxisRef = useRef<THREE.Vector3>(new THREE.Vector3(0,1,0));
   const clusterAnimRef = useRef<{phase:'travel'|'dwell'|'orbit'; start:number; travelDur:number; dwellDur:number; orbitStart:number; radius:number; }|null>(null);
   const nextClusterAtRef = useRef<number>(Date.now()+30000); // schedule first after 30s idle
+  const lastFrameTimeRef = useRef<number>(performance.now());
 
   // State for P2P Routing
   const routingWorkerRef = useRef<Worker | null>(null);
@@ -990,6 +992,8 @@ function App() {
          const tSec = performance.now()/1000;
          if(dustPointsRef.current){ const mat:any = dustPointsRef.current.material; if(mat.userData?.shader){ mat.userData.shader.uniforms.uTime.value = tSec; } }
          if(secondDustRef.current){ const mat:any = secondDustRef.current.material; if(mat.userData?.shader){ mat.userData.shader.uniforms.uTime.value = tSec; } }
+         const nowPerf = performance.now();
+         const deltaSec = (nowPerf - lastFrameTimeRef.current)/1000; lastFrameTimeRef.current = nowPerf;
          // Autonomous cluster tour logic (no user selection required)
          if(autoClusterTourRef.current && cinematicModeRef.current && mapData){
            const nowMs = Date.now();
@@ -1007,6 +1011,13 @@ function App() {
                const centroid = new THREE.Vector3(cx,cy,cz);
                clusterTargetRef.current = centroid;
                clusterStartRef.current = cameraRef.current?.position.clone() || new THREE.Vector3(0,0,0);
+               if(clusterStartRef.current){
+                 // Outward direction from centroid to current camera
+                 clusterApproachDirRef.current = clusterStartRef.current.clone().sub(centroid).normalize();
+                 if(clusterApproachDirRef.current.lengthSq() < 1e-6) clusterApproachDirRef.current.set(0,0,1);
+               } else {
+                 clusterApproachDirRef.current = new THREE.Vector3(0,0,1);
+               }
                // Determine radius based on cluster spread
                let spread=0; for(const s of sorted){ const dx=s.position.x-cx; const dy=s.position.y-cy; const dz=s.position.z-cz; const d=Math.sqrt(dx*dx+dy*dy+dz*dz); if(d>spread) spread=d; }
                const radius = Math.min(Math.max(spread*2.2, 1200), 16000);
@@ -1020,12 +1031,11 @@ function App() {
                const t = Math.min(1, (nowMs - anim.start)/anim.travelDur);
                // Smoothstep easing
                const et = t*t*(3-2*t);
-               // Target camera position offset backwards along current view
+               // Stable desired endpoint based on stored approach direction
                const targetPos = clusterTargetRef.current.clone();
-               const dir = new THREE.Vector3().subVectors(clusterTargetRef.current, controlsRef.current.target).normalize();
-               if(dir.lengthSq()<1e-6) dir.set(0,0,1);
-               const desired = targetPos.clone().add(dir.multiplyScalar(anim.radius));
-               if(clusterStartRef.current){ cameraRef.current.position.lerpVectors(clusterStartRef.current, desired, et); }
+               const outward = clusterApproachDirRef.current ? clusterApproachDirRef.current : new THREE.Vector3(0,0,1);
+               const desired = targetPos.clone().add(outward.clone().normalize().multiplyScalar(anim.radius));
+               if(clusterStartRef.current){ cameraRef.current.position.lerpVectors(clusterStartRef.current, desired, et); } else { cameraRef.current.position.lerp(desired, et); }
                controlsRef.current.target.lerp(clusterTargetRef.current, et);
                if(t>=1){ anim.phase='dwell'; anim.orbitStart = nowMs; }
              } else if(anim.phase==='dwell'){
@@ -1034,7 +1044,9 @@ function App() {
                const orbitT = (nowMs - anim.orbitStart)/1000; // seconds
                const axis = clusterOrbitAxisRef.current;
                const rel = cameraRef.current.position.clone().sub(clusterTargetRef.current);
-               rel.applyAxisAngle(axis, 0.0008* (performance.now()/16.0)); // continuous subtle rotation
+               // Apply small incremental rotation based on delta time
+               const ORBIT_SPEED = 0.02; // rad/sec
+               rel.applyAxisAngle(axis, ORBIT_SPEED * deltaSec);
                cameraRef.current.position.copy(clusterTargetRef.current.clone().add(rel));
                controlsRef.current.target.lerp(clusterTargetRef.current, 0.05);
                // After some time schedule next cluster
