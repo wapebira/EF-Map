@@ -219,6 +219,14 @@ function App() {
   const [cinematicLabels, setCinematicLabels] = useState(false); // Toggle to optionally show hover & selection labels during cinematic mode
   const cinematicLabelsRef = useRef(false);
   useEffect(()=>{ cinematicLabelsRef.current = cinematicLabels; }, [cinematicLabels]);
+  // Autonomous cluster tour (camera glides to random dense cluster centroids)
+  const [autoClusterTour, setAutoClusterTour] = useState(false);
+  const autoClusterTourRef = useRef(false); useEffect(()=>{ autoClusterTourRef.current = autoClusterTour; }, [autoClusterTour]);
+  const clusterTargetRef = useRef<THREE.Vector3|null>(null);
+  const clusterApproachDirRef = useRef<THREE.Vector3|null>(null); // approach direction when moving to star
+  const clusterAnimRef = useRef<{phase:'travelStar'|'panCenter'; start:number; travelDur:number; panDur:number; starPos:THREE.Vector3; camStart:THREE.Vector3; camEnd:THREE.Vector3; starTargetStart?:THREE.Vector3; panStart?:number; camPanStart?:THREE.Vector3; camPanEnd?:THREE.Vector3; orientDone?:boolean; travelStart?:number; initialAngle?:number; }|null>(null);
+  const nextClusterAtRef = useRef<number>(Date.now()+30000); // schedule first after 30s idle
+  const lastFrameTimeRef = useRef<number>(performance.now());
 
   // State for P2P Routing
   const routingWorkerRef = useRef<Worker | null>(null);
@@ -974,7 +982,7 @@ function App() {
          // Bloom pulse
          if(bloomPassRef.current){ const base = bloomStrengthRef.current; bloomPassRef.current.strength = base * (1 + (bloomPulseEnabled? bloomPulseAmp:0)*Math.sin(performance.now()/1000*0.35)); }
          // Camera idle drift
-         if(cameraDriftEnabled && !autoCamPausedRef.current){ const idleTime = (Date.now() - lastInteractionRef.current)/1000; if(idleTime > 6 && cameraRef.current){ const t = performance.now()/1000; cameraRef.current.position.x += Math.sin(t*0.07)*0.3; cameraRef.current.position.y += Math.cos(t*0.05)*0.25; cameraRef.current.position.z += Math.sin(t*0.04)*0.15; } }
+         if(cameraDriftEnabled && !autoCamPausedRef.current && !(clusterAnimRef.current)){ const idleTime = (Date.now() - lastInteractionRef.current)/1000; if(idleTime > 6 && cameraRef.current){ const t = performance.now()/1000; cameraRef.current.position.x += Math.sin(t*0.07)*0.3; cameraRef.current.position.y += Math.cos(t*0.05)*0.25; cameraRef.current.position.z += Math.sin(t*0.04)*0.15; } }
          // Rotate dust layers
          if (dustPointsRef.current) dustPointsRef.current.rotation.y += 0.0004;
          if (secondDustEnabled && secondDustRef.current) secondDustRef.current.rotation.y -= 0.00025;
@@ -982,6 +990,102 @@ function App() {
          const tSec = performance.now()/1000;
          if(dustPointsRef.current){ const mat:any = dustPointsRef.current.material; if(mat.userData?.shader){ mat.userData.shader.uniforms.uTime.value = tSec; } }
          if(secondDustRef.current){ const mat:any = secondDustRef.current.material; if(mat.userData?.shader){ mat.userData.shader.uniforms.uTime.value = tSec; } }
+         const nowPerf = performance.now();
+         lastFrameTimeRef.current = nowPerf;
+         // Autonomous cluster tour logic (no user selection required)
+         if(autoClusterTourRef.current && cinematicModeRef.current && mapData){
+           const nowMs = Date.now();
+           // Schedule next cluster centroid if none active or finished
+           if(!clusterAnimRef.current && nowMs > nextClusterAtRef.current){
+             // Pick a random star system
+             const systems = visibleSystemsRef.current.length? visibleSystemsRef.current : Object.values(mapData.solar_systems);
+             if(systems.length && cameraRef.current && controlsRef.current){
+               const star = systems[Math.floor(Math.random()*systems.length)];
+               const starPos = new THREE.Vector3(star.position.x, star.position.y, star.position.z);
+               clusterTargetRef.current = starPos;
+               const camStart = cameraRef.current.position.clone();
+               const approachDir = camStart.clone().sub(starPos).normalize();
+               if(approachDir.lengthSq() < 1e-6) approachDir.set(1,0,0);
+               clusterApproachDirRef.current = approachDir.clone();
+               const dist = camStart.distanceTo(starPos);
+               const desiredDist = Math.min(Math.max(dist*0.6, 2000), 14000);
+               const camEnd = starPos.clone().add(approachDir.multiplyScalar(desiredDist));
+               clusterAnimRef.current = { phase:'travelStar', start: nowMs, travelDur: 8000, panDur: 5000, starPos, camStart, camEnd, orientDone:false };
+             }
+           }
+           if(clusterAnimRef.current && clusterTargetRef.current && cameraRef.current && controlsRef.current){
+             const anim = clusterAnimRef.current;
+             if(anim.phase==='travelStar'){
+               // Continuous blended turn + forward motion. We begin moving immediately but scale forward progress
+               // by how aligned we are, so early motion is very slight and grows smoothly.
+               const desiredTarget = anim.starPos.clone();
+               const toDesired = desiredTarget.clone().sub(cameraRef.current.position);
+               const currentTarget = controlsRef.current.target.clone();
+               const toCurrent = currentTarget.clone().sub(cameraRef.current.position);
+               let angle = toCurrent.angleTo(toDesired); // radians (0 = aligned)
+               if(anim.initialAngle===undefined) anim.initialAngle = angle || 1e-6;
+               // Dynamic max turn: faster when large angle, slower when nearly aligned
+               const baseDeg = 0.3; // baseline deg per frame
+               const accelFactor = THREE.MathUtils.clamp(angle / Math.PI, 0, 1); // 1 when 180°, 0 when aligned
+               const maxAngle = (baseDeg + 0.25*accelFactor) * (Math.PI/180); // up to ~0.55° early, slows to 0.3°
+               if(angle > 1e-4){
+                 const step = Math.min(angle, maxAngle);
+                 const axis = new THREE.Vector3().crossVectors(toCurrent, toDesired).normalize();
+                 if(axis.lengthSq()>0){
+                   const q = new THREE.Quaternion().setFromAxisAngle(axis, step);
+                   toCurrent.applyQuaternion(q);
+                   controlsRef.current.target.copy(cameraRef.current.position.clone().add(toCurrent));
+                   // Recompute residual angle after partial turn for smoother progress metrics
+                   angle = toCurrent.angleTo(toDesired);
+                 }
+               }
+               // Orientation progress (0..1)
+               const orientProgress = THREE.MathUtils.clamp(1 - (angle / anim.initialAngle), 0, 1);
+               // Time-based raw progress (continues even while turning) – we start counting from anim.start
+               const elapsed = nowMs - anim.start;
+               const rawTime = THREE.MathUtils.clamp(elapsed / anim.travelDur, 0, 1);
+               // Blend factor: allow only a small fraction of forward motion until orientationProgress grows.
+               // Use orientProgress^2 for smoother early suppression.
+               const orientFactor = orientProgress * orientProgress; // (quadratic)
+               // Velocity shaping: quintic smoothstep for time, then multiply by orientation factor
+               const timeEase = rawTime*rawTime*rawTime*(rawTime*(6*rawTime - 15) + 10);
+               const blended = timeEase * orientFactor;
+               // Apply a soft floor once within 90° cone so motion doesn't feel stalled.
+               // 90° cone check:
+               const withinCone = angle <= Math.PI/2;
+               const coneBoost = withinCone ? 0.08 : 0; // small nudge so travel visibly begins
+               let travelT = THREE.MathUtils.clamp(blended + coneBoost* (1 - orientFactor), 0, 1);
+               // Prevent overshoot due to boost
+               if(travelT > 1) travelT = 1;
+               cameraRef.current.position.lerpVectors(anim.camStart, anim.camEnd, travelT);
+               // Transition when complete
+               if(travelT>=1){
+                 // Setup pan to center (origin)
+                 anim.phase = 'panCenter';
+                 anim.panStart = nowMs;
+                 anim.starTargetStart = anim.starPos.clone();
+                 anim.camPanStart = cameraRef.current.position.clone();
+                 const center = new THREE.Vector3(0,0,0);
+                 const shift = center.clone().sub(anim.starPos).multiplyScalar(0.3); // keep existing pan distance
+                 anim.camPanEnd = cameraRef.current.position.clone().add(shift);
+               }
+             } else if(anim.phase==='panCenter'){
+               const panElapsed = nowMs - (anim.panStart||nowMs);
+               const t = Math.min(1, panElapsed / anim.panDur);
+               // Slow the pan/align motion further by easing with higher-order smoothing
+               const et = t*t*t*(t*(6*t - 15) + 10); // quintic smoothstep for even gentler start/stop
+               const center = new THREE.Vector3(0,0,0);
+               if(anim.starTargetStart) controlsRef.current.target.lerpVectors(anim.starTargetStart, center, et);
+               if(anim.camPanStart && anim.camPanEnd) cameraRef.current.position.lerpVectors(anim.camPanStart, anim.camPanEnd, et);
+               if(t>=1){
+                 clusterAnimRef.current = null;
+                 nextClusterAtRef.current = Date.now() + 20000 + Math.random()*20000; // schedule next
+               }
+             }
+           }
+         } else if(!autoClusterTourRef.current){
+           clusterAnimRef.current = null; // reset if disabled
+         }
          // Meteors (shooting stars)
          const now = performance.now();
          if(shootingStarsEnabled && meteorsGroupRef.current){
@@ -2536,6 +2640,11 @@ function App() {
               <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
                 <label style={{ fontSize:12, fontWeight:600 }}>Aurora Intensity <span style={{ opacity:.65 }}>({auroraIntensity.toFixed(2)})</span></label>
                 <input type="range" min={0} max={1.0} step={0.01} value={auroraIntensity} onChange={e=> setAuroraIntensity(parseFloat(e.target.value))} />
+              </div>
+              <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+                <label style={{ fontSize:11, display:'flex', gap:6, alignItems:'center' }}>
+                  <input type="checkbox" checked={autoClusterTour} onChange={e=> setAutoClusterTour(e.target.checked)} /> Auto Cluster Tour
+                </label>
               </div>
             </div>
           )}
