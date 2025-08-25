@@ -224,7 +224,7 @@ function App() {
   const autoClusterTourRef = useRef(false); useEffect(()=>{ autoClusterTourRef.current = autoClusterTour; }, [autoClusterTour]);
   const clusterTargetRef = useRef<THREE.Vector3|null>(null);
   const clusterApproachDirRef = useRef<THREE.Vector3|null>(null); // approach direction when moving to star
-  const clusterAnimRef = useRef<{phase:'travelStar'|'panCenter'; start:number; travelDur:number; panDur:number; starPos:THREE.Vector3; camStart:THREE.Vector3; camEnd:THREE.Vector3; starTargetStart?:THREE.Vector3; panStart?:number; camPanStart?:THREE.Vector3; camPanEnd?:THREE.Vector3; }|null>(null);
+  const clusterAnimRef = useRef<{phase:'travelStar'|'panCenter'; start:number; travelDur:number; panDur:number; starPos:THREE.Vector3; camStart:THREE.Vector3; camEnd:THREE.Vector3; starTargetStart?:THREE.Vector3; panStart?:number; camPanStart?:THREE.Vector3; camPanEnd?:THREE.Vector3; orientDone?:boolean; travelStart?:number; initialAngle?:number; }|null>(null);
   const nextClusterAtRef = useRef<number>(Date.now()+30000); // schedule first after 30s idle
   const lastFrameTimeRef = useRef<number>(performance.now());
 
@@ -1010,44 +1010,59 @@ function App() {
                const dist = camStart.distanceTo(starPos);
                const desiredDist = Math.min(Math.max(dist*0.6, 2000), 14000);
                const camEnd = starPos.clone().add(approachDir.multiplyScalar(desiredDist));
-               clusterAnimRef.current = { phase:'travelStar', start: nowMs, travelDur: 8000, panDur: 5000, starPos, camStart, camEnd };
+               clusterAnimRef.current = { phase:'travelStar', start: nowMs, travelDur: 8000, panDur: 5000, starPos, camStart, camEnd, orientDone:false };
              }
            }
            if(clusterAnimRef.current && clusterTargetRef.current && cameraRef.current && controlsRef.current){
              const anim = clusterAnimRef.current;
              if(anim.phase==='travelStar'){
-               const t = Math.min(1, (nowMs - anim.start)/anim.travelDur);
-               const et = t*t*(3-2*t);
-               cameraRef.current.position.lerpVectors(anim.camStart, anim.camEnd, et);
-               // Smooth max turn rate: slerp current direction toward desired
-               const currentTarget = controlsRef.current.target.clone();
+               // Orientation-first gating: only begin forward travel once target within 90 deg cone
                const desiredTarget = anim.starPos.clone();
                const toDesired = desiredTarget.clone().sub(cameraRef.current.position);
+               const currentTarget = controlsRef.current.target.clone();
                const toCurrent = currentTarget.clone().sub(cameraRef.current.position);
-               const maxAngle = 0.8 * (Math.PI/180); // 0.8 deg per frame approx
-               const angle = toCurrent.angleTo(toDesired);
-               if(angle > maxAngle){
+               const angle = toCurrent.angleTo(toDesired); // radians
+               if(anim.initialAngle===undefined) anim.initialAngle = angle;
+               const withinCone = angle <= Math.PI/2; // 90 deg
+               // Turn rate (slower) scaled by frame: base deg per frame ~0.35
+               const maxAngle = 0.35 * (Math.PI/180);
+               if(angle > 1e-3){
+                 const step = Math.min(angle, maxAngle);
                  const axis = new THREE.Vector3().crossVectors(toCurrent, toDesired).normalize();
-                 const q = new THREE.Quaternion().setFromAxisAngle(axis, maxAngle);
-                 toCurrent.applyQuaternion(q);
-                 controlsRef.current.target.copy(cameraRef.current.position.clone().add(toCurrent));
-               } else {
-                 controlsRef.current.target.lerp(desiredTarget, 0.15); // final ease in
+                 if(axis.lengthSq()>0){
+                   const q = new THREE.Quaternion().setFromAxisAngle(axis, step);
+                   toCurrent.applyQuaternion(q);
+                   controlsRef.current.target.copy(cameraRef.current.position.clone().add(toCurrent));
+                 }
                }
-               if(t>=1){
+               if(withinCone && !anim.orientDone){
+                 anim.orientDone = true; anim.travelStart = nowMs; // mark start of forward movement
+               }
+               // Travel progress only after orientation complete
+               let travelT = 0;
+               if(anim.orientDone && anim.travelStart){
+                 const raw = Math.min(1, (nowMs - anim.travelStart)/anim.travelDur);
+                 // Custom accelerate-decelerate curve (stronger mid speed): easeInOutCubic variant
+                 const accel = raw < 0.5 ? 4*raw*raw*raw : 1 - Math.pow(-2*raw + 2, 3)/2;
+                 travelT = accel;
+                 cameraRef.current.position.lerpVectors(anim.camStart, anim.camEnd, travelT);
+               }
+               // Once travel complete move to next phase
+               if(travelT>=1){
                  // Setup pan to center (origin)
                  anim.phase = 'panCenter';
                  anim.panStart = nowMs;
                  anim.starTargetStart = anim.starPos.clone();
                  anim.camPanStart = cameraRef.current.position.clone();
                  const center = new THREE.Vector3(0,0,0);
-                 const shift = center.clone().sub(anim.starPos).multiplyScalar(0.3);
+                 const shift = center.clone().sub(anim.starPos).multiplyScalar(0.3); // keep existing pan distance
                  anim.camPanEnd = cameraRef.current.position.clone().add(shift);
                }
              } else if(anim.phase==='panCenter'){
                const panElapsed = nowMs - (anim.panStart||nowMs);
                const t = Math.min(1, panElapsed / anim.panDur);
-               const et = t*t*(3-2*t);
+               // Slow the pan/align motion further by easing with higher-order smoothing
+               const et = t*t*t*(t*(6*t - 15) + 10); // quintic smoothstep for even gentler start/stop
                const center = new THREE.Vector3(0,0,0);
                if(anim.starTargetStart) controlsRef.current.target.lerpVectors(anim.starTargetStart, center, et);
                if(anim.camPanStart && anim.camPanEnd) cameraRef.current.position.lerpVectors(anim.camPanStart, anim.camPanEnd, et);
