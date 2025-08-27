@@ -67,6 +67,35 @@ body {
   cursor: default;
 }
 
+/* Support button wrapper sits to the LEFT of the persistent logo (logo: 96px wide + 20px gap) */
+.ef-support-btn-wrapper { position:fixed; right: calc(12px + 96px + 20px); bottom:12px; z-index:3200; display:flex; align-items:flex-end; }
+.ef-support-btn {
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+  align-items:center;
+  padding:8px 10px 10px;
+  background:var(--accent);
+  border:none;
+  border-radius:4px;
+  font-family: system-ui, sans-serif;
+  font-weight:600;
+  letter-spacing:.5px;
+  font-size:14px;
+  line-height:1.15;
+  cursor:pointer;
+  color:#fff;
+  min-width:122px;
+  box-shadow:0 2px 6px rgba(0,0,0,0.45);
+  position:relative;
+  overflow:hidden;
+}
+.ef-support-btn .line1 { font-size:14px; font-weight:600; }
+.ef-support-btn .line2 { font-size:14px; font-weight:600; }
+.ef-support-btn:hover { filter:brightness(1.08); }
+.ef-support-btn:active { transform:translateY(1px); }
+
+
 /* Top-right overlay toolbar housing Share + Referral + Help */
 /* Toolbar: help toggle fixed separately; shifting group sits under it */
 .ef-top-toolbar {

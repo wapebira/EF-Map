@@ -157,6 +157,25 @@ function App() {
   const [maxPlanets, setMaxPlanets] = useState(0);
   // Cinematic mode + locked parameters (UI removed)
   const [cinematicMode, setCinematicMode] = useState(false);
+  // External trigger for expanding Support section in Help
+  const [supportExpandRequestId, setSupportExpandRequestId] = useState(0);
+  // Static support content (user supplied exact text)
+  const supportContent = (
+    <div className="support-project-content" style={{ display:'flex', flexDirection:'column', gap:'14px', fontSize:'14px', lineHeight:1.45 }}>
+      <p style={{ margin:0 }}>Thanks for even opening this section - seriously.</p>
+      <p style={{ margin:0 }}>The app is free to use, and my time on it is free too. I build this because I enjoy it.</p>
+      <p style={{ margin:0 }}>That said, there are ongoing costs to keep things online and improving. I’ll always be transparent about them:</p>
+      <div style={{ display:'flex', flexDirection:'column', gap:'6px', padding:'6px 10px', background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:6 }}>
+        <div>Hosting: £19/month (may rise with traffic)</div>
+        <div>Development tools: £40/month (GitHub Copilot)</div>
+      </div>
+      <p style={{ margin:0 }}>There’s no obligation to contribute. If you’d like to chip in, that support is very, very, very much appreciated—and it helps me cover the basics while keeping the app free for everyone.</p>
+      <p style={{ margin:0 }}>
+        <a href="https://donate.stripe.com/8x200j3krbO9aVtdLS4gg00" target="_blank" rel="noopener noreferrer" style={{ display:'inline-block', background:'var(--accent)', color:'#fff', padding:'10px 18px', borderRadius:6, fontWeight:700, textDecoration:'none', boxShadow:'0 2px 6px rgba(0,0,0,0.45)', letterSpacing:'.5px' }}>Donate via Stripe</a>
+      </p>
+      <p style={{ margin:0, fontSize:'12px', opacity:.65 }}>Opens secure Stripe payment page in a new tab.</p>
+    </div>
+  );
   // Bloom strength (committed) and draft for deferred apply (performance)
   const [bloomStrength, setBloomStrength] = useState(0.6); // committed default
   const [bloomStrengthDraft, setBloomStrengthDraft] = useState(0.6); // draft default
@@ -2492,7 +2511,7 @@ function App() {
       <ReferralBadge />
   </div>
   {/* Help button should remain to the right of referral always */}
-  <HelpPanel accentIsBlue={accentIsBlue} />
+  <HelpPanel accentIsBlue={accentIsBlue} supportExpandRequestId={supportExpandRequestId} supportContent={supportContent} />
     </div>
   </div>
   <div style={hideUI?{display:'none'}:{ position: 'absolute', top: 10, left: 10, zIndex: 1, color: 'white', backgroundColor: 'rgba(0,0,0,0.5)', padding: '10px', borderRadius: '5px', ...scaleStyle }}>
@@ -2722,6 +2741,18 @@ function App() {
       </div>
     <div ref={mountRef} style={{ width: '100vw', height: '100vh' }} />
   {/* Small persistent logo and referral code */}
+  {/* Support button (hides with UI) positioned left of persistent logo */}
+  <div className="ef-support-btn-wrapper" style={hideUI?{display:'none'}:{ transform:`scale(${uiScale})`, transformOrigin:'bottom right' }}>
+    <button
+      className="ef-support-btn"
+      onClick={()=> setSupportExpandRequestId(id=> id+1)}
+      aria-label="Support this project (opens Help panel to Support section)"
+    >
+      <span className="line1">Support</span>
+      <span className="line2">this project</span>
+    </button>
+  </div>
+  {/* Persistent logo (always visible even when UI hidden) */}
   <img src={logo} alt="EF Map" className="ef-small-logo" />
     </>
   );
