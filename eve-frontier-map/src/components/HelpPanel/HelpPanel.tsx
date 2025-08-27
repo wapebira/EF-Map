@@ -1,8 +1,10 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import './HelpPanel.css';
 
 interface HelpPanelProps {
   accentIsBlue: boolean; // for potential future logic; CSS variable handles colors now
+  supportExpandRequestId?: number; // increments when external support button clicked
+  supportContent?: React.ReactNode; // injected content for support section (user supplied)
 }
 
 interface SectionDef {
@@ -12,7 +14,8 @@ interface SectionDef {
   subsections?: { id: string; title: string; content: React.ReactNode }[];
 }
 
-const sections: SectionDef[] = [
+// Base help sections (support section appended dynamically so it can always remain last)
+const baseSections: SectionDef[] = [
   {
     id: 'overview',
     title: 'Overview',
@@ -276,9 +279,10 @@ const sections: SectionDef[] = [
   },
 ];
 
-const HelpPanel: React.FC<HelpPanelProps> = ({ accentIsBlue }) => {
+const HelpPanel: React.FC<HelpPanelProps> = ({ accentIsBlue, supportExpandRequestId = 0, supportContent }) => {
   const [open, setOpen] = useState(false);
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({ overview: true });
+  // Start with all sections collapsed by default (no auto-open Overview)
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [expandedSub, setExpandedSub] = useState<Record<string, boolean>>({});
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -387,6 +391,42 @@ const HelpPanel: React.FC<HelpPanelProps> = ({ accentIsBlue }) => {
     window.addEventListener('resize', setWidth);
     return ()=> window.removeEventListener('resize', setWidth);
   }, [open]);
+
+  // Derive final sections list with Support section appended last (always)
+  const sections: SectionDef[] = useMemo(()=> {
+    return [
+      ...baseSections,
+      {
+        id: 'support-project',
+        title: 'Support This Project',
+        body: (
+          <div>
+            {supportContent || (
+              <div style={{ opacity:.75 }}>
+                <p><em>Support content pending.</em> This placeholder will be replaced with project support details once provided.</p>
+              </div>
+            )}
+          </div>
+        )
+      }
+    ];
+  }, [supportContent]);
+
+  // When the external Support button is clicked, force open panel + expand support section
+  useEffect(()=>{
+    if(!supportExpandRequestId) return; // ignore initial 0
+    setOpen(prevOpen => {
+      if(prevOpen){
+        // Close panel on second click
+        return false;
+      } else {
+        // Open & expand support section
+        setExpanded(prev => ({ ...prev, 'support-project': true }));
+        setTimeout(()=>{ scrollIntoViewSmooth(sectionHeaderRefs.current['support-project']); }, 60);
+        return true;
+      }
+    });
+  }, [supportExpandRequestId]);
 
   return (
     <>
