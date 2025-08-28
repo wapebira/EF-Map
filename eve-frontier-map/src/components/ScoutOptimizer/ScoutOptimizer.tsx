@@ -71,6 +71,8 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	// Note export (paged like P2P)
 	const [notePages, setNotePages] = useState<string[]>([]);
 	const [activeNotePage, setActiveNotePage] = useState(0);
+	const [includeLegend, setIncludeLegend] = useState(true);
+	const [includeStats, setIncludeStats] = useState(false);
 	const workersRef = useRef<Worker[]>([]);
 	const workerStatusRef = useRef<{ state:'idle'|'baseline'|'running'|'restarting'|'done'; lastImprovement:number }[]>([]);
 	const lastGlobalImprovementRef = useRef<number>(0);
@@ -566,31 +568,27 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 
 	// --- Scout Note Formatting (mirrors P2P with loop-back segmentation) ---
 	const MAX_NOTE_LENGTH = 1500;
-	const formatRouteToNotes = useCallback((path: string[], data: MapData): string[] => {
+	const formatRouteToNotes = useCallback((path: string[], data: MapData, opts?: { includeLegend?: boolean; includeStats?: boolean; stats?: { gateJumps:number; shipJumps:number; totalDist:number; shipDist:number } }): string[] => {
 		if(path.length < 2) return [];
 		const systemsByName: Map<string, SolarSystem> = new Map(Object.values(data.solar_systems).map(s => [s.name.toLowerCase(), s]));
 		const pathSystems = path.map(n => systemsByName.get(n.toLowerCase())).filter(Boolean) as SolarSystem[];
 		if(pathSystems.length < 2) return [];
-
 		// Precompute gate adjacency lookup for faster gate checks
 		const gates = Object.values(data.stargates);
 		const gatePairs = new Set<string>();
 		for(const g of gates){ gatePairs.add(g.source_system_id+":"+g.destination_system_id); gatePairs.add(g.destination_system_id+":"+g.source_system_id); }
 		const isGate = (a:SolarSystem,b:SolarSystem)=> gatePairs.has(a.id+":"+b.id);
-
 		const gateSystemIds = new Set<number>(); gates.forEach(g=>{ gateSystemIds.add(g.source_system_id); gateSystemIds.add(g.destination_system_id); });
 		const getSystemLink = (system: SolarSystem): string => {
 			const hasGates = gateSystemIds.has(system.id);
 			const isHighlighted = system.planets === 1 && !hasGates;
 			return `<a href="showinfo:5//${system.id}">${system.name}${isHighlighted ? '*' : ''}</a>`;
 		};
-
 		// Build condensed segments with backtracking / loop splitting.
 		type Segment = { type:'GATE'; count:number; from:SolarSystem; to:SolarSystem } | { type:'JUMP'; distance:number; from:SolarSystem; to:SolarSystem };
 		const segments: Segment[] = [];
 		let segStartIdx = 0; // start index in pathSystems for current gate run
 		let inGateRun = isGate(pathSystems[0], pathSystems[1]);
-		// Track seen system ids in current run to split when a prior system is revisited (loop) or immediate reversal occurs
 		let seenInRun = new Map<number, number>();
 		if(inGateRun){ seenInRun.set(pathSystems[0].id, 0); }
 		for(let i=0;i<pathSystems.length-1;i++){
@@ -598,7 +596,6 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 			const b = pathSystems[i+1];
 			const gate = isGate(a,b);
 			if(!gate){
-				// finalize any gate run up to i
 				if(inGateRun){
 					const from = pathSystems[segStartIdx];
 					const to = pathSystems[i];
@@ -606,55 +603,44 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 					if(count>0) segments.push({ type:'GATE', count, from, to });
 				}
 				inGateRun=false; seenInRun.clear();
-				// ship jump as own segment
 				const distance = Math.sqrt(
 					Math.pow(a.position.x - b.position.x,2)+
 					Math.pow(a.position.y - b.position.y,2)+
 					Math.pow(a.position.z - b.position.z,2)
 				);
 				segments.push({ type:'JUMP', distance, from:a, to:b });
-				// next iteration will handle new gate run if any
 				continue;
 			}
-			// gate edge
 			if(!inGateRun){
 				inGateRun=true; segStartIdx=i; seenInRun.clear(); seenInRun.set(a.id, i);
 			}
-			// Detect immediate reversal (a == path[i-1] && b == path[i-1]) => Actually reversal when b.id === pathSystems[i-1]?.id
 			if(i>0 && b.id === pathSystems[i-1].id){
-				// Close previous forward leg: segStartIdx -> a
 				if(i - segStartIdx > 0){
 					segments.push({ type:'GATE', count: i - segStartIdx, from: pathSystems[segStartIdx], to: a });
 				}
-				// Start new run at a (pivot) for back leg
 				segStartIdx = i; seenInRun.clear(); seenInRun.set(a.id, i);
 				continue;
 			}
-			// Detect loop: visiting a system already seen earlier in current run (not current start)
 			if(seenInRun.has(b.id)){
-				// Close run up to a
 				if(i - segStartIdx > 0){
 					segments.push({ type:'GATE', count: i - segStartIdx, from: pathSystems[segStartIdx], to: a });
 				}
-				// Start new run at a
 				segStartIdx = i; seenInRun.clear(); seenInRun.set(a.id, i);
 				continue;
 			}
 			seenInRun.set(b.id, i+1);
-			// end handled after loop
 		}
-		// finalize tail gate run
 		if(inGateRun){
 			const lastIdx = pathSystems.length-1;
 			if(lastIdx - segStartIdx > 0){
 				segments.push({ type:'GATE', count: lastIdx - segStartIdx, from: pathSystems[segStartIdx], to: pathSystems[lastIdx] });
 			}
 		}
-
 		const from = pathSystems[0];
 		const to = pathSystems[pathSystems.length-1];
 		const legend = `Gate: (x)→ SmartGate: []→ Jump: ly→ | * = 1 Planet, No Gates\n`;
-
+		const legendBlock = opts?.includeLegend!==false ? legend : '';
+		const statsBlock = (opts?.includeStats && opts.stats) ? `Stats: Gates ${opts.stats.gateJumps} | Ship ${opts.stats.shipJumps} | Dist ${opts.stats.totalDist.toFixed(2)} LY | ShipDist ${opts.stats.shipDist.toFixed(2)} LY\n` : '';
 		const pages: string[] = [];
 		let pageNum = 1;
 		let currentBody = getSystemLink(from);
@@ -663,17 +649,17 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 			const nextLink = getSystemLink(seg.to);
 			const nextPiece = separator + nextLink;
 			const headerBase = `${from.name} → ${to.name}`;
-			const pageHeader = `${headerBase} (Page ${pageNum})\n` + legend;
+			const pageHeader = `${headerBase} (Page ${pageNum})\n` + (pages.length===0 ? statsBlock : '') + legendBlock;
 			if(pageHeader.length + currentBody.length + nextPiece.length > MAX_NOTE_LENGTH){
-				const finalHeader = `${headerBase}${pages.length>0?` (Page ${pageNum})`:''}\n` + legend;
+				const finalHeader = `${headerBase}${pages.length>0?` (Page ${pageNum})`:''}\n` + (pages.length===0 ? statsBlock : '') + legendBlock;
 				pages.push(finalHeader + currentBody);
 				pageNum++;
-				currentBody = getSystemLink(seg.from) + nextPiece; // restart with segment start
+				currentBody = getSystemLink(seg.from) + nextPiece;
 			}else{
 				currentBody += nextPiece;
 			}
 		}
-		const finalHeader = `${from.name} → ${to.name}${pages.length>0?` (Page ${pageNum})`:''}\n` + legend;
+		const finalHeader = `${from.name} → ${to.name}${pages.length>0?` (Page ${pageNum})`:''}\n` + (pages.length===0 ? statsBlock : '') + legendBlock;
 		pages.push(finalHeader + currentBody);
 		if(pages.length===1){ pages[0]=pages[0].replace(' (Page 1)',''); }
 		return pages;
@@ -681,34 +667,32 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 
 	useEffect(()=>{
 		if(championDisplayPath && mapData){
-			setNotePages(formatRouteToNotes(championDisplayPath, mapData));
+			setNotePages(formatRouteToNotes(championDisplayPath, mapData, { includeLegend, includeStats, stats: championShipJumps!==null && championShipDistance!==null && championDistance!==null ? { gateJumps: (championDisplayPath.length-1) - championShipJumps, shipJumps: championShipJumps, totalDist: championDistance, shipDist: championShipDistance } : undefined }));
 			setActiveNotePage(0);
 		}else{
 			setNotePages([]);
 		}
-	},[championDisplayPath, mapData, formatRouteToNotes]);
+	},[championDisplayPath, mapData, formatRouteToNotes, includeLegend, includeStats, championShipJumps, championShipDistance, championDistance]);
 
 	// When a route is imported (share link), seed internal state so note pages & copy buttons appear
 	useEffect(()=>{
 		if(importedRoutePath && importedRoutePath.length>1 && mapData){
-			// If no champion yet, treat imported path as champion display path
 			if(!championDisplayPathRef.current){
 				setChampionDisplayPath(importedRoutePath);
 				championDisplayPathRef.current = importedRoutePath;
-				// Use imported route also as macro path (approx) so ship metrics / future optimization possible
 				setChampionPath(importedRoutePath);
 				championPathRef.current = importedRoutePath;
 				const distVal = computeRouteDistance(importedRoutePath);
 				setChampionDistance(distVal);
-				baselineDistanceRef.current = distVal; // treat as baseline for improvement calc if user optimizes further
+				baselineDistanceRef.current = distVal;
 				const shipMetrics = computeShipMetrics(importedRoutePath);
 				setChampionShipJumps(shipMetrics.shipJumps);
 				setChampionShipDistance(shipMetrics.shipDistance);
-				setNotePages(formatRouteToNotes(importedRoutePath, mapData));
+				setNotePages(formatRouteToNotes(importedRoutePath, mapData, { includeLegend, includeStats, stats: { gateJumps: (importedRoutePath.length-1) - shipMetrics.shipJumps, shipJumps: shipMetrics.shipJumps, totalDist: distVal, shipDist: shipMetrics.shipDistance } }));
 				setActiveNotePage(0);
 			}
 		}
-	},[importedRoutePath, mapData, computeRouteDistance, computeShipMetrics, formatRouteToNotes]);
+	},[importedRoutePath, mapData, computeRouteDistance, computeShipMetrics, formatRouteToNotes, includeLegend, includeStats]);
 
 	const handleCopyPage = (idx:number) => {
 		if(!notePages[idx]) return;
@@ -811,6 +795,10 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 					{notePages.length>0 && (
 						<div className="p2p-results">
 							<h4>Route Note{notePages.length>1?` (Page ${activeNotePage+1}/${notePages.length})`:''}</h4>
+							<div style={{ display:'flex', flexDirection:'column', gap:4, marginBottom:6, fontSize:'0.7rem' }}>
+								<label style={{ display:'flex', alignItems:'center', gap:4 }}><input type="checkbox" checked={includeLegend} onChange={e=> setIncludeLegend(e.target.checked)} /> Include Legend</label>
+								<label style={{ display:'flex', alignItems:'center', gap:4 }}><input type="checkbox" checked={includeStats} onChange={e=> setIncludeStats(e.target.checked)} /> Include Route Statistics (first page)</label>
+							</div>
 							<div className="scout-grid-buttons">
 								{notePages.map((_,idx)=>(
 									<button key={idx} onClick={()=>{ setActiveNotePage(idx); handleCopyPage(idx); }} className={`p2p-copy-button ${activeNotePage===idx?'active':''}`}>
