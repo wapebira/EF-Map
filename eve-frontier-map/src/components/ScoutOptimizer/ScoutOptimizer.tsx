@@ -56,6 +56,8 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	// Ship jump metrics for current champion (lexicographic primary criteria)
 	const [championShipJumps, setChampionShipJumps] = useState<number|null>(null);
 	const [championShipDistance, setChampionShipDistance] = useState<number|null>(null);
+	// Gate jump count (edges that are gates only)
+	const [championGateJumps, setChampionGateJumps] = useState<number|null>(null);
 	// Track baseline distance separately for improvement % display
 	const baselineDistanceRef = useRef<number|null>(null);
 	const [datasetChanged, setDatasetChanged] = useState(false);
@@ -674,6 +676,28 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		}
 	},[championDisplayPath, mapData, formatRouteToNotes, includeLegend, includeStats, championShipJumps, championShipDistance, championDistance]);
 
+	// Compute gate jump count for display metrics
+	useEffect(()=>{
+		if(championDisplayPath && championDisplayPath.length>1){
+			let gates=0;
+			for(let i=0;i<championDisplayPath.length-1;i++){
+				const aName = championDisplayPath[i];
+				const bName = championDisplayPath[i+1];
+				// Use gatesBySource (names need conversion to ids) - build name to id map once
+				// systemCacheByName.current holds SolarSystem by exact name
+				const a = systemCacheByName.current[aName];
+				const b = systemCacheByName.current[bName];
+				if(a && b){
+					const neighbors = gatesBySource[a.id] || [];
+					if(neighbors.includes(b.id)) gates++;
+				}
+			}
+			setChampionGateJumps(gates);
+		}else{
+			setChampionGateJumps(null);
+		}
+	},[championDisplayPath, gatesBySource]);
+
 	// When a route is imported (share link), seed internal state so note pages & copy buttons appear
 	useEffect(()=>{
 		if(importedRoutePath && importedRoutePath.length>1 && mapData){
@@ -812,13 +836,13 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 						<div className="scout-metrics">
 							<div><strong>Baseline Distance:</strong> {baselineDistanceRef.current?.toFixed(2)} LY</div>
 							<div><strong>Current Champion:</strong> {championDistance?.toFixed(2)} LY {baselineDistanceRef.current && championDistance!==null && championDistance < baselineDistanceRef.current ? `(-${improvementPct.toFixed(2)}%)` : ''}</div>
-							<div><strong>Systems:</strong> {championPath.length}{returnToStart ? ' (includes return)' : ''}</div>
-							{championShipJumps!==null && championShipDistance!==null && (
-								<div><strong>Ship Jumps:</strong> {championShipJumps} ({championShipDistance.toFixed(2)} LY)</div>
-							)}
-							{championDisplayPath && championDisplayPath.length !== championPath.length && (
-								<div><strong>Gate Hops (expanded):</strong> {championDisplayPath.length}</div>
-							)}
+									<div><strong>Total Hops:</strong> {championDisplayPath ? (championDisplayPath.length - 1) : (championPath.length - 1)}{returnToStart ? ' (includes return)' : ''}</div>
+									{championGateJumps!==null && (
+										<div><strong>Gate Jumps:</strong> {championGateJumps}</div>
+									)}
+									{championShipJumps!==null && championShipDistance!==null && (
+										<div><strong>Ship Jumps:</strong> {championShipJumps} ({championShipDistance.toFixed(2)} LY)</div>
+									)}
 							{isCalculating && workerStatusRef.current.length>0 && (
 								<div style={{marginTop:'6px', width:'100%'}}>
 									<strong>Workers:</strong>
