@@ -819,7 +819,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 					{notePages.length>0 && (
 						<div className="p2p-results">
 							<h4>Route Note{notePages.length>1?` (Page ${activeNotePage+1}/${notePages.length})`:''}</h4>
-							<div style={{ display:'flex', flexDirection:'column', gap:4, marginBottom:6, fontSize:'0.7rem' }}>
+							<div style={{ display:'flex', flexDirection:'column', gap:4, marginBottom:6, fontSize:'0.75rem' }}>
 								<label style={{ display:'flex', alignItems:'center', gap:4 }}><input type="checkbox" checked={includeLegend} onChange={e=> setIncludeLegend(e.target.checked)} /> Include Legend</label>
 								<label style={{ display:'flex', alignItems:'center', gap:4 }}><input type="checkbox" checked={includeStats} onChange={e=> setIncludeStats(e.target.checked)} /> Include Route Statistics (first page)</label>
 							</div>
