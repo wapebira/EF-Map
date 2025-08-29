@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
+import QRCode from 'qrcode';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
@@ -167,28 +168,28 @@ function App() {
   const [supportExpandRequestId, setSupportExpandRequestId] = useState(0);
   const [cryptoModalOpen, setCryptoModalOpen] = useState(false);
   const cryptoAddresses = [
-    { id: 'eth', label: 'ETH (Ethereum mainnet)', address: '0xC1204805b018ec2Ad06e6119965134AfFa212C10', qr: '' },
-    { id: 'usdc', label: 'USDC (Ethereum mainnet)', address: '0xC1204805b018ec2Ad06e6119965134AfFa212C10', qr: '' },
+    { id: 'eth', label: 'ETH (Ethereum mainnet)', address: '0xC1204805b018ec2Ad06e6119965134AfFa212C10' },
+    { id: 'usdc', label: 'USDC (Ethereum mainnet)', address: '0xC1204805b018ec2Ad06e6119965134AfFa212C10' },
   ];
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const copyAddress = (addr:string, id:string)=>{
-    try { navigator.clipboard.writeText(addr).then(()=>{ setCopiedId(id); setTimeout(()=>{ if(copiedId===id) setCopiedId(null); }, 1600); }); } catch {/* ignore */}
-  };
-  // Lightweight inline QR generator (simple canvas) to avoid dependency; memoize dataURL
-  const generateQR = (text:string)=>{
-    // Minimal placeholder (not full QR spec) – replace with real generator later if needed
-    // For now create a canvas with the address text for user scanning alternative – proper QR recommended for production
-    const canvas = document.createElement('canvas');
-    canvas.width = 240; canvas.height = 240;
-    const ctx = canvas.getContext('2d'); if(!ctx) return '';
-    ctx.fillStyle = '#fff'; ctx.fillRect(0,0,240,240);
-    ctx.fillStyle = '#000'; ctx.font = '12px monospace';
-    const wrapped = text.match(/.{1,20}/g) || [text];
-    wrapped.forEach((line,i)=> ctx.fillText(line, 8, 20 + i*14));
-    return canvas.toDataURL('image/png');
+    try { navigator.clipboard.writeText(addr).then(()=>{ setCopiedId(id); setTimeout(()=>{ setCopiedId(prev => prev===id ? null : prev); }, 1600); }); } catch {/* ignore */}
   };
   const qrCacheRef = useRef<Record<string,string>>({});
-  const getQR = (addr:string, id:string)=>{ if(!qrCacheRef.current[id]) qrCacheRef.current[id] = generateQR(addr); return qrCacheRef.current[id]; };
+  const [, forceQrRefresh] = useState(0);
+  useEffect(()=>{
+    if(!cryptoModalOpen) return; let cancelled=false;
+    (async()=>{
+      for(const entry of cryptoAddresses){
+        if(qrCacheRef.current[entry.id]) continue;
+        try {
+          const dataUrl = await QRCode.toDataURL(entry.address, { margin:1, scale:6, errorCorrectionLevel:'M' });
+          if(!cancelled){ qrCacheRef.current[entry.id]=dataUrl; forceQrRefresh(v=>v+1); }
+        } catch { /* ignore */ }
+      }
+    })();
+    return ()=>{ cancelled=true; };
+  }, [cryptoModalOpen]);
   // Static support content (user supplied exact text)
   const supportContent = (
     <div className="support-project-content" style={{ display:'flex', flexDirection:'column', gap:'14px', fontSize:'14px', lineHeight:1.45 }}>
@@ -2802,7 +2803,7 @@ function App() {
             <div style={{ display:'flex', flexDirection:'column', gap:20 }}>
               {cryptoAddresses.map(entry => {
                 const truncated = entry.address.slice(0,10) + '…' + entry.address.slice(-6);
-                const qr = getQR(entry.address, entry.id);
+                const qr = qrCacheRef.current[entry.id];
                 return (
                   <div key={entry.id} style={{ display:'flex', gap:14, alignItems:'stretch', background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:8, padding:12 }}>
                     <div style={{ flex:'0 0 140px', display:'flex', alignItems:'center', justifyContent:'center', background:'#fff', borderRadius:6 }}>
