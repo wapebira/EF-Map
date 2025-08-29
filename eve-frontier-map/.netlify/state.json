@@ -1,0 +1,21 @@
+{
+	"siteId": "30b98c13-79db-455e-a413-bf8173401a7c",
+	"geolocation": {
+		"data": {
+			"city": "Greenock",
+			"country": {
+				"code": "GB",
+				"name": "United Kingdom"
+			},
+			"subdivision": {
+				"code": "SCT",
+				"name": "Scotland"
+			},
+			"timezone": "Europe/London",
+			"latitude": 55.9519,
+			"longitude": -4.748,
+			"postalCode": "PA16"
+		},
+		"timestamp": 1756005050082
+	}
+}

@@ -1,0 +1,8 @@
+{
+  "version": 3,
+  "sources": ["../../../../../../EF-Map-main/eve-frontier-map/netlify/functions/health.js"],
+  "sourceRoot": "C:/Users/micha/AppData/Local/Temp/tmp-468-r61fwhzPkL5q",
+  "sourcesContent": ["// Simple health check to verify functions deployment.\r\nexport async function handler() {\r\n  return { statusCode: 200, body: 'ok' };\r\n}\r\n\r\n// Redeploy trigger comment: verifying Blobs env vars are now active.\r\n\r\n"],
+  "mappings": ";;;;;;;;;;;;;;;;;;;AAAA;AAAA;AAAA;AAAA;AAAA;AACA,eAAsB,UAAU;AAC9B,SAAO,EAAE,YAAY,KAAK,MAAM,KAAK;AACvC;",
+  "names": []
+}

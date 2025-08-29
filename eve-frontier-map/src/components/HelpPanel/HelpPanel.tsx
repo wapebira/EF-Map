@@ -174,6 +174,21 @@ const baseSections: SectionDef[] = [
         ),
       },
       {
+        id: 'p2p-map-interactions',
+        title: 'Fast Map Interactions',
+        content: (
+          <div>
+            <p><strong>Left‑click</strong> a star to set the <em>From</em> system (and the Scout Optimizer start). <strong>Right‑click</strong> a star to open a small contextual menu with these actions:</p>
+            <ul style={{ paddingLeft:'18px', margin:'6px 0' }}>
+              <li><strong>Set Destination:</strong> Fills the <em>To</em> field. Automatically opens the P2P panel if a From already exists.</li>
+              <li><strong>Add Waypoint:</strong> Appends the system to the Waypoints list (max 10). If no destination is set yet, the <em>first waypoint temporarily acts as the destination</em> until you explicitly set one.</li>
+              <li><strong>Avoid System:</strong> Adds the system to the Avoid list so routing will not pass through it (unless it is a required endpoint of a segment).</li>
+            </ul>
+            <p>The menu closes on left‑click elsewhere. Duplicate adds are ignored silently. A system cannot simultaneously be in Waypoints and Avoid; adding it to one removes it from the other.</p>
+          </div>
+        )
+      },
+      {
         id: 'p2p-metrics',
         title: 'Optimize for Fuel vs Jumps',
         content: (
@@ -188,11 +203,51 @@ const baseSections: SectionDef[] = [
         ),
       },
       {
+        id: 'p2p-waypoints',
+        title: 'Waypoints & Segment Chaining',
+        content: (
+          <div>
+            <p>Waypoints let you force the route to visit specific systems in sequence. Each <em>segment</em> (From → W1, W1 → W2, … → Destination) is solved independently; the final path is a concatenation with duplicate junction systems removed.</p>
+            <ul style={{ paddingLeft:'18px', margin:'6px 0' }}>
+              <li><strong>Order:</strong> By default the order you add them is preserved.</li>
+              <li><strong>Optimize order (experimental):</strong> Optional checkbox runs a simple nearest‑neighbor heuristic to reorder for shorter travel. This is a heuristic, not guaranteed optimal (future improvements may upgrade this).</li>
+              <li><strong>Limit:</strong> Up to 10 waypoints.</li>
+              <li><strong>Temporary destination:</strong> If no explicit Destination is set, the first waypoint is treated as the target so you can stage multi‑leg planning incrementally.</li>
+              <li><strong>Removal:</strong> Click the ✕ next to a waypoint in the panel to remove it.</li>
+            </ul>
+          </div>
+        )
+      },
+      {
+        id: 'p2p-avoid',
+        title: 'Avoid Systems',
+        content: (
+          <div>
+            <p>Systems in the Avoid list are excluded from pathfinding expansions to steer the route around risky or undesirable space. They are still allowed if they are an explicit segment endpoint (From, a Waypoint, or Destination) so you cannot soft‑lock the route.</p>
+            <ul style={{ paddingLeft:'18px', margin:'6px 0' }}>
+              <li>Right‑click → Avoid System to add; ✕ in the panel to remove.</li>
+              <li>Adding a system to Avoid removes it from Waypoints if present (and vice‑versa).</li>
+              <li>Ignored silently if already avoided.</li>
+            </ul>
+          </div>
+        )
+      },
+      {
         id: 'p2p-progress',
         title: 'Progress Indicators',
         content: (
           <p>Explored/frontier counts and elapsed ms show algorithm search breadth and pacing. If a search seems stuck, ensure the max jump distance isn&apos;t too restrictive.</p>
         ),
+      },
+      {
+        id: 'p2p-cancel-reset',
+        title: 'Stopping & Resetting',
+        content: (
+          <div>
+            <p><strong>Stop</strong> immediately cancels the current segment (or multi‑segment chain) and halts further processing. The progress message updates to “Cancelled”.</p>
+            <p><strong>Reset</strong> clears current route results, Scout results, search box, all Waypoints, all Avoid Systems, and the waypoint order optimization toggle. Destination is preserved (so you can refine quickly) unless you manually change it.</p>
+          </div>
+        )
       },
           {
             id: 'p2p-route-notes-export',
