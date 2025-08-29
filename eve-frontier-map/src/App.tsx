@@ -2499,6 +2499,10 @@ function App() {
         e.stopPropagation();
         if(contextMenuSystemRef.current){
           setLastDestinationSystemName(contextMenuSystemRef.current.name);
+          // If a source (From) system already selected, auto-open P2P Routing panel
+          if(lastSelectedSystemName){
+            try { setP2POpen(true); setScoutOpenReal(false); } catch {/* ignore */}
+          }
         }
         // cleanup
         try {
