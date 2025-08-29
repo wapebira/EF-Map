@@ -74,7 +74,13 @@ const calculateRouteSummary = (path: string[], mapData: MapData): RouteSummary =
   return summary;
 };
 
-const formatRouteToNotes = (path: string[], mapData: MapData): string[] => {
+interface NoteFormatOptions {
+  includeLegend: boolean;
+  includeStats: boolean;
+  summary?: RouteSummary | null;
+}
+
+const formatRouteToNotes = (path: string[], mapData: MapData, options?: NoteFormatOptions): string[] => {
   if (path.length < 2) return [];
 
   const systemsByName: Map<string, SolarSystem> = new Map(Object.values(mapData.solar_systems).map(s => [s.name.toLowerCase(), s]));
@@ -90,7 +96,10 @@ const formatRouteToNotes = (path: string[], mapData: MapData): string[] => {
 
   const from = pathSystems[0];
   const to = pathSystems[pathSystems.length - 1];
-  const legend = `Gate: (x)→ SmartGate: []→ Jump: ly→ | * = 1 Planet, No Gates\n`;
+  const legend = `Gate: (x)→ SmartGate: []→ Jump: <distance>→ | * = single-planet system with no stargates\n`;
+  const legendBlock = options?.includeLegend !== false ? legend : '';
+  const statsBlock = (options?.includeStats && options?.summary) ?
+    `Stats: Gates ${options.summary.stargateJumps} | Ship ${options.summary.shipJumps} | Dist ${options.summary.totalDistance.toFixed(2)} LY | ShipDist ${options.summary.shipJumpDistance.toFixed(2)} LY\n` : '';
 
   const getSystemLink = (system: SolarSystem): string => {
     const hasGates = gateSystemIds.has(system.id);
@@ -154,10 +163,10 @@ const formatRouteToNotes = (path: string[], mapData: MapData): string[] => {
     const nextLink = getSystemLink(segment.to);
     const nextPiece = separator + nextLink;
 
-    const pageHeader = `${from.name} → ${to.name} (Page ${pageNum})\n` + legend;
+  const pageHeader = `${from.name} → ${to.name} (Page ${pageNum})\n` + (pages.length===0 ? statsBlock : '') + legendBlock;
     
     if (pageHeader.length + currentBody.length + nextPiece.length > MAX_NOTE_LENGTH) {
-      const finalHeader = `${from.name} → ${to.name}${pages.length > 0 ? ` (Page ${pageNum})` : ''}\n` + legend;
+  const finalHeader = `${from.name} → ${to.name}${pages.length > 0 ? ` (Page ${pageNum})` : ''}\n` + (pages.length===0 ? statsBlock : '') + legendBlock;
       pages.push(finalHeader + currentBody);
       
       pageNum++;
@@ -168,7 +177,7 @@ const formatRouteToNotes = (path: string[], mapData: MapData): string[] => {
   }
 
   // Add the final page
-  const finalPageHeader = `${from.name} → ${to.name}${pages.length > 0 ? ` (Page ${pageNum})` : ''}\n` + legend;
+  const finalPageHeader = `${from.name} → ${to.name}${pages.length > 0 ? ` (Page ${pageNum})` : ''}\n` + (pages.length===0 ? statsBlock : '') + legendBlock;
   pages.push(finalPageHeader + currentBody);
 
   // If there's only one page, remove the page number from the header
@@ -254,14 +263,16 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
   const [algorithm, setAlgorithm] = useState<'astar' | 'dijkstra'>('astar');
 
   const [notePages, setNotePages] = useState<string[]>([]);
+  const [includeLegend, setIncludeLegend] = useState(true);
+  const [includeStats, setIncludeStats] = useState(false);
   const [summary, setSummary] = useState<RouteSummary | null>(null);
   const [activeNotePage, setActiveNotePage] = useState(0);
   const [copyButtonText, setCopyButtonText] = useState('Copy');
 
   useEffect(() => {
     if (routeResult?.path && mapData) {
-      const notes = formatRouteToNotes(routeResult.path, mapData);
       const routeSummary = calculateRouteSummary(routeResult.path, mapData);
+      const notes = formatRouteToNotes(routeResult.path, mapData, { includeLegend, includeStats, summary: routeSummary });
       setNotePages(notes);
       setSummary(routeSummary);
       setActiveNotePage(0);
@@ -269,7 +280,7 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
       setNotePages([]);
       setSummary(null);
     }
-  }, [routeResult, mapData]);
+  }, [routeResult, mapData, includeLegend, includeStats]);
 
   const handleCalculate = () => {
     const distance = parseFloat(jumpDistance);
@@ -304,7 +315,9 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
     setNotePages([]);
     setSummary(null);
     setActiveNotePage(0);
-    setCopyButtonText('Copy');
+  setCopyButtonText('Copy');
+  setIncludeLegend(true);
+  setIncludeStats(false);
   }, [resetToken]);
 
   return (
@@ -418,6 +431,14 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
           {notePages.length > 0 && (
             <div className="p2p-results">
               <h4>Route Note{notePages.length > 1 ? ` (Page ${activeNotePage + 1}/${notePages.length})` : ''}</h4>
+              <div style={{ display:'flex', flexDirection:'column', gap:'4px', marginBottom:'6px' }}>
+                <label className="route-note-option-label">
+                  <input type="checkbox" checked={includeLegend} onChange={e=> setIncludeLegend(e.target.checked)} /> Include Legend
+                </label>
+                <label className="route-note-option-label">
+                  <input type="checkbox" checked={includeStats} onChange={e=> setIncludeStats(e.target.checked)} /> Include Route Statistics
+                </label>
+              </div>
               <div className="p2p-copy-buttons">
                 {notePages.map((_, index) => (
                   <button 

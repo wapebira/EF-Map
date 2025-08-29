@@ -194,6 +194,30 @@ const baseSections: SectionDef[] = [
           <p>Explored/frontier counts and elapsed ms show algorithm search breadth and pacing. If a search seems stuck, ensure the max jump distance isn&apos;t too restrictive.</p>
         ),
       },
+          {
+            id: 'p2p-route-notes-export',
+            title: 'Route Notes Export',
+            content: (
+              <div>
+                <p>The Copy buttons generate paged in‑game notes sized to stay under the character cap. Two optional inclusions:</p>
+                <ul style={{ paddingLeft:'18px', margin:'6px 0' }}>
+                  <li><strong>Include Legend:</strong> Adds the legend line explaining symbols on every page.</li>
+                  <li><strong>Include Route Statistics:</strong> Adds a one‑line stats summary (Gate, Ship, Total Distance, Ship Distance) on the <em>first page only</em>.</li>
+                </ul>
+                <p><strong>Legend format:</strong><br/>
+                  <code>Gate: (x)→ SmartGate: []→ Jump: &lt;distance&gt;→ | * = single-planet system with no stargates</code></p>
+                <ul style={{ paddingLeft:'18px', margin:'6px 0' }}>
+                  <li><strong>(x)→</strong> A run of x consecutive stargate hops between the two shown systems.</li>
+                  <li><strong>[]→ SmartGate</strong> Placeholder for future player‑made smart gate links (handled like normal gates when data present).</li>
+                  <li><strong>&lt;distance&gt;→</strong> A direct ship jump (distance in LY, 2 decimals).</li>
+                  <li><strong>*</strong> System has exactly one planet and no stargates (isolation marker).</li>
+                </ul>
+                <p style={{marginTop:'6px'}}><strong>Example snippet:</strong><br/>
+                  <span style={{color:'var(--accent)'}}>&lt;A1-XYZ&gt;</span> (3)→ <span style={{color:'var(--accent)'}}>&lt;B2-QP9&gt;</span> 2.57→ <span style={{color:'var(--accent)'}}>&lt;C9-LMN*&gt;</span> (2)→ <span style={{color:'var(--accent)'}}>&lt;D4-RST&gt;</span>
+                </p>
+              </div>
+            )
+          },
     ],
   },
   {
@@ -242,6 +266,29 @@ const baseSections: SectionDef[] = [
           <p>Start with modest radius/region sizes. Tune ship trade parameters after baseline to adjust gate vs ship balance, then re-run baseline if the system set or return toggle changes. Use more workers for larger sets; diminishing returns may appear after CPU saturation.</p>
         ),
       },
+          {
+            id: 'scout-route-notes-export',
+            title: 'Route Notes Export',
+            content: (
+              <div>
+                <p>Exports the optimized (expanded) route in paged note form. Options:</p>
+                <ul style={{ paddingLeft:'18px', margin:'6px 0' }}>
+                  <li><strong>Include Legend:</strong> Adds legend line on each page.</li>
+                  <li><strong>Include Route Statistics:</strong> Adds stats summary only on the first page.</li>
+                </ul>
+                <p><strong>Legend:</strong> <code>Gate: (x)→ SmartGate: []→ Jump: &lt;distance&gt;→ | * = single-planet system with no stargates</code></p>
+                <ul style={{ paddingLeft:'18px', margin:'6px 0' }}>
+                  <li><strong>(x)→</strong> x consecutive gate hops collapsed.</li>
+                  <li><strong>[]→</strong> Smart gate link (future dataset).</li>
+                  <li><strong>&lt;distance&gt;→</strong> Direct ship jump distance (LY, 2 decimals).</li>
+                  <li><strong>*</strong> Single‑planet isolated system.</li>
+                </ul>
+                <p style={{marginTop:'6px'}}><strong>Example:</strong><br/>
+                  <span style={{color:'var(--accent)'}}>&lt;OH1-20R&gt;</span> 2.61→ <span style={{color:'var(--accent)'}}>&lt;IJH-191&gt;</span> (4)→ <span style={{color:'var(--accent)'}}>&lt;UHR-QP2*&gt;</span> 3.88→ <span style={{color:'var(--accent)'}}>&lt;E82-GD2&gt;</span>
+                </p>
+              </div>
+            )
+          },
     ],
   },
   {
