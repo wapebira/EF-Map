@@ -1,5 +1,6 @@
 {
   "dependencies": {
+    "qrcode": "^1.5.4",
     "sql.js": "^1.13.0"
   },
   "devDependencies": {

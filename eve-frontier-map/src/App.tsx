@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
+import QRCode from 'qrcode';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
@@ -128,7 +129,7 @@ type SqlValue = number | string | Uint8Array | null;
 
 // Define colors for selection and base
 const DEFAULT_STAR_COLOR = new THREE.Color(0xffffff);
-const SELECTED_STAR_COLOR = new THREE.Color(0x00aaff); // Blue for selected star when DPC is off
+let SELECTED_STAR_COLOR = new THREE.Color(0xff4c26); // Will track accent (orange default)
 const REGION_OUTLINE_COLOR = new THREE.Color(0x00aaff); // Shared blue for region outlines
 
 function App() {
@@ -165,6 +166,30 @@ function App() {
   const [cinematicMode, setCinematicMode] = useState(false);
   // External trigger for expanding Support section in Help
   const [supportExpandRequestId, setSupportExpandRequestId] = useState(0);
+  const [cryptoModalOpen, setCryptoModalOpen] = useState(false);
+  const cryptoAddresses = [
+    { id: 'eth', label: 'ETH (Ethereum mainnet)', address: '0xC1204805b018ec2Ad06e6119965134AfFa212C10' },
+    { id: 'usdc', label: 'USDC (Ethereum mainnet)', address: '0xC1204805b018ec2Ad06e6119965134AfFa212C10' },
+  ];
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const copyAddress = (addr:string, id:string)=>{
+    try { navigator.clipboard.writeText(addr).then(()=>{ setCopiedId(id); setTimeout(()=>{ setCopiedId(prev => prev===id ? null : prev); }, 1600); }); } catch {/* ignore */}
+  };
+  const qrCacheRef = useRef<Record<string,string>>({});
+  const [, forceQrRefresh] = useState(0);
+  useEffect(()=>{
+    if(!cryptoModalOpen) return; let cancelled=false;
+    (async()=>{
+      for(const entry of cryptoAddresses){
+        if(qrCacheRef.current[entry.id]) continue;
+        try {
+          const dataUrl = await QRCode.toDataURL(entry.address, { margin:1, scale:6, errorCorrectionLevel:'M' });
+          if(!cancelled){ qrCacheRef.current[entry.id]=dataUrl; forceQrRefresh(v=>v+1); }
+        } catch { /* ignore */ }
+      }
+    })();
+    return ()=>{ cancelled=true; };
+  }, [cryptoModalOpen]);
   // Static support content (user supplied exact text)
   const supportContent = (
     <div className="support-project-content" style={{ display:'flex', flexDirection:'column', gap:'14px', fontSize:'14px', lineHeight:1.45 }}>
@@ -177,9 +202,12 @@ function App() {
       </div>
       <p style={{ margin:0 }}>There’s no obligation to contribute. If you’d like to chip in, that support is very, very, very much appreciated—and it helps me cover the basics while keeping the app free for everyone.</p>
       <p style={{ margin:0 }}>
+        <button type="button" onClick={()=> setCryptoModalOpen(true)} style={{ cursor:'pointer', display:'inline-block', background:'var(--accent)', color:'#fff', padding:'10px 18px', border:'none', borderRadius:6, fontWeight:700, textDecoration:'none', boxShadow:'0 2px 6px rgba(0,0,0,0.45)', letterSpacing:'.5px' }}>Donate via Crypto</button>
+      </p>
+      <p style={{ margin:'0 0 2px 0' }}>
         <a href="https://donate.stripe.com/8x200j3krbO9aVtdLS4gg00" target="_blank" rel="noopener noreferrer" style={{ display:'inline-block', background:'var(--accent)', color:'#fff', padding:'10px 18px', borderRadius:6, fontWeight:700, textDecoration:'none', boxShadow:'0 2px 6px rgba(0,0,0,0.45)', letterSpacing:'.5px' }}>Donate via Stripe</a>
       </p>
-      <p style={{ margin:0, fontSize:'12px', opacity:.65 }}>Opens secure Stripe payment page in a new tab.</p>
+      <p style={{ margin:0, fontSize:'12px', opacity:.65 }}>Stripe opens in a new secure tab.</p>
     </div>
   );
   // Bloom strength (committed) and draft for deferred apply (performance)
@@ -435,6 +463,8 @@ function App() {
     }
     // Update runtime three.js colors used by the app
   const accentHex = accentIsBlue ? 0x00aaff : 0xff4c26;
+  // Keep module-scoped selected color in sync so selection effect uses correct accent
+  SELECTED_STAR_COLOR = new THREE.Color(accentHex);
     // Update hover material if exists
     if (hoverPointRef.current) {
       (hoverPointRef.current.material as THREE.PointsMaterial).color.set(accentHex);
@@ -521,6 +551,7 @@ function App() {
     if(cinematicModeRef.current && !cinematicLabelsRef.current){
       return;
     }
+          
 
     // Clear previous persistent label
     if (selectedLabelObj.current && selectedLabelObj.current.parent) {
@@ -550,7 +581,20 @@ function App() {
     }
     selectedLabelObj.current.visible = true;
 
-  }, [createSystemLabelElement, setLabelText, getTransformedPosition]);
+    // Fast local recolor so user sees feedback before layout effect re-runs.
+    try {
+      if (!isPlanetCountActive && !isRegionHighlighterActive && starFieldRef.current) {
+        const starColorsAttr = (starFieldRef.current.geometry as THREE.BufferGeometry).attributes.color as THREE.BufferAttribute;
+        const idx = visibleSystemsRef.current.findIndex(s => s.id === system.id);
+        if (idx !== -1) {
+          const accentHex = accentIsBlue ? 0x00aaff : 0xff4c26;
+          new THREE.Color(accentHex).toArray(starColorsAttr.array as Float32Array, idx * 3);
+          starColorsAttr.needsUpdate = true;
+        }
+      }
+    } catch { /* ignore */ }
+
+  }, [createSystemLabelElement, setLabelText, getTransformedPosition, isPlanetCountActive, isRegionHighlighterActive, accentIsBlue]);
 
   // Initialize and manage the routing worker
   useEffect(() => {
@@ -2298,6 +2342,21 @@ function App() {
     });
   }, [accentIsBlue]);
 
+  // Final pass to ensure selected star is colored with accent after all other color pipelines.
+  useEffect(() => {
+    if (!starFieldRef.current || !highlightedSystem) return;
+    if (cinematicMode) return; // cinematic palette handles differently
+    try {
+      const attr = (starFieldRef.current.geometry as THREE.BufferGeometry).attributes.color as THREE.BufferAttribute;
+      if (!attr) return;
+      const idx = visibleSystemsRef.current.findIndex(s => s.id === highlightedSystem.id);
+      if (idx === -1) return;
+      const accentHex = accentIsBlue ? 0x00aaff : 0xff4c26;
+      new THREE.Color(accentHex).toArray(attr.array as Float32Array, idx * 3);
+      attr.needsUpdate = true;
+    } catch {/* ignore */}
+  }, [highlightedSystem, accentIsBlue, cinematicMode]);
+
   // Handle camera animation
   useEffect(() => {
     if (!highlightedSystem || !controlsRef.current || !cameraRef.current) return;
@@ -2733,6 +2792,39 @@ function App() {
 
   return (
     <>
+      {cryptoModalOpen && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:4000 }} onClick={()=> setCryptoModalOpen(false)}>
+          <div onClick={e=> e.stopPropagation()} style={{ width:'min(520px,92%)', maxHeight:'80vh', overflowY:'auto', background:'#111', padding:'20px 22px 26px', border:'1px solid rgba(255,255,255,0.15)', borderRadius:10, boxShadow:'0 8px 28px -4px rgba(0,0,0,0.55)', display:'flex', flexDirection:'column', gap:18 }}>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:4 }}>
+              <h3 style={{ margin:0, fontSize:'20px', fontWeight:600 }}>Donate via Crypto</h3>
+              <button onClick={()=> setCryptoModalOpen(false)} style={{ background:'none', border:'none', color:'#fff', fontSize:'20px', cursor:'pointer', lineHeight:1 }}>×</button>
+            </div>
+            <p style={{ margin:'0 0 4px', fontSize:'13px', opacity:.75 }}>Choose a network and copy the address. QR codes are provided for convenience.</p>
+            <div style={{ display:'flex', flexDirection:'column', gap:20 }}>
+              {cryptoAddresses.map(entry => {
+                const truncated = entry.address.slice(0,10) + '…' + entry.address.slice(-6);
+                const qr = qrCacheRef.current[entry.id];
+                return (
+                  <div key={entry.id} style={{ display:'flex', gap:14, alignItems:'stretch', background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:8, padding:12 }}>
+                    <div style={{ flex:'0 0 140px', display:'flex', alignItems:'center', justifyContent:'center', background:'#fff', borderRadius:6 }}>
+                      <img src={qr} alt={entry.label + ' QR'} style={{ width:120, height:120, objectFit:'contain' }} />
+                    </div>
+                    <div style={{ display:'flex', flexDirection:'column', gap:8, flex:1 }}>
+                      <div style={{ fontWeight:600, fontSize:'14px' }}>{entry.label}</div>
+                      <div style={{ fontFamily:'monospace', fontSize:'13px', wordBreak:'break-all', background:'rgba(255,255,255,0.05)', padding:'6px 8px', borderRadius:4 }}>{truncated}</div>
+                      <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+                        <button onClick={()=> copyAddress(entry.address, entry.id)} style={{ background:'var(--accent)', color:'#fff', border:'none', padding:'6px 14px', borderRadius:4, cursor:'pointer', fontWeight:600, fontSize:'13px', letterSpacing:'.5px' }}>Copy</button>
+                        {copiedId === entry.id && <span style={{ fontSize:'12px', color:'var(--accent)', alignSelf:'center' }}>Copied!</span>}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <p style={{ margin:'10px 0 0', fontSize:'11px', opacity:.6 }}>Verify wallet address independently before sending funds.</p>
+          </div>
+        </div>
+      )}
   {/* Referral code copy state */}
   {/* ...existing code... */}
   <div className="ef-top-toolbar" style={hideUI?{display:'none'}:{}}>

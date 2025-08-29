@@ -13,20 +13,22 @@
     "test:scout-cost": "node tools/test_scout_cost.js"
   },
   "dependencies": {
-  "@netlify/blobs": "^8.1.0",
+    "@netlify/blobs": "^8.1.0",
     "@types/three": "^0.179.0",
     "lz-string": "^1.5.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "sql.js": "^1.10.2",
-    "three": "^0.179.1"
+    "three": "^0.179.1",
+    "qrcode": "^1.5.4"
   },
   "devDependencies": {
-  "netlify-cli": "^17.34.1",
+    "netlify-cli": "^17.34.1",
     "@eslint/js": "^9.33.0",
     "@types/react": "^19.1.10",
     "@types/react-dom": "^19.1.7",
     "@types/sql.js": "*",
+    "@types/qrcode": "^1.5.5",
     "@vitejs/plugin-react": "^5.0.0",
     "eslint": "^9.33.0",
     "eslint-plugin-react-hooks": "^5.2.0",
