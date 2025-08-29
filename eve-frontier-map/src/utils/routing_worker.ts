@@ -12,6 +12,7 @@ interface RoutingRequest {
   maxJumpDistance: number;
   optimizeFor: 'fuel' | 'jumps';
   algorithm?: 'astar' | 'dijkstra';
+  avoidSystemNames?: string[]; // optional list of systems to exclude
 }
 
 interface RoutingResponse { path: string[] | null; error?: string }
@@ -155,7 +156,7 @@ const getNeighbors = (
 
 // --- A* (basic) ---
 const findPathAstar = (request: RoutingRequest): RoutingResponse => {
-  const { systems, stargates, fromSystemName, toSystemName, maxJumpDistance, optimizeFor } = request;
+  const { systems, stargates, fromSystemName, toSystemName, maxJumpDistance, optimizeFor, avoidSystemNames } = request;
 
   const systemsByName: { [name: string]: SolarSystem } = {};
   const systemsById: { [id: number]: SolarSystem } = {};
@@ -182,12 +183,15 @@ const findPathAstar = (request: RoutingRequest): RoutingResponse => {
 
   const allSystemsList = Object.values(systems);
 
+  const avoidSet = new Set<string>((avoidSystemNames||[]).map(n=> n.toLowerCase()).filter(n=> n!==fromSystemName.toLowerCase() && n!==toSystemName.toLowerCase()));
+
   while (!openSet.isEmpty()) {
     const current = openSet.dequeue()!;
 
     if (current.id === endNode.id) return { path: reconstructPath(cameFrom, current, systemsById) };
 
-    const neighbors = getNeighbors(current, allSystemsList, stargates, maxJumpDistance, optimizeFor, systemsById);
+    const neighbors = getNeighbors(current, allSystemsList, stargates, maxJumpDistance, optimizeFor, systemsById)
+      .filter(n => !avoidSet.has(n.system.name.toLowerCase()));
 
     for (const neighbor of neighbors) {
       const tentativeGScore = gScore[current.id] + neighbor.cost;
@@ -254,7 +258,7 @@ class MinHeap<T> {
 }
 
 const findPathDijkstra = (request: RoutingRequest): RoutingResponse => {
-  const { systems, stargates, fromSystemName, toSystemName, maxJumpDistance, optimizeFor } = request;
+  const { systems, stargates, fromSystemName, toSystemName, maxJumpDistance, optimizeFor, avoidSystemNames } = request;
 
   const systemsByName: { [name: string]: SolarSystem } = {};
   const systemsById: { [id: number]: SolarSystem } = {};
@@ -281,6 +285,8 @@ const findPathDijkstra = (request: RoutingRequest): RoutingResponse => {
 
   const startTime = Date.now();
   let lastEmit = 0;
+  const avoidSet = new Set<string>((avoidSystemNames||[]).map(n=> n.toLowerCase()).filter(n=> n!==fromSystemName.toLowerCase() && n!==toSystemName.toLowerCase()));
+
   while (!heap.isEmpty()) {
     const top = heap.pop()!;
     const current = top.val;
@@ -289,7 +295,8 @@ const findPathDijkstra = (request: RoutingRequest): RoutingResponse => {
 
     if (current.id === endNode.id) return { path: reconstructPath(prev, current, systemsById) };
 
-  const neighbors = getNeighbors(current, allSystemsList, stargates, maxJumpDistance, optimizeFor, systemsById);
+  const neighbors = getNeighbors(current, allSystemsList, stargates, maxJumpDistance, optimizeFor, systemsById)
+    .filter(n => !avoidSet.has(n.system.name.toLowerCase()));
     for (const neighbor of neighbors) {
       const cost = (() => {
         if (optimizeFor === 'jumps') return neighbor.cost; // 1 per jump

@@ -205,6 +205,12 @@ interface P2PRoutingProps {
   resetToken?: number; // increments when parent requests a reset
   selectedSystemName?: string; // externally selected system (map click / global search)
   selectedDestinationSystemName?: string; // externally chosen destination system (right-click context)
+  waypoints?: string[];
+  avoidSystems?: string[];
+  onRemoveWaypoint?: (name: string)=>void;
+  onRemoveAvoidSystem?: (name: string)=>void;
+  waypointOptimize?: boolean; // false = visit in added order, true = optimize order (future)
+  onWaypointOptimizeChange?: (v: boolean)=>void;
 }
 
 // Minimal neutral custom select (no accent colors) for consistent option highlight across platforms
@@ -257,7 +263,7 @@ const NeutralSelect = <T extends string>({ value, onChange, options, ariaLabel, 
   );
 };
 
-const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeResult, mapData, systemNames, progress, routeCalcTimeMs, open, onToggle, resetToken, selectedSystemName, selectedDestinationSystemName }: P2PRoutingProps) => {
+const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeResult, mapData, systemNames, progress, routeCalcTimeMs, open, onToggle, resetToken, selectedSystemName, selectedDestinationSystemName, waypoints = [], avoidSystems = [], onRemoveWaypoint, onRemoveAvoidSystem, waypointOptimize = false, onWaypointOptimizeChange }: P2PRoutingProps) => {
   const [fromSystem, setFromSystem] = useState('');
   const [toSystem, setToSystem] = useState('');
   const [jumpDistance, setJumpDistance] = useState('60');
@@ -336,6 +342,44 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
     }
   }, [selectedDestinationSystemName]);
 
+  // Build waypoint & avoided system UI blocks (only if non-empty)
+  const waypointBlock = waypoints.length > 0 && (
+    <div className="p2p-input-group">
+      <label style={{ display:'flex', alignItems:'center', gap:8 }}>
+        Waypoints
+        <span style={{ fontSize:11, opacity:.65 }}>({waypoints.length})</span>
+      </label>
+      <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+        {waypoints.map(w => (
+          <div key={w} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', background:'#111', border:'1px solid #333', padding:'4px 8px', borderRadius:4, fontSize:12 }}>
+            <span style={{ fontWeight:600 }}>{w}</span>
+            {onRemoveWaypoint && (<button style={{ background:'transparent', color:'#ccc', border:'none', cursor:'pointer', fontSize:12 }} onClick={()=> onRemoveWaypoint(w)} aria-label={`Remove waypoint ${w}`}>✕</button>)}
+          </div>
+        ))}
+      </div>
+      <label style={{ display:'flex', gap:6, alignItems:'center', marginTop:6, fontSize:11, background:'#0c0c0c', padding:'4px 6px', borderRadius:4, border:'1px solid #222' }}>
+        <input type="checkbox" checked={waypointOptimize} onChange={e=> onWaypointOptimizeChange && onWaypointOptimizeChange(e.target.checked)} /> Optimize waypoint order (experimental)
+      </label>
+    </div>
+  );
+
+  const avoidBlock = avoidSystems.length > 0 && (
+    <div className="p2p-input-group">
+      <label style={{ display:'flex', alignItems:'center', gap:8 }}>
+        Avoid Systems
+        <span style={{ fontSize:11, opacity:.65 }}>({avoidSystems.length})</span>
+      </label>
+      <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+        {avoidSystems.map(a => (
+          <div key={a} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', background:'#180000', border:'1px solid #552222', padding:'4px 8px', borderRadius:4, fontSize:12 }}>
+            <span style={{ fontWeight:600 }}>{a}</span>
+            {onRemoveAvoidSystem && (<button style={{ background:'transparent', color:'#ccc', border:'none', cursor:'pointer', fontSize:12 }} onClick={()=> onRemoveAvoidSystem(a)} aria-label={`Remove avoided system ${a}`}>✕</button>)}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
   return (
     <div className="p2p-routing-container">
       <label className="module-toggle-label">
@@ -359,6 +403,8 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
               placeholder="Enter start system"
             />
           </div>
+          {waypointBlock}
+          {avoidBlock}
 
           <div className="p2p-input-group">
             <label htmlFor="to-system">To</label>

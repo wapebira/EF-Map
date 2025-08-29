@@ -149,6 +149,10 @@ function App() {
   const [highlightedSystem, setHighlightedSystem] = useState<SolarSystem | null>(null);
   const [lastSelectedSystemName, setLastSelectedSystemName] = useState<string>(''); // propagate to modules
   const [lastDestinationSystemName, setLastDestinationSystemName] = useState<string>(''); // right-click destination propagation
+  const [waypoints, setWaypoints] = useState<string[]>([]); // ordered list (max 10)
+  const [avoidSystems, setAvoidSystems] = useState<string[]>([]);
+  const [waypointOptimize, setWaypointOptimize] = useState<boolean>(false); // false = visit in order added
+  const destinationLockedRef = useRef<boolean>(false); // becomes true once user explicitly sets destination via context menu
   const [hoveredSystem, setHoveredSystem] = useState<SolarSystem | null>(null);
   const [isRegionHighlighterActive, setIsRegionHighlighterActive] = useState(false);
   const [isPlanetCountActive, setIsPlanetCountActive] = useState(false);
@@ -266,6 +270,15 @@ function App() {
   const contextMenuObjRef = useRef<CSS2DObject | null>(null);
   const contextMenuSystemRef = useRef<SolarSystem | null>(null);
   const labelRendererRef = useRef<CSS2DRenderer | null>(null); // store CSS2DRenderer for pointerEvents toggling
+  // Waypoint / avoid helpers
+  const addWaypoint = useCallback((name: string) => {
+    setWaypoints(prev => prev.includes(name) ? prev : (prev.length < 10 ? [...prev, name] : prev));
+  }, []);
+  const removeWaypoint = useCallback((name: string) => { setWaypoints(prev => prev.filter(w => w !== name)); }, []);
+  const removeAvoidSystem = useCallback((name: string) => { setAvoidSystems(prev => prev.filter(a => a !== name)); }, []);
+  const addAvoidSystem = useCallback((name: string) => {
+    setAvoidSystems(prev => prev.includes(name) ? prev : [...prev, name]);
+  }, []);
 
   // Refs for three.js objects
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -652,6 +665,11 @@ function App() {
 
   // Stop / cancel the current calculation: terminate worker and recreate a fresh one
   const stopCalculation = useCallback(() => {
+    // Signal multi-segment cancellation if active
+    try {
+      const ref = (calculateRoute as any)._cancelRef;
+      if (ref) ref.value = true;
+    } catch { /* ignore */ }
     if (routingWorkerRef.current) {
       try {
         routingWorkerRef.current.terminate();
@@ -661,7 +679,7 @@ function App() {
       routingWorkerRef.current = null;
     }
     setIsCalculatingRoute(false);
-    setRouteProgress(null);
+    setRouteProgress(p => p ? { ...p, message: 'Cancelled' } : null);
     routeCalcStartRef.current = null;
     setRouteCalcTimeMs(null);
 
@@ -702,36 +720,91 @@ function App() {
   }, [mapData, selectSystem]);
 
   const calculateRoute = useCallback((fromSystemName: string, toSystemName: string, maxJumpDistance: number, optimizeFor: 'fuel' | 'jumps', algorithm: 'astar' | 'dijkstra') => {
-    // Track last P2P params for share link updates
     try { (lastP2PParamsRef as any).current = { jump:maxJumpDistance, optimize:optimizeFor, algo:algorithm, from:fromSystemName, to:toSystemName }; } catch(e) { /* ignore */ }
-    if (!mapData) {
-      alert('Map data is not loaded yet.');
-      return;
-    }
+    if (!mapData) { alert('Map data is not loaded yet.'); return; }
+    if(!fromSystemName || !toSystemName){ alert('Both From and To are required.'); return; }
 
-    // If a scout route was displayed, clear it so P2P route takes visual precedence
-    if (scoutRouteResult) {
-      setScoutRouteResult(null);
-      setScoutInvalidateToken(t=> t+1); // force scout component to clear internal workers/state
-    }
-    // Always clear any currently drawn route lines before drawing new P2P route
+    if (scoutRouteResult) { setScoutRouteResult(null); setScoutInvalidateToken(t=> t+1); }
     clearCurrentRoute();
 
-    setIsCalculatingRoute(true);
-    setRouteResult(null);
-  setRouteCalcTimeMs(null);
-  routeCalcStartRef.current = Date.now();
+    // Build ordered segments respecting waypointOptimize (currently just order-added; optimization TBD)
+    let orderedWaypoints = waypoints;
+    if(waypointOptimize && waypoints.length > 1){
+      // Placeholder: naive nearest-neighbor starting from From (could be improved later)
+      const systemsByLower = new Map(Object.values(mapData.solar_systems).map(s=> [s.name.toLowerCase(), s]));
+      const startSys = systemsByLower.get(fromSystemName.toLowerCase());
+      if(startSys){
+        const remaining = waypoints.slice();
+        const ordered: string[] = [];
+        let current = startSys;
+        while(remaining.length){
+          let bestIdx = 0; let bestDist = Infinity;
+          for(let i=0;i<remaining.length;i++){
+            const cand = systemsByLower.get(remaining[i].toLowerCase());
+            if(!cand) continue;
+            const d = Math.hypot(cand.position.x-current.position.x, cand.position.y-current.position.y, cand.position.z-current.position.z);
+            if(d < bestDist){ bestDist = d; bestIdx = i; }
+          }
+            ordered.push(remaining[bestIdx]);
+            const chosen = systemsByLower.get(remaining[bestIdx].toLowerCase());
+            if(chosen) current = chosen;
+            remaining.splice(bestIdx,1);
+        }
+        orderedWaypoints = ordered;
+      }
+    }
+    const segments: Array<[string,string]> = [];
+    const chain = [fromSystemName, ...orderedWaypoints.filter(w=> w && w!==fromSystemName && w!==toSystemName), toSystemName];
+    for(let i=0;i<chain.length-1;i++){ segments.push([chain[i], chain[i+1]]); }
+    if(segments.length === 0){ alert('Nothing to route.'); return; }
 
-  routingWorkerRef.current?.postMessage({
-      systems: mapData.solar_systems,
-      stargates: mapData.stargates,
-      fromSystemName,
-      toSystemName,
-      maxJumpDistance,
-      optimizeFor,
-      algorithm,
-    });
-  }, [mapData, scoutRouteResult, clearCurrentRoute]);
+    setIsCalculatingRoute(true); setRouteResult(null); setRouteCalcTimeMs(null); routeCalcStartRef.current = Date.now();
+  const cancelRef = { value:false }; (calculateRoute as any)._cancelRef = cancelRef;
+    const fullPath: string[] = []; let segIndex = 0;
+    const runNext = () => {
+      if(cancelRef.value){ setIsCalculatingRoute(false); setRouteProgress(null); return; }
+      if(segIndex >= segments.length){
+        setIsCalculatingRoute(false);
+        setRouteProgress(null);
+        setRouteResult({ path: fullPath });
+        if(fullPath.length && mapData){
+          const sysMap = Object.fromEntries(Object.values(mapData.solar_systems).map(s=> [s.name.toLowerCase(), s]));
+          const startSystem = sysMap[fullPath[0].toLowerCase()]; if(startSystem) selectSystem(startSystem);
+        }
+        return;
+      }
+      const [segFrom, segTo] = segments[segIndex];
+      setRouteProgress({ explored:0, frontier:0, elapsedMs:0, message:`Segment ${segIndex+1}/${segments.length}: ${segFrom} → ${segTo}` });
+      // Fresh worker per segment for simplicity (reuse existing ref)
+      try { routingWorkerRef.current?.terminate(); } catch { /* ignore */ }
+      routingWorkerRef.current = new Worker(new URL('./utils/routing_worker.ts', import.meta.url), { type:'module' });
+      routingWorkerRef.current.onmessage = (e) => {
+        const data = e.data;
+        if(data && data.type==='progress') { setRouteProgress(p=> ({ ...(p||{}), ...data })); return; }
+        const { path, error } = data;
+        if(error || !path){
+          setIsCalculatingRoute(false); setRouteProgress(null); setRouteResult({ path:null, error: error || `No path for segment ${segFrom} → ${segTo}` }); return;
+        }
+        if(fullPath.length){ // avoid duplicating junction node
+          fullPath.push(...path.slice(1));
+        } else {
+          fullPath.push(...path);
+        }
+        segIndex++; runNext();
+      };
+      routingWorkerRef.current.postMessage({
+        systems: mapData.solar_systems,
+        stargates: mapData.stargates,
+        fromSystemName: segFrom,
+        toSystemName: segTo,
+        maxJumpDistance,
+        optimizeFor,
+        algorithm,
+        avoidSystemNames: avoidSystems.filter(a=> a!==segFrom && a!==segTo && !orderedWaypoints.includes(a)),
+      });
+    };
+    runNext();
+  }, [mapData, scoutRouteResult, clearCurrentRoute, waypoints, avoidSystems, waypointOptimize, selectSystem]);
 
   // Helper to get planet count color
   const getPlanetCountColor = useCallback((planets: number, minPlanets: number, maxPlanets: number): THREE.Color => {
@@ -2491,20 +2564,9 @@ function App() {
       // Options container
       const optionsWrap = document.createElement('div');
       optionsWrap.className = 'context-menu-options';
-      const item = document.createElement('div');
-      item.className = 'context-menu-item';
-      item.textContent = 'Set Destination';
-      item.addEventListener('mousedown', (e)=>{ e.stopPropagation(); e.preventDefault(); });
-      item.addEventListener('click', (e)=>{
-        e.stopPropagation();
-        if(contextMenuSystemRef.current){
-          setLastDestinationSystemName(contextMenuSystemRef.current.name);
-          // If a source (From) system already selected, auto-open P2P Routing panel
-          if(lastSelectedSystemName){
-            try { setP2POpen(true); setScoutOpenReal(false); } catch {/* ignore */}
-          }
-        }
-        // cleanup
+
+      // Helper to close menu
+      const closeMenu = () => {
         try {
           if(contextMenuObjRef.current && contextMenuObjRef.current.parent){
             contextMenuObjRef.current.parent.remove(contextMenuObjRef.current);
@@ -2514,8 +2576,71 @@ function App() {
           }
         } catch {/* ignore */}
         contextMenuObjRef.current = null; contextMenuSystemRef.current = null;
+      };
+
+      // Set Destination item
+      const destItem = document.createElement('div');
+      destItem.className = 'context-menu-item';
+      destItem.textContent = 'Set Destination';
+      destItem.addEventListener('mousedown', e=> { e.stopPropagation(); e.preventDefault(); });
+      destItem.addEventListener('click', e => {
+        e.stopPropagation();
+        if(contextMenuSystemRef.current){
+          // If no explicit destination yet and user already has a destination set via earlier waypoints rule (first waypoint becomes destination) we still allow override.
+          setLastDestinationSystemName(contextMenuSystemRef.current.name);
+          destinationLockedRef.current = true; // lock so future waypoints won't shift destination
+          if(lastSelectedSystemName){ setP2POpen(true); setScoutOpenReal(false); }
+        }
+        closeMenu();
       });
-      optionsWrap.appendChild(item);
+      optionsWrap.appendChild(destItem);
+
+      // Add Waypoint item
+      const wpItem = document.createElement('div');
+      wpItem.className = 'context-menu-item';
+      wpItem.textContent = 'Add Waypoint';
+      wpItem.addEventListener('mousedown', e=> { e.stopPropagation(); e.preventDefault(); });
+      wpItem.addEventListener('click', e => {
+        e.stopPropagation();
+        if(contextMenuSystemRef.current){
+          const name = contextMenuSystemRef.current.name;
+          // If system already destination -> ignore
+          if(name === lastDestinationSystemName) { closeMenu(); return; }
+          // If system already in avoid list -> ignore
+            if(avoidSystems.includes(name)) { closeMenu(); return; }
+          // Conflict rule (b): adding waypoint removes from avoid if present (handled above) OR if it was destination? we treat destination separately
+          addWaypoint(name);
+          // Auto-open panel
+          if(lastSelectedSystemName){ setP2POpen(true); setScoutOpenReal(false); }
+          // If destination not locked and no explicit destination set yet and no destination chosen -> first waypoint becomes destination
+          if(!destinationLockedRef.current && !lastDestinationSystemName){
+            setLastDestinationSystemName(name);
+          }
+        }
+        closeMenu();
+      });
+      optionsWrap.appendChild(wpItem);
+
+      // Avoid System item
+      const avoidItem = document.createElement('div');
+      avoidItem.className = 'context-menu-item';
+      avoidItem.textContent = 'Avoid System';
+      avoidItem.addEventListener('mousedown', e=> { e.stopPropagation(); e.preventDefault(); });
+      avoidItem.addEventListener('click', e => {
+        e.stopPropagation();
+        if(contextMenuSystemRef.current){
+          const name = contextMenuSystemRef.current.name;
+          // Cannot avoid current destination or from system or waypoints (we remove from waypoints then add to avoid per rule b)
+          if(name === lastSelectedSystemName || name === lastDestinationSystemName){ closeMenu(); return; }
+          // If waypoint currently, remove it then add to avoid (rule b)
+          if(waypoints.includes(name)){ setWaypoints(prev => prev.filter(w => w !== name)); }
+          if(!avoidSystems.includes(name)) addAvoidSystem(name);
+          if(lastSelectedSystemName){ setP2POpen(true); setScoutOpenReal(false); }
+        }
+        closeMenu();
+      });
+      optionsWrap.appendChild(avoidItem);
+
       inner.appendChild(optionsWrap);
       el.appendChild(inner);
       const menuObj = new CSS2DObject(el);
@@ -2667,6 +2792,12 @@ function App() {
               setScoutInvalidateToken(t=> t+1);
               if(window.location.hash){ try { history.replaceState(null,'', window.location.pathname + window.location.search); } catch {/* ignore */} }
               setSearchQuery('');
+              // Clear advanced routing state
+              setWaypoints([]);
+              setAvoidSystems([]);
+              setWaypointOptimize(false);
+              // (Destination not explicitly required to reset per spec, keep unless you want to uncomment next line)
+              // setLastDestinationSystemName('');
               setResetToken(t=> t+1);
             }}
             aria-label="Reset all inputs"
@@ -2800,6 +2931,12 @@ function App() {
           resetToken={resetToken}
           selectedSystemName={lastSelectedSystemName}
           selectedDestinationSystemName={lastDestinationSystemName}
+            waypoints={waypoints}
+            avoidSystems={avoidSystems}
+            onRemoveWaypoint={removeWaypoint}
+            onRemoveAvoidSystem={removeAvoidSystem}
+            waypointOptimize={waypointOptimize}
+            onWaypointOptimizeChange={setWaypointOptimize}
         />
         <ScoutOptimizer
           open={scoutOpen}
