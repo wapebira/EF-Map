@@ -201,12 +201,12 @@ function App() {
       </div>
       <p style={{ margin:0 }}>There’s no obligation to contribute. If you’d like to chip in, that support is very, very, very much appreciated—and it helps me cover the basics while keeping the app free for everyone.</p>
       <p style={{ margin:0 }}>
+        <button type="button" onClick={()=> setCryptoModalOpen(true)} style={{ cursor:'pointer', display:'inline-block', background:'var(--accent)', color:'#fff', padding:'10px 18px', border:'none', borderRadius:6, fontWeight:700, textDecoration:'none', boxShadow:'0 2px 6px rgba(0,0,0,0.45)', letterSpacing:'.5px' }}>Donate via Crypto</button>
+      </p>
+      <p style={{ margin:'0 0 2px 0' }}>
         <a href="https://donate.stripe.com/8x200j3krbO9aVtdLS4gg00" target="_blank" rel="noopener noreferrer" style={{ display:'inline-block', background:'var(--accent)', color:'#fff', padding:'10px 18px', borderRadius:6, fontWeight:700, textDecoration:'none', boxShadow:'0 2px 6px rgba(0,0,0,0.45)', letterSpacing:'.5px' }}>Donate via Stripe</a>
       </p>
-      <p style={{ margin:0 }}>
-        <button onClick={()=> setCryptoModalOpen(true)} style={{ cursor:'pointer', display:'inline-block', background:'var(--accent)', color:'#fff', padding:'10px 18px', border:'none', borderRadius:6, fontWeight:700, textDecoration:'none', boxShadow:'0 2px 6px rgba(0,0,0,0.45)', letterSpacing:'.5px' }}>Donate via Crypto</button>
-      </p>
-      <p style={{ margin:0, fontSize:'12px', opacity:.65 }}>Opens secure Stripe payment page in a new tab.</p>
+      <p style={{ margin:0, fontSize:'12px', opacity:.65 }}>Stripe opens in a new secure tab.</p>
     </div>
   );
   // Bloom strength (committed) and draft for deferred apply (performance)
