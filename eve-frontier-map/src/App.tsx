@@ -128,7 +128,7 @@ type SqlValue = number | string | Uint8Array | null;
 
 // Define colors for selection and base
 const DEFAULT_STAR_COLOR = new THREE.Color(0xffffff);
-const SELECTED_STAR_COLOR = new THREE.Color(0x00aaff); // Blue for selected star when DPC is off
+let SELECTED_STAR_COLOR = new THREE.Color(0xff4c26); // Will track accent (orange default)
 const REGION_OUTLINE_COLOR = new THREE.Color(0x00aaff); // Shared blue for region outlines
 
 function App() {
@@ -435,6 +435,8 @@ function App() {
     }
     // Update runtime three.js colors used by the app
   const accentHex = accentIsBlue ? 0x00aaff : 0xff4c26;
+  // Keep module-scoped selected color in sync so selection effect uses correct accent
+  SELECTED_STAR_COLOR = new THREE.Color(accentHex);
     // Update hover material if exists
     if (hoverPointRef.current) {
       (hoverPointRef.current.material as THREE.PointsMaterial).color.set(accentHex);
@@ -550,33 +552,20 @@ function App() {
     }
     selectedLabelObj.current.visible = true;
 
-    // Immediately recolor the selected star (previous behavior regressed when logic moved into effect hooks)
+    // Fast local recolor so user sees feedback before layout effect re-runs.
     try {
-      if (!isPlanetCountActive && sceneRef.current && starFieldRef.current) {
-        const geom = starFieldRef.current.geometry as THREE.BufferGeometry;
-        const starColorsAttr = geom.attributes.color as THREE.BufferAttribute | undefined;
-        if (starColorsAttr) {
-          const arr = starColorsAttr.array as Float32Array;
-          const idx = visibleSystemsRef.current.findIndex(s => s.id === system.id);
-          if (idx !== -1) {
-            // First, if there was a previously highlighted system (different), restore its base color
-            // We do a minimal reset rather than re-running the full coloring pass to keep this fast.
-            // (Full pass still happens in the rendering effect if needed.)
-            if (highlightedSystem && highlightedSystem.id !== system.id) {
-              const prevIndex = visibleSystemsRef.current.findIndex(s => s.id === highlightedSystem.id);
-              if (prevIndex !== -1) {
-                DEFAULT_STAR_COLOR.toArray(arr, prevIndex * 3);
-              }
-            }
-            const accentHex = accentIsBlue ? 0x00aaff : 0xff4c26;
-            new THREE.Color(accentHex).toArray(arr, idx * 3);
-            starColorsAttr.needsUpdate = true;
-          }
+      if (!isPlanetCountActive && !isRegionHighlighterActive && starFieldRef.current) {
+        const starColorsAttr = (starFieldRef.current.geometry as THREE.BufferGeometry).attributes.color as THREE.BufferAttribute;
+        const idx = visibleSystemsRef.current.findIndex(s => s.id === system.id);
+        if (idx !== -1) {
+          const accentHex = accentIsBlue ? 0x00aaff : 0xff4c26;
+          new THREE.Color(accentHex).toArray(starColorsAttr.array as Float32Array, idx * 3);
+          starColorsAttr.needsUpdate = true;
         }
       }
-    } catch { /* non-fatal */ }
+    } catch { /* ignore */ }
 
-  }, [createSystemLabelElement, setLabelText, getTransformedPosition, isPlanetCountActive, accentIsBlue, highlightedSystem]);
+  }, [createSystemLabelElement, setLabelText, getTransformedPosition, isPlanetCountActive, isRegionHighlighterActive, accentIsBlue]);
 
   // Initialize and manage the routing worker
   useEffect(() => {
