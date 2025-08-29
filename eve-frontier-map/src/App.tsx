@@ -148,6 +148,7 @@ function App() {
   const [uiScale, setUiScale] = useState(1); // active scale (applies only to main panels + toolbar)
   const [highlightedSystem, setHighlightedSystem] = useState<SolarSystem | null>(null);
   const [lastSelectedSystemName, setLastSelectedSystemName] = useState<string>(''); // propagate to modules
+  const [lastDestinationSystemName, setLastDestinationSystemName] = useState<string>(''); // right-click destination propagation
   const [hoveredSystem, setHoveredSystem] = useState<SolarSystem | null>(null);
   const [isRegionHighlighterActive, setIsRegionHighlighterActive] = useState(false);
   const [isPlanetCountActive, setIsPlanetCountActive] = useState(false);
@@ -261,6 +262,10 @@ function App() {
   // New state for labels
   const hoverLabelObj = useRef<CSS2DObject | null>(null);
   const selectedLabelObj = useRef<CSS2DObject | null>(null);
+  // Context menu (right-click) persistent label
+  const contextMenuObjRef = useRef<CSS2DObject | null>(null);
+  const contextMenuSystemRef = useRef<SolarSystem | null>(null);
+  const labelRendererRef = useRef<CSS2DRenderer | null>(null); // store CSS2DRenderer for pointerEvents toggling
 
   // Refs for three.js objects
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -936,7 +941,8 @@ function App() {
     currentMount.appendChild(rendererRef.current.domElement);
 
     // New: CSS2DRenderer setup
-    const labelRenderer = new CSS2DRenderer();
+  const labelRenderer = new CSS2DRenderer();
+  labelRendererRef.current = labelRenderer;
     labelRenderer.setSize(window.innerWidth, window.innerHeight);
     labelRenderer.domElement.style.position = 'absolute';
     labelRenderer.domElement.style.top = '0px';
@@ -2429,12 +2435,83 @@ function App() {
     currentRenderer.domElement.addEventListener('pointerdown', onPointerDown);
   currentRenderer.domElement.addEventListener('pointerup', onPointerUp);
   currentRenderer.domElement.addEventListener('pointerleave', onPointerLeave);
+    // Right-click context menu for setting destination
+    const onContextMenu = (event: MouseEvent) => {
+      if(!hoveredSystem) return; // only active when a star is hovered
+      event.preventDefault();
+      // Remove existing context menu label
+      if(contextMenuObjRef.current){
+        try {
+          if(contextMenuObjRef.current.parent){
+            contextMenuObjRef.current.parent.remove(contextMenuObjRef.current);
+            if(sceneRef.current && contextMenuObjRef.current.parent instanceof THREE.Object3D){
+              sceneRef.current.remove(contextMenuObjRef.current.parent);
+            }
+          }
+        } catch {/* ignore */}
+        contextMenuObjRef.current = null;
+      }
+      contextMenuSystemRef.current = hoveredSystem;
+      // Build persistent label parent at system position
+      const parent = new THREE.Object3D();
+      const pos = getTransformedPosition(hoveredSystem.position);
+      parent.position.set(pos.x,pos.y,pos.z);
+      sceneRef.current?.add(parent);
+      // Build label element replicating hover formatting (planets, distance)
+      const el = document.createElement('div');
+      el.className = 'system-label-wrapper';
+      const inner = document.createElement('div');
+      inner.className = 'system-label system-label--selected';
+      // Compose text like hover label
+      let labelText = hoveredSystem.name;
+      if(isPlanetCountActive){ labelText += ` (${hoveredSystem.planets} planets)`; }
+      if(showDistance && highlightedSystem){
+        const p1 = hoveredSystem.position; const p2 = highlightedSystem.position;
+        const dist = Math.sqrt((p2.x-p1.x)**2 + (p2.y-p1.y)**2 + (p2.z-p1.z)**2);
+        labelText += ` | ${dist.toFixed(2)} LY`;
+      }
+      inner.textContent = labelText;
+      // Add action button
+      const btn = document.createElement('button');
+      btn.textContent = 'Set Destination';
+      btn.style.marginLeft = '8px';
+      btn.style.cursor = 'pointer';
+      btn.style.background = 'var(--accent)';
+      btn.style.border = 'none';
+      btn.style.color = '#fff';
+      btn.style.padding = '2px 6px';
+      btn.style.fontSize = '11px';
+      btn.style.borderRadius = '3px';
+      btn.addEventListener('click', (e)=>{
+        e.stopPropagation();
+        if(contextMenuSystemRef.current){
+          setLastDestinationSystemName(contextMenuSystemRef.current.name);
+        }
+        // Cleanup context menu after selection
+        try {
+          if(contextMenuObjRef.current && contextMenuObjRef.current.parent){
+            contextMenuObjRef.current.parent.remove(contextMenuObjRef.current);
+            if(sceneRef.current && contextMenuObjRef.current.parent instanceof THREE.Object3D){
+              sceneRef.current.remove(contextMenuObjRef.current.parent);
+            }
+          }
+        } catch {/* ignore */}
+        contextMenuObjRef.current = null; contextMenuSystemRef.current = null;
+      });
+      inner.appendChild(btn);
+      el.appendChild(inner);
+      const menuObj = new CSS2DObject(el);
+      contextMenuObjRef.current = menuObj;
+      parent.add(menuObj);
+    };
+    currentRenderer.domElement.addEventListener('contextmenu', onContextMenu);
 
     return () => {
       currentRenderer.domElement.removeEventListener('pointermove', onPointerMove);
       currentRenderer.domElement.removeEventListener('pointerdown', onPointerDown);
   currentRenderer.domElement.removeEventListener('pointerup', onPointerUp);
   currentRenderer.domElement.removeEventListener('pointerleave', onPointerLeave);
+  currentRenderer.domElement.removeEventListener('contextmenu', onContextMenu);
     };
   }, [isLoaded, hoveredSystem, isDraggingRef, mouseDownPosRef, mouseDownTimeRef, createSystemLabelElement, selectSystem, isPlanetCountActive, showDistance, highlightedSystem, cinematicMode, cinematicLabels]);
 
@@ -2686,6 +2763,7 @@ function App() {
           onToggle={toggleP2P}
           resetToken={resetToken}
           selectedSystemName={lastSelectedSystemName}
+          selectedDestinationSystemName={lastDestinationSystemName}
         />
         <ScoutOptimizer
           open={scoutOpen}
