@@ -203,6 +203,7 @@ interface P2PRoutingProps {
   open: boolean;
   onToggle: (open: boolean) => void;
   resetToken?: number; // increments when parent requests a reset
+  selectedSystemName?: string; // externally selected system (map click / global search)
 }
 
 // Minimal neutral custom select (no accent colors) for consistent option highlight across platforms
@@ -255,7 +256,7 @@ const NeutralSelect = <T extends string>({ value, onChange, options, ariaLabel, 
   );
 };
 
-const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeResult, mapData, systemNames, progress, routeCalcTimeMs, open, onToggle, resetToken }: P2PRoutingProps) => {
+const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeResult, mapData, systemNames, progress, routeCalcTimeMs, open, onToggle, resetToken, selectedSystemName }: P2PRoutingProps) => {
   const [fromSystem, setFromSystem] = useState('');
   const [toSystem, setToSystem] = useState('');
   const [jumpDistance, setJumpDistance] = useState('60');
@@ -319,6 +320,13 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
   setIncludeLegend(true);
   setIncludeStats(false);
   }, [resetToken]);
+
+  // Update From system when an external system selection occurs
+  useEffect(()=>{
+    if(selectedSystemName){
+      setFromSystem(selectedSystemName);
+    }
+  }, [selectedSystemName]);
 
   return (
     <div className="p2p-routing-container">

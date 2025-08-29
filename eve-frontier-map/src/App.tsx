@@ -147,6 +147,7 @@ function App() {
   const uiScaleStops = [0.5,0.6,0.7,0.8,0.9,1.0,1.1,1.2,1.3];
   const [uiScale, setUiScale] = useState(1); // active scale (applies only to main panels + toolbar)
   const [highlightedSystem, setHighlightedSystem] = useState<SolarSystem | null>(null);
+  const [lastSelectedSystemName, setLastSelectedSystemName] = useState<string>(''); // propagate to modules
   const [hoveredSystem, setHoveredSystem] = useState<SolarSystem | null>(null);
   const [isRegionHighlighterActive, setIsRegionHighlighterActive] = useState(false);
   const [isPlanetCountActive, setIsPlanetCountActive] = useState(false);
@@ -483,6 +484,8 @@ function App() {
   const selectSystem = useCallback((system: SolarSystem) => {
     // Set the highlighted system for camera animation and the main rendering effect
     setHighlightedSystem(system);
+  // Store name for external consumers (P2P / Scout)
+  try { setLastSelectedSystemName(system.name); } catch {/* ignore */}
 
     // Skip label creation while in cinematic mode unless labels enabled
     if(cinematicModeRef.current && !cinematicLabelsRef.current){
@@ -2443,6 +2446,8 @@ function App() {
         );
       if (foundSystem) {
         selectSystem(foundSystem);
+  // ensure external selection propagation even if already highlighted
+  setLastSelectedSystemName(foundSystem.name);
       } else {
         setHighlightedSystem(null);
         alert('System not found');
@@ -2680,6 +2685,7 @@ function App() {
           open={p2pOpen}
           onToggle={toggleP2P}
           resetToken={resetToken}
+          selectedSystemName={lastSelectedSystemName}
         />
         <ScoutOptimizer
           open={scoutOpen}
@@ -2691,6 +2697,7 @@ function App() {
           invalidateToken={scoutInvalidateToken}
           importedRoutePath={scoutRouteResult?.path || null}
           resetToken={resetToken}
+          selectedSystemName={lastSelectedSystemName}
           onBaselineRoute={(path)=>{ 
             setScoutRouteResult({ path }); 
             // Clear existing hash on new scout route

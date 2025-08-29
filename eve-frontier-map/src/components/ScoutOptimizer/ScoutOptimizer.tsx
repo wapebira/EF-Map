@@ -20,11 +20,12 @@ interface ScoutOptimizerProps {
 	invalidateToken?: number; // external invalidation (e.g. P2P route started)
 	importedRoutePath?: string[] | null; // path supplied from shared URL (expanded display path)
 	resetToken?: number; // external reset for clearing all inputs
+	selectedSystemName?: string; // externally selected system (map click / global search)
 }
 
 const MAX_SYSTEMS_WARNING = 300;
 
-const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, onReturnToStartChange, onBaselineRoute, onOptimizedRoute, onClearRoute, invalidateToken, importedRoutePath, resetToken }: ScoutOptimizerProps) => {
+const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, onReturnToStartChange, onBaselineRoute, onOptimizedRoute, onClearRoute, invalidateToken, importedRoutePath, resetToken, selectedSystemName }: ScoutOptimizerProps) => {
 	const [startSystem, setStartSystem] = useState('');
 	const [radius, setRadius] = useState('50');
 	const [useRegion, setUseRegion] = useState(false);
@@ -120,6 +121,13 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		if(globalMonitorRef.current!==undefined){ clearInterval(globalMonitorRef.current); globalMonitorRef.current=undefined; }
 		generationRef.current += 1; // invalidate any stray worker messages
 	}, [resetToken]);
+
+	// Update start system when external system selection occurs
+	useEffect(()=>{
+		if(selectedSystemName){
+			setStartSystem(selectedSystemName);
+		}
+	}, [selectedSystemName]);
 
 	const stargatesArray = mapData ? Object.values(mapData.stargates) : [];
 	const gatesBySource: {[id:number]: number[]} = {}; stargatesArray.forEach(g=>{ if(!gatesBySource[g.source_system_id]) gatesBySource[g.source_system_id]=[]; gatesBySource[g.source_system_id].push(g.destination_system_id); if(!gatesBySource[g.destination_system_id]) gatesBySource[g.destination_system_id]=[]; gatesBySource[g.destination_system_id].push(g.source_system_id); });
