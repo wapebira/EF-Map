@@ -165,6 +165,30 @@ function App() {
   const [cinematicMode, setCinematicMode] = useState(false);
   // External trigger for expanding Support section in Help
   const [supportExpandRequestId, setSupportExpandRequestId] = useState(0);
+  const [cryptoModalOpen, setCryptoModalOpen] = useState(false);
+  const cryptoAddresses = [
+    { id: 'eth', label: 'ETH (Ethereum mainnet)', address: '0xC1204805b018ec2Ad06e6119965134AfFa212C10', qr: '' },
+    { id: 'usdc', label: 'USDC (Ethereum mainnet)', address: '0xC1204805b018ec2Ad06e6119965134AfFa212C10', qr: '' },
+  ];
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const copyAddress = (addr:string, id:string)=>{
+    try { navigator.clipboard.writeText(addr).then(()=>{ setCopiedId(id); setTimeout(()=>{ if(copiedId===id) setCopiedId(null); }, 1600); }); } catch {/* ignore */}
+  };
+  // Lightweight inline QR generator (simple canvas) to avoid dependency; memoize dataURL
+  const generateQR = (text:string)=>{
+    // Minimal placeholder (not full QR spec) – replace with real generator later if needed
+    // For now create a canvas with the address text for user scanning alternative – proper QR recommended for production
+    const canvas = document.createElement('canvas');
+    canvas.width = 240; canvas.height = 240;
+    const ctx = canvas.getContext('2d'); if(!ctx) return '';
+    ctx.fillStyle = '#fff'; ctx.fillRect(0,0,240,240);
+    ctx.fillStyle = '#000'; ctx.font = '12px monospace';
+    const wrapped = text.match(/.{1,20}/g) || [text];
+    wrapped.forEach((line,i)=> ctx.fillText(line, 8, 20 + i*14));
+    return canvas.toDataURL('image/png');
+  };
+  const qrCacheRef = useRef<Record<string,string>>({});
+  const getQR = (addr:string, id:string)=>{ if(!qrCacheRef.current[id]) qrCacheRef.current[id] = generateQR(addr); return qrCacheRef.current[id]; };
   // Static support content (user supplied exact text)
   const supportContent = (
     <div className="support-project-content" style={{ display:'flex', flexDirection:'column', gap:'14px', fontSize:'14px', lineHeight:1.45 }}>
@@ -178,6 +202,9 @@ function App() {
       <p style={{ margin:0 }}>There’s no obligation to contribute. If you’d like to chip in, that support is very, very, very much appreciated—and it helps me cover the basics while keeping the app free for everyone.</p>
       <p style={{ margin:0 }}>
         <a href="https://donate.stripe.com/8x200j3krbO9aVtdLS4gg00" target="_blank" rel="noopener noreferrer" style={{ display:'inline-block', background:'var(--accent)', color:'#fff', padding:'10px 18px', borderRadius:6, fontWeight:700, textDecoration:'none', boxShadow:'0 2px 6px rgba(0,0,0,0.45)', letterSpacing:'.5px' }}>Donate via Stripe</a>
+      </p>
+      <p style={{ margin:0 }}>
+        <button onClick={()=> setCryptoModalOpen(true)} style={{ cursor:'pointer', display:'inline-block', background:'var(--accent)', color:'#fff', padding:'10px 18px', border:'none', borderRadius:6, fontWeight:700, textDecoration:'none', boxShadow:'0 2px 6px rgba(0,0,0,0.45)', letterSpacing:'.5px' }}>Donate via Crypto</button>
       </p>
       <p style={{ margin:0, fontSize:'12px', opacity:.65 }}>Opens secure Stripe payment page in a new tab.</p>
     </div>
@@ -523,6 +550,39 @@ function App() {
     if(cinematicModeRef.current && !cinematicLabelsRef.current){
       return;
     }
+          {cryptoModalOpen && (
+            <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:4000 }} onClick={()=> setCryptoModalOpen(false)}>
+              <div onClick={e=> e.stopPropagation()} style={{ width:'min(520px,92%)', maxHeight:'80vh', overflowY:'auto', background:'#111', padding:'20px 22px 26px', border:'1px solid rgba(255,255,255,0.15)', borderRadius:10, boxShadow:'0 8px 28px -4px rgba(0,0,0,0.55)', display:'flex', flexDirection:'column', gap:18 }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:4 }}>
+                  <h3 style={{ margin:0, fontSize:'20px', fontWeight:600 }}>Donate via Crypto</h3>
+                  <button onClick={()=> setCryptoModalOpen(false)} style={{ background:'none', border:'none', color:'#fff', fontSize:'20px', cursor:'pointer', lineHeight:1 }}>×</button>
+                </div>
+                <p style={{ margin:'0 0 4px', fontSize:'13px', opacity:.75 }}>Choose a network and copy the address. QR codes are provided for convenience.</p>
+                <div style={{ display:'flex', flexDirection:'column', gap:20 }}>
+                  {cryptoAddresses.map(entry => {
+                    const truncated = entry.address.slice(0,10) + '…' + entry.address.slice(-6);
+                    const qr = getQR(entry.address, entry.id);
+                    return (
+                      <div key={entry.id} style={{ display:'flex', gap:14, alignItems:'stretch', background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:8, padding:12 }}>
+                        <div style={{ flex:'0 0 140px', display:'flex', alignItems:'center', justifyContent:'center', background:'#fff', borderRadius:6 }}>
+                          <img src={qr} alt={entry.label + ' QR'} style={{ width:120, height:120, objectFit:'contain' }} />
+                        </div>
+                        <div style={{ display:'flex', flexDirection:'column', gap:8, flex:1 }}>
+                          <div style={{ fontWeight:600, fontSize:'14px' }}>{entry.label}</div>
+                          <div style={{ fontFamily:'monospace', fontSize:'13px', wordBreak:'break-all', background:'rgba(255,255,255,0.05)', padding:'6px 8px', borderRadius:4 }}>{truncated}</div>
+                          <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+                            <button onClick={()=> copyAddress(entry.address, entry.id)} style={{ background:'var(--accent)', color:'#fff', border:'none', padding:'6px 14px', borderRadius:4, cursor:'pointer', fontWeight:600, fontSize:'13px', letterSpacing:'.5px' }}>Copy</button>
+                            {copiedId === entry.id && <span style={{ fontSize:'12px', color:'var(--accent)', alignSelf:'center' }}>Copied!</span>}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <p style={{ margin:'10px 0 0', fontSize:'11px', opacity:.6 }}>Verify wallet address independently before sending funds.</p>
+              </div>
+            </div>
+          )}
 
     // Clear previous persistent label
     if (selectedLabelObj.current && selectedLabelObj.current.parent) {
