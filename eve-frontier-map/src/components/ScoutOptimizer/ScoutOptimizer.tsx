@@ -821,7 +821,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 							<h4>Route Note{notePages.length>1?` (Page ${activeNotePage+1}/${notePages.length})`:''}</h4>
 							<div style={{ display:'flex', flexDirection:'column', gap:4, marginBottom:6 }}>
 								<label className="route-note-option-label"><input type="checkbox" checked={includeLegend} onChange={e=> setIncludeLegend(e.target.checked)} /> Include Legend</label>
-								<label className="route-note-option-label"><input type="checkbox" checked={includeStats} onChange={e=> setIncludeStats(e.target.checked)} /> Include Route Statistics (first page)</label>
+								<label className="route-note-option-label"><input type="checkbox" checked={includeStats} onChange={e=> setIncludeStats(e.target.checked)} /> Include Route Statistics</label>
 							</div>
 							<div className="scout-grid-buttons">
 								{notePages.map((_,idx)=>(

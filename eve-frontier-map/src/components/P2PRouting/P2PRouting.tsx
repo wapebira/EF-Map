@@ -436,7 +436,7 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
                   <input type="checkbox" checked={includeLegend} onChange={e=> setIncludeLegend(e.target.checked)} /> Include Legend
                 </label>
                 <label className="route-note-option-label">
-                  <input type="checkbox" checked={includeStats} onChange={e=> setIncludeStats(e.target.checked)} /> Include Route Statistics (first page)
+                  <input type="checkbox" checked={includeStats} onChange={e=> setIncludeStats(e.target.checked)} /> Include Route Statistics
                 </label>
               </div>
               <div className="p2p-copy-buttons">
