@@ -2412,7 +2412,7 @@ function App() {
         let newHoveredSystem: SolarSystem | null = null;
         let hitStarObject: THREE.Object3D | null = null;
 
-        if (intersects.length > 0 && intersects[0].index !== undefined) {
+  if (intersects.length > 0 && intersects[0].index !== undefined) {
           newHoveredSystem = visibleSystemsRef.current[intersects[0].index];
           
           const intersectedPointPosition = new THREE.Vector3();
@@ -2424,25 +2424,41 @@ function App() {
 
           setHoveredSystem(newHoveredSystem);
 
-          if (hoverLabelObj.current === null) {
-            const el = createSystemLabelElement(newHoveredSystem.name, false, newHoveredSystem.planets);
-            hoverLabelObj.current = new CSS2DObject(el);
-            hoverLabelObj.current.position.set(0, 0, 0); // Position at star's center, offset via CSS transform
-            hitStarObject.add(hoverLabelObj.current);
-          } else {
-            if (hoverLabelObj.current.parent) {
-              hoverLabelObj.current.parent.remove(hoverLabelObj.current);
-              if (sceneRef.current && hoverLabelObj.current.parent instanceof THREE.Object3D) {
-                sceneRef.current.remove(hoverLabelObj.current.parent);
+          const suppressForMenu = contextMenuObjRef.current && contextMenuSystemRef.current && contextMenuSystemRef.current.name === newHoveredSystem.name;
+          if (!suppressForMenu) {
+            if (hoverLabelObj.current === null) {
+              const el = createSystemLabelElement(newHoveredSystem.name, false, newHoveredSystem.planets);
+              hoverLabelObj.current = new CSS2DObject(el);
+              hoverLabelObj.current.position.set(0, 0, 0); // Position at star's center, offset via CSS transform
+              hitStarObject.add(hoverLabelObj.current);
+            } else {
+              if (hoverLabelObj.current.parent) {
+                hoverLabelObj.current.parent.remove(hoverLabelObj.current);
+                if (sceneRef.current && hoverLabelObj.current.parent instanceof THREE.Object3D) {
+                  sceneRef.current.remove(hoverLabelObj.current.parent);
+                }
               }
+              hitStarObject.add(hoverLabelObj.current);
+              setLabelText(hoverLabelObj.current, newHoveredSystem.name, newHoveredSystem.planets);
+              hoverLabelObj.current.position.set(0, 0, 0); // Reset offset
             }
-            hitStarObject.add(hoverLabelObj.current);
-            setLabelText(hoverLabelObj.current, newHoveredSystem.name, newHoveredSystem.planets);
-            hoverLabelObj.current.position.set(0, 0, 0); // Reset offset
+          } else {
+            // Hide any existing hover label for this system while menu shown
+            if (hoverLabelObj.current) {
+              try {
+                if (hoverLabelObj.current.parent) {
+                  hoverLabelObj.current.parent.remove(hoverLabelObj.current);
+                  if (sceneRef.current && hoverLabelObj.current.parent instanceof THREE.Object3D) {
+                    sceneRef.current.remove(hoverLabelObj.current.parent);
+                  }
+                }
+                hoverLabelObj.current.visible = false;
+              } catch { /* ignore */ }
+            }
           }
           
-          const labelElement = (hoverLabelObj.current.element as HTMLElement).querySelector('.system-label');
-          if (labelElement) {
+          const labelElement = hoverLabelObj.current ? (hoverLabelObj.current.element as HTMLElement).querySelector('.system-label') : null;
+          if (labelElement && hoverLabelObj.current && hoverLabelObj.current.visible) {
             let labelText = newHoveredSystem.name;
             if (isPlanetCountActive) {
               labelText += ` (${newHoveredSystem.planets} planets)`;
@@ -2461,7 +2477,7 @@ function App() {
             labelElement.textContent = labelText;
           }
 
-          hoverLabelObj.current.visible = true;
+          if(hoverLabelObj.current) hoverLabelObj.current.visible = ! (contextMenuObjRef.current && contextMenuSystemRef.current && contextMenuSystemRef.current.name === newHoveredSystem?.name);
 
         } else {
           setHoveredSystem(null);
