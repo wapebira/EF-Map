@@ -142,6 +142,16 @@ input[type=number].p2p-input { -moz-appearance: textfield; appearance: textfield
   background-color: var(--accent);
 }
 
+/* Route note option labels (shared styling expectation) */
+.route-note-option-label {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #ccc;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .error {
   color: #ff4c26;
   font-weight: bold;
