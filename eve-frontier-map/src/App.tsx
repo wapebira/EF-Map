@@ -2313,6 +2313,21 @@ function App() {
     });
   }, [accentIsBlue]);
 
+  // Final pass to ensure selected star is colored with accent after all other color pipelines.
+  useEffect(() => {
+    if (!starFieldRef.current || !highlightedSystem) return;
+    if (cinematicMode) return; // cinematic palette handles differently
+    try {
+      const attr = (starFieldRef.current.geometry as THREE.BufferGeometry).attributes.color as THREE.BufferAttribute;
+      if (!attr) return;
+      const idx = visibleSystemsRef.current.findIndex(s => s.id === highlightedSystem.id);
+      if (idx === -1) return;
+      const accentHex = accentIsBlue ? 0x00aaff : 0xff4c26;
+      new THREE.Color(accentHex).toArray(attr.array as Float32Array, idx * 3);
+      attr.needsUpdate = true;
+    } catch {/* ignore */}
+  }, [highlightedSystem, accentIsBlue, cinematicMode]);
+
   // Handle camera animation
   useEffect(() => {
     if (!highlightedSystem || !controlsRef.current || !cameraRef.current) return;
