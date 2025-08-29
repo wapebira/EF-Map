@@ -640,7 +640,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		}
 		const from = pathSystems[0];
 		const to = pathSystems[pathSystems.length-1];
-		const legend = `Gate: (x)→ SmartGate: []→ Jump: ly→ | * = 1 Planet, No Gates\n`;
+		const legend = `Gate: (x)→ SmartGate: []→ Jump: <distance>→ | * = single-planet system with no stargates\n`;
 		const legendBlock = opts?.includeLegend!==false ? legend : '';
 		const statsBlock = (opts?.includeStats && opts.stats) ? `Stats: Gates ${opts.stats.gateJumps} | Ship ${opts.stats.shipJumps} | Dist ${opts.stats.totalDist.toFixed(2)} LY | ShipDist ${opts.stats.shipDist.toFixed(2)} LY\n` : '';
 		const pages: string[] = [];

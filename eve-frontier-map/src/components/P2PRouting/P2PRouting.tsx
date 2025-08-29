@@ -96,7 +96,7 @@ const formatRouteToNotes = (path: string[], mapData: MapData, options?: NoteForm
 
   const from = pathSystems[0];
   const to = pathSystems[pathSystems.length - 1];
-  const legend = `Gate: (x)→ SmartGate: []→ Jump: ly→ | * = 1 Planet, No Gates\n`;
+  const legend = `Gate: (x)→ SmartGate: []→ Jump: <distance>→ | * = single-planet system with no stargates\n`;
   const legendBlock = options?.includeLegend !== false ? legend : '';
   const statsBlock = (options?.includeStats && options?.summary) ?
     `Stats: Gates ${options.summary.stargateJumps} | Ship ${options.summary.shipJumps} | Dist ${options.summary.totalDistance.toFixed(2)} LY | ShipDist ${options.summary.shipJumpDistance.toFixed(2)} LY\n` : '';
