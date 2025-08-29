@@ -53,6 +53,33 @@ body {
   user-select: none;
 }
 
+/* Context menu options inside persistent system label */
+.system-label .context-menu-options {
+  display: flex;
+  flex-direction: column;
+  margin-top: 4px;
+  gap: 2px;
+  pointer-events: auto;
+}
+.system-label .context-menu-item {
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 3px 6px;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.15);
+  cursor: pointer;
+  color: #e0e0de;
+  transition: background .12s ease, border-color .12s ease;
+  letter-spacing: .3px;
+}
+.system-label .context-menu-item:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color:#fff;
+}
+
 /* Small persistent EF Map logo bottom-right */
 .ef-small-logo {
   position: fixed;

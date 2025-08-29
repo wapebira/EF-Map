@@ -491,6 +491,18 @@ function App() {
     setHighlightedSystem(system);
   // Store name for external consumers (P2P / Scout)
   try { setLastSelectedSystemName(system.name); } catch {/* ignore */}
+    // Clear any open context menu when a new system is selected via left-click
+    if(contextMenuObjRef.current){
+      try {
+        if(contextMenuObjRef.current.parent){
+          contextMenuObjRef.current.parent.remove(contextMenuObjRef.current);
+          if(sceneRef.current && contextMenuObjRef.current.parent instanceof THREE.Object3D){
+            sceneRef.current.remove(contextMenuObjRef.current.parent);
+          }
+        }
+      } catch {/* ignore */}
+      contextMenuObjRef.current = null; contextMenuSystemRef.current = null;
+    }
 
     // Skip label creation while in cinematic mode unless labels enabled
     if(cinematicModeRef.current && !cinematicLabelsRef.current){
@@ -2436,7 +2448,7 @@ function App() {
   currentRenderer.domElement.addEventListener('pointerup', onPointerUp);
   currentRenderer.domElement.addEventListener('pointerleave', onPointerLeave);
     // Right-click context menu for setting destination
-    const onContextMenu = (event: MouseEvent) => {
+  const onContextMenu = (event: MouseEvent) => {
       if(!hoveredSystem) return; // only active when a star is hovered
       event.preventDefault();
       // Remove existing context menu label
@@ -2460,6 +2472,7 @@ function App() {
       // Build label element replicating hover formatting (planets, distance)
       const el = document.createElement('div');
       el.className = 'system-label-wrapper';
+      el.style.pointerEvents = 'auto'; // enable interaction for context menu
       const inner = document.createElement('div');
       inner.className = 'system-label system-label--selected';
       // Compose text like hover label
@@ -2470,24 +2483,24 @@ function App() {
         const dist = Math.sqrt((p2.x-p1.x)**2 + (p2.y-p1.y)**2 + (p2.z-p1.z)**2);
         labelText += ` | ${dist.toFixed(2)} LY`;
       }
-      inner.textContent = labelText;
-      // Add action button
-      const btn = document.createElement('button');
-      btn.textContent = 'Set Destination';
-      btn.style.marginLeft = '8px';
-      btn.style.cursor = 'pointer';
-      btn.style.background = 'var(--accent)';
-      btn.style.border = 'none';
-      btn.style.color = '#fff';
-      btn.style.padding = '2px 6px';
-      btn.style.fontSize = '11px';
-      btn.style.borderRadius = '3px';
-      btn.addEventListener('click', (e)=>{
+      // First line (label text)
+      const titleSpan = document.createElement('div');
+      titleSpan.textContent = labelText;
+      titleSpan.style.fontWeight = '700';
+      inner.appendChild(titleSpan);
+      // Options container
+      const optionsWrap = document.createElement('div');
+      optionsWrap.className = 'context-menu-options';
+      const item = document.createElement('div');
+      item.className = 'context-menu-item';
+      item.textContent = 'Set Destination';
+      item.addEventListener('mousedown', (e)=>{ e.stopPropagation(); e.preventDefault(); });
+      item.addEventListener('click', (e)=>{
         e.stopPropagation();
         if(contextMenuSystemRef.current){
           setLastDestinationSystemName(contextMenuSystemRef.current.name);
         }
-        // Cleanup context menu after selection
+        // cleanup
         try {
           if(contextMenuObjRef.current && contextMenuObjRef.current.parent){
             contextMenuObjRef.current.parent.remove(contextMenuObjRef.current);
@@ -2498,13 +2511,31 @@ function App() {
         } catch {/* ignore */}
         contextMenuObjRef.current = null; contextMenuSystemRef.current = null;
       });
-      inner.appendChild(btn);
+      optionsWrap.appendChild(item);
+      inner.appendChild(optionsWrap);
       el.appendChild(inner);
       const menuObj = new CSS2DObject(el);
       contextMenuObjRef.current = menuObj;
       parent.add(menuObj);
     };
     currentRenderer.domElement.addEventListener('contextmenu', onContextMenu);
+    // Close context menu on left click anywhere outside menu
+    const closeOnLeftClick = (ev: MouseEvent) => {
+      if(ev.button !== 0) return;
+      if(!contextMenuObjRef.current) return;
+      const el = contextMenuObjRef.current.element as HTMLElement;
+      if(el && ev.target instanceof Node && el.contains(ev.target)) return; // click inside menu
+      try {
+        if(contextMenuObjRef.current.parent){
+          contextMenuObjRef.current.parent.remove(contextMenuObjRef.current);
+          if(sceneRef.current && contextMenuObjRef.current.parent instanceof THREE.Object3D){
+            sceneRef.current.remove(contextMenuObjRef.current.parent);
+          }
+        }
+      } catch {/* ignore */}
+      contextMenuObjRef.current = null; contextMenuSystemRef.current = null;
+    };
+    window.addEventListener('mousedown', closeOnLeftClick);
 
     return () => {
       currentRenderer.domElement.removeEventListener('pointermove', onPointerMove);
@@ -2512,6 +2543,7 @@ function App() {
   currentRenderer.domElement.removeEventListener('pointerup', onPointerUp);
   currentRenderer.domElement.removeEventListener('pointerleave', onPointerLeave);
   currentRenderer.domElement.removeEventListener('contextmenu', onContextMenu);
+  window.removeEventListener('mousedown', closeOnLeftClick);
     };
   }, [isLoaded, hoveredSystem, isDraggingRef, mouseDownPosRef, mouseDownTimeRef, createSystemLabelElement, selectSystem, isPlanetCountActive, showDistance, highlightedSystem, cinematicMode, cinematicLabels]);
 
