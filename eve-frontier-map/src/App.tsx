@@ -2540,6 +2540,18 @@ function App() {
   const onContextMenu = (event: MouseEvent) => {
       if(!hoveredSystem) return; // only active when a star is hovered
       event.preventDefault();
+      // Immediately suppress existing hover label for this system so it doesn't overlap menu
+      if(hoverLabelObj.current){
+        try {
+          if(hoverLabelObj.current.parent){
+            hoverLabelObj.current.parent.remove(hoverLabelObj.current);
+            if(sceneRef.current && hoverLabelObj.current.parent instanceof THREE.Object3D){
+              sceneRef.current.remove(hoverLabelObj.current.parent);
+            }
+          }
+          hoverLabelObj.current.visible = false;
+        } catch { /* ignore */ }
+      }
       // Remove existing context menu label
       if(contextMenuObjRef.current){
         try {
