@@ -550,7 +550,33 @@ function App() {
     }
     selectedLabelObj.current.visible = true;
 
-  }, [createSystemLabelElement, setLabelText, getTransformedPosition]);
+    // Immediately recolor the selected star (previous behavior regressed when logic moved into effect hooks)
+    try {
+      if (!isPlanetCountActive && sceneRef.current && starFieldRef.current) {
+        const geom = starFieldRef.current.geometry as THREE.BufferGeometry;
+        const starColorsAttr = geom.attributes.color as THREE.BufferAttribute | undefined;
+        if (starColorsAttr) {
+          const arr = starColorsAttr.array as Float32Array;
+          const idx = visibleSystemsRef.current.findIndex(s => s.id === system.id);
+          if (idx !== -1) {
+            // First, if there was a previously highlighted system (different), restore its base color
+            // We do a minimal reset rather than re-running the full coloring pass to keep this fast.
+            // (Full pass still happens in the rendering effect if needed.)
+            if (highlightedSystem && highlightedSystem.id !== system.id) {
+              const prevIndex = visibleSystemsRef.current.findIndex(s => s.id === highlightedSystem.id);
+              if (prevIndex !== -1) {
+                DEFAULT_STAR_COLOR.toArray(arr, prevIndex * 3);
+              }
+            }
+            const accentHex = accentIsBlue ? 0x00aaff : 0xff4c26;
+            new THREE.Color(accentHex).toArray(arr, idx * 3);
+            starColorsAttr.needsUpdate = true;
+          }
+        }
+      }
+    } catch { /* non-fatal */ }
+
+  }, [createSystemLabelElement, setLabelText, getTransformedPosition, isPlanetCountActive, accentIsBlue, highlightedSystem]);
 
   // Initialize and manage the routing worker
   useEffect(() => {
