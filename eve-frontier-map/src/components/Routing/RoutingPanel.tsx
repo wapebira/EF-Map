@@ -28,6 +28,10 @@ interface RoutingPanelProps {
   onBaselineRoute?:(path:string[])=>void;
   onOptimizedRoute?:(path:string[])=>void;
   onScoutClearRoute?:()=>void;
+  initialJumpDistance?: number;
+  initialOptimizeFor?: 'fuel' | 'jumps';
+  initialAlgorithm?: 'astar' | 'dijkstra';
+  onRoutingParamChange?:(jump:number,opt:'fuel'|'jumps',algo:'astar'|'dijkstra')=>void;
 }
 
 const RoutingPanel: React.FC<RoutingPanelProps> = (props) => {
@@ -60,6 +64,10 @@ const RoutingPanel: React.FC<RoutingPanelProps> = (props) => {
           onRemoveAvoidSystem={props.onRemoveAvoidSystem}
           waypointOptimize={props.waypointOptimize}
           onWaypointOptimizeChange={props.onWaypointOptimizeChange}
+          initialJumpDistance={props.initialJumpDistance}
+          initialOptimizeFor={props.initialOptimizeFor}
+          initialAlgorithm={props.initialAlgorithm}
+          onParamChange={props.onRoutingParamChange}
         />
       )}
       {tab==='scout' && (

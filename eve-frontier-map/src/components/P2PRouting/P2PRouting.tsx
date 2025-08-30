@@ -212,6 +212,10 @@ interface P2PRoutingProps {
   waypointOptimize?: boolean; // false = visit in added order, true = optimize order (future)
   onWaypointOptimizeChange?: (v: boolean)=>void;
   embedded?: boolean; // if true, omit outer toggle wrapper and always show panel
+  initialJumpDistance?: number; // persisted default
+  initialOptimizeFor?: 'fuel' | 'jumps';
+  initialAlgorithm?: 'astar' | 'dijkstra';
+  onParamChange?: (jump:number, optimize:'fuel'|'jumps', algorithm:'astar'|'dijkstra')=>void;
 }
 
 // Minimal neutral custom select (no accent colors) for consistent option highlight across platforms
@@ -264,12 +268,12 @@ const NeutralSelect = <T extends string>({ value, onChange, options, ariaLabel, 
   );
 };
 
-const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeResult, mapData, systemNames, progress, routeCalcTimeMs, open, onToggle, resetToken, selectedSystemName, selectedDestinationSystemName, waypoints = [], avoidSystems = [], onRemoveWaypoint, onRemoveAvoidSystem, waypointOptimize = false, onWaypointOptimizeChange, embedded = false }: P2PRoutingProps) => {
+const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeResult, mapData, systemNames, progress, routeCalcTimeMs, open, onToggle, resetToken, selectedSystemName, selectedDestinationSystemName, waypoints = [], avoidSystems = [], onRemoveWaypoint, onRemoveAvoidSystem, waypointOptimize = false, onWaypointOptimizeChange, embedded = false, initialJumpDistance=60, initialOptimizeFor='fuel', initialAlgorithm='astar', onParamChange }: P2PRoutingProps) => {
   const [fromSystem, setFromSystem] = useState('');
   const [toSystem, setToSystem] = useState('');
-  const [jumpDistance, setJumpDistance] = useState('60');
-  const [optimizeFor, setOptimizeFor] = useState<'fuel' | 'jumps'>('fuel');
-  const [algorithm, setAlgorithm] = useState<'astar' | 'dijkstra'>('astar');
+  const [jumpDistance, setJumpDistance] = useState(String(initialJumpDistance));
+  const [optimizeFor, setOptimizeFor] = useState<'fuel' | 'jumps'>(initialOptimizeFor);
+  const [algorithm, setAlgorithm] = useState<'astar' | 'dijkstra'>(initialAlgorithm);
 
   const [notePages, setNotePages] = useState<string[]>([]);
   const [includeLegend, setIncludeLegend] = useState(true);
@@ -298,6 +302,7 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
       return;
     }
   onCalculateRoute(fromSystem, toSystem, distance, optimizeFor, algorithm);
+  if(onParamChange) onParamChange(distance, optimizeFor, algorithm);
   };
 
   const handleCopy = (pageIndex: number) => {
@@ -413,8 +418,8 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
               id="jump-distance"
               type="number"
               value={jumpDistance}
-              onChange={(e) => setJumpDistance(e.target.value)}
-                className="p2p-input"
+              onChange={(e) => { setJumpDistance(e.target.value); const v=parseFloat(e.target.value); if(!isNaN(v) && onParamChange) onParamChange(v, optimizeFor, algorithm); }}
+              className="p2p-input"
             />
           </div>
 
@@ -424,7 +429,7 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
               id="optimize-for"
               ariaLabel="Optimize For"
               value={optimizeFor}
-              onChange={(v)=> setOptimizeFor(v as 'fuel'|'jumps')}
+              onChange={(v)=> { const val=v as 'fuel'|'jumps'; setOptimizeFor(val); if(onParamChange){ const dist=parseFloat(jumpDistance); if(!isNaN(dist)) onParamChange(dist, val, algorithm); } }}
               options={[
                 { value: 'fuel', label: 'Fuel (Prefer Gates)' },
                 { value: 'jumps', label: 'Jumps' },
@@ -438,7 +443,7 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
               id="algorithm-select"
               ariaLabel="Algorithm"
               value={algorithm}
-              onChange={(v)=> setAlgorithm(v as 'astar'|'dijkstra')}
+              onChange={(v)=> { const val=v as 'astar'|'dijkstra'; setAlgorithm(val); if(onParamChange){ const dist=parseFloat(jumpDistance); if(!isNaN(dist)) onParamChange(dist, optimizeFor, val); } }}
               options={[
                 { value: 'astar', label: 'A* (basic)' },
                 { value: 'dijkstra', label: 'Dijkstra (advanced)' },

@@ -20,6 +20,7 @@ import PlanetLegendPanel from './components/Planets/PlanetLegendPanel';
 import './components/layout/panelLayout.css';
 import AutoCompleteInput from './components/AutoCompleteInput/AutoCompleteInput';
 import HelpPanel from './components/HelpPanel/HelpPanel';
+import { loadPrefs, setAccent, setOpenPanels as persistOpenPanels, getPrefs, setRoutingPrefs, fullReset } from './utils/prefs';
 import { encodeShare, decodeShare } from './utils/share';
 import { createShortShare, fetchShortShare } from './utils/shortShare';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
@@ -138,7 +139,7 @@ let SELECTED_STAR_COLOR = new THREE.Color(0xff4c26); // Will track accent (orang
 const REGION_OUTLINE_COLOR = new THREE.Color(0x00aaff); // Shared blue for region outlines
 
 function App() {
-  // Default to orange accent; the toggle will flip to blue
+  // Accent color (persisted)
   const [accentIsBlue, setAccentIsBlue] = useState(false);
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [loadingStatus, setLoadingStatus] = useState('Initializing...');
@@ -641,7 +642,7 @@ function App() {
   const routeCalcStartRef = useRef<number | null>(null);
   const [routeCalcTimeMs, setRouteCalcTimeMs] = useState<number | null>(null);
 
-  // Multi-panel open state (allow several drawers at once)
+  // Multi-panel open state (allow several drawers at once) - persisted
   const [openPanels, setOpenPanels] = useState<Set<string>>(new Set());
   // Z-index management for draggable panels
   const [panelZ, setPanelZ] = useState<Record<string, number>>({});
@@ -656,6 +657,20 @@ function App() {
   // (legacy openPanel removed after multi-panel refactor)
   const togglePanel = (id:string) => setOpenPanels(prev => { const next = new Set(prev); if(next.has(id)) next.delete(id); else next.add(id); return next; });
   const ensurePanel = (id:string) => setOpenPanels(prev => { if(prev.has(id)) return prev; const next = new Set(prev); next.add(id); return next; });
+
+  // Load persisted prefs once
+  useEffect(()=>{
+    const prefs = loadPrefs();
+    setAccentIsBlue(prefs.accent === 'blue');
+    if(prefs.openPanels?.length){ setOpenPanels(new Set(prefs.openPanels)); }
+    if(prefs.lastJumpDistance){ lastP2PParamsRef.current.jump = prefs.lastJumpDistance; }
+    if(prefs.optimizeFor){ lastP2PParamsRef.current.optimize = prefs.optimizeFor; }
+    if(prefs.algorithm){ lastP2PParamsRef.current.algo = prefs.algorithm; }
+  },[]);
+
+  // Persist accent & open panels
+  useEffect(()=>{ setAccent(accentIsBlue ? 'blue' : 'orange'); }, [accentIsBlue]);
+  useEffect(()=>{ persistOpenPanels(Array.from(openPanels)); }, [openPanels]);
 
   // Apply shared route from URL hash (supports short form #s=ID) once map data is loaded
   useEffect(()=>{
@@ -2907,7 +2922,7 @@ function App() {
       </div>
       {!hideUI && (
         <>
-          <PanelRail
+      <PanelRail
             // @ts-ignore style prop for scaling; compensate slight position shift when scaling up
             style={{ transform:`scale(${uiScale})`, transformOrigin:'top left' }}
             items={[
@@ -2916,6 +2931,7 @@ function App() {
               { id:'region', type:'toggle', label:'Highlight Region', display:(<>Highlight<br/>Region</>), icon:null, active:isRegionHighlighterActive, onToggle:()=> setIsRegionHighlighterActive(v=> !v) },
               { id:'planets', type:'toggle', label:'Display Planet Counts', display:(<>Planet<br/>Counts</>), icon:null, active:isPlanetCountActive, onToggle:()=> setIsPlanetCountActive(v=> !v) },
               { id:'distance', type:'toggle', label:'Show Distance', display:(<>Show<br/>Distance</>), icon:null, active:showDistance, onToggle:()=> setShowDistance(v=> !v) },
+        { id:'reset-layout', type:'panel', label:'Reset Layout', display:(<>Reset<br/>Layout</>), icon:null, active:false, onSelect:()=> { if(window.confirm('Reset panel positions and preferences?')) { fullReset(); setOpenPanels(new Set()); setAccentIsBlue(false); setResetToken(t=> t+1); } } },
             ] as any}
           />
           {openPanels.has('routing') && (
@@ -2960,6 +2976,10 @@ function App() {
                   }
                 }}
                 onScoutClearRoute={()=> setScoutRouteResult(null)}
+                initialJumpDistance={getPrefs().lastJumpDistance || lastP2PParamsRef.current.jump}
+                initialOptimizeFor={(getPrefs().optimizeFor as any) || lastP2PParamsRef.current.optimize}
+                initialAlgorithm={(getPrefs().algorithm as any) || lastP2PParamsRef.current.algo}
+                onRoutingParamChange={(jump,opt,algo)=> { setRoutingPrefs(jump,opt,algo); lastP2PParamsRef.current.jump=jump; lastP2PParamsRef.current.optimize=opt; lastP2PParamsRef.current.algo=algo; }}
               />
             </PanelDrawer>
           )}
