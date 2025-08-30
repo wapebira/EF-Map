@@ -2902,11 +2902,11 @@ function App() {
             // @ts-ignore style prop for scaling; compensate slight position shift when scaling up
             style={{ transform:`scale(${uiScale})`, transformOrigin:'top left' }}
             items={[
-              { id:'routing', type:'panel', label:'Routing', icon:null, active:openPanels.has('routing'), onSelect:()=> togglePanel('routing') },
-              { id:'cinematic', type:'panel', label:'CinematicMode', icon:null, active:openPanels.has('cinematic'), onSelect:()=> { if(openPanels.has('cinematic')) { setCinematicMode(false); } else { setCinematicMode(true); } togglePanel('cinematic'); } },
-              { id:'region', type:'toggle', label:'HighlightRegion', icon:null, active:isRegionHighlighterActive, onToggle:()=> setIsRegionHighlighterActive(v=> !v) },
-              { id:'planets', type:'toggle', label:'DisplayPlanetCounts', icon:null, active:isPlanetCountActive, onToggle:()=> setIsPlanetCountActive(v=> !v) },
-              { id:'distance', type:'toggle', label:'ShowDistance', icon:null, active:showDistance, onToggle:()=> setShowDistance(v=> !v) },
+              { id:'routing', type:'panel', label:'Routing', display:(<>{'Routing'}</>), icon:null, active:openPanels.has('routing'), onSelect:()=> togglePanel('routing') },
+              { id:'cinematic', type:'panel', label:'Cinematic Mode', display:(<>Cinematic<br/>Mode</>), icon:null, active:openPanels.has('cinematic'), onSelect:()=> { if(openPanels.has('cinematic')) { setCinematicMode(false); } else { setCinematicMode(true); } togglePanel('cinematic'); } },
+              { id:'region', type:'toggle', label:'Highlight Region', display:(<>Highlight<br/>Region</>), icon:null, active:isRegionHighlighterActive, onToggle:()=> setIsRegionHighlighterActive(v=> !v) },
+              { id:'planets', type:'toggle', label:'Display Planet Counts', display:(<>Planet<br/>Counts</>), icon:null, active:isPlanetCountActive, onToggle:()=> setIsPlanetCountActive(v=> !v) },
+              { id:'distance', type:'toggle', label:'Show Distance', display:(<>Show<br/>Distance</>), icon:null, active:showDistance, onToggle:()=> setShowDistance(v=> !v) },
             ] as any}
           />
           {openPanels.has('routing') && (

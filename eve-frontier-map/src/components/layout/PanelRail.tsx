@@ -3,8 +3,11 @@ import './panelLayout.css';
 
 export interface RailItemBase {
   id: string;
+  // Accessible single-line label (used for title/aria)
   label: string;
-  icon: React.ReactNode | null; // retained for compatibility but not rendered now
+  // Optional display (can contain <br/> etc.)
+  display?: React.ReactNode;
+  icon: React.ReactNode | null; // retained for compatibility (not rendered)
   hotkey?: string;
 }
 
@@ -31,19 +34,19 @@ const PanelRail: React.FC<PanelRailProps> = ({ items, style }) => {
         const common: any = {
           key: item.id,
           className: `ef-rail-btn ${item.active ? 'active' : ''}`,
-          title: `${item.label}${item.hotkey ? ` (${item.hotkey.toUpperCase()})` : ''}`,
+      title: `${item.label}${item.hotkey ? ` (${item.hotkey.toUpperCase()})` : ''}`,
           'data-id': item.id
         };
         if (item.type === 'toggle') {
           return (
             <button {...common} role="switch" aria-checked={item.active} onClick={item.onToggle}>
-              <span className="ef-rail-label">{item.label}</span>
+        <span className="ef-rail-label">{item.display ?? item.label}</span>
             </button>
           );
         }
         return (
             <button {...common} role="button" aria-pressed={item.active} onClick={item.onSelect}>
-              <span className="ef-rail-label">{item.label}</span>
+        <span className="ef-rail-label">{item.display ?? item.label}</span>
             </button>
         );
       })}
