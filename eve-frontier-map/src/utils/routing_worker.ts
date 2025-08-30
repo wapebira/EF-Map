@@ -430,6 +430,22 @@ const findPath = (request: RoutingRequest): RoutingResponse => {
     neighborCache.clear();
   }
 
+  // Build system lookup (lightweight) to perform early connectivity / min range check to avoid expensive search when doomed
+  try {
+    const systemsByName: { [name: string]: SolarSystem } = {};
+    for (const sys of Object.values(request.systems)) { systemsByName[sys.name.toLowerCase()] = sys; }
+    const startNode = systemsByName[request.fromSystemName.toLowerCase()];
+    const endNode = systemsByName[request.toSystemName.toLowerCase()];
+    if(startNode && endNode){
+      // Quick gate-component test: if already connected by gates then algorithm will succeed or fail normally;
+      // otherwise compute minimal required range. If current range insufficient, short-circuit.
+      const minReq = computeMinRequiredRangePair(request.systems, request.stargates, startNode, endNode);
+      if(isFinite(minReq) && minReq > 0 && request.maxJumpDistance + 1e-6 < minReq){
+        return { path: null, error: 'No path found (insufficient jump range).', minRequiredShipRange: minReq };
+      }
+    }
+  } catch { /* ignore early check errors */ }
+
   const algo = request.algorithm ?? 'astar';
   if (algo === 'dijkstra') return findPathDijkstra(request);
   return findPathAstar(request);
