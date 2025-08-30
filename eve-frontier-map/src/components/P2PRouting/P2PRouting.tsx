@@ -276,10 +276,13 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
   const [algorithm, setAlgorithm] = useState<'astar' | 'dijkstra'>(initialAlgorithm);
 
   // Keep internal state in sync if persisted prefs load after first mount.
+  // Sync initial jump distance only on first mount; subsequent preference changes shouldn't overwrite in-progress user edits.
+  const initJumpAppliedRef = useRef(false);
   useEffect(()=>{
-    // Only update if different to avoid clobbering active user edits mid-session.
-    if(jumpDistance !== String(initialJumpDistance)) setJumpDistance(String(initialJumpDistance));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    if(initJumpAppliedRef.current) return;
+    setJumpDistance(String(initialJumpDistance));
+    initJumpAppliedRef.current = true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialJumpDistance]);
   useEffect(()=>{ if(optimizeFor !== initialOptimizeFor) setOptimizeFor(initialOptimizeFor); }, [initialOptimizeFor]);
   useEffect(()=>{ if(algorithm !== initialAlgorithm) setAlgorithm(initialAlgorithm); }, [initialAlgorithm]);

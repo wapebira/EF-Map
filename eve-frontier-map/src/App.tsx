@@ -695,24 +695,31 @@ function App() {
 
   // Dynamic cascade: when multiple panels (routing, cinematic, planet legend) open and user has not dragged them (no stored pos), arrange side-by-side.
   useEffect(()=>{
-    // Determine which panels are open for cascade: drawers from openPanels plus legend if active
-    const candidates = ['routing','cinematic'];
-    if(isPlanetCountActive) candidates.push('planet-legend');
-    // Preserve original open order sequence for consistency
-    const active = openPanelOrder.filter(id=> candidates.includes(id) && (id==='planet-legend' ? isPlanetCountActive : openPanels.has(id)));
+    // Candidate panels & active filtered by open state
+    const candidates = ['routing','cinematic']; if(isPlanetCountActive) candidates.push('planet-legend');
+    const active = openPanelOrder.filter(id=> candidates.includes(id) && (id==='planet-legend'? isPlanetCountActive : openPanels.has(id)));
     if(active.length===0) return;
-    const baseX = 140; const baseY = 70; const stride = 420;
-  const cascading = active.length > 1; // flag to inform panels (esp. legend) to align uniformly
-  active.forEach((id, idx)=>{
+    const baseY = 70; const stride = 420;
+    // Determine anchor X: leftmost among panels that already have a stored position (user-moved) else default 140.
+    let anchorX = 140;
+    const resolvedPositions: Record<string,{x:number;y:number}> = {};
+    active.forEach(id=>{
       const key = id==='planet-legend' ? 'panel-pos:planet-legend' : 'panel-pos:drawer-'+id;
-      const stored = localStorage.getItem(key);
-      if(stored) return; // user has dragged; don't auto-move
-      const isSingle = active.length===1;
-      const target = { x: isSingle? baseX : baseX + idx*stride, y: baseY };
-      if(id==='routing' && routingDrawerRef.current){ routingDrawerRef.current.autoPosition(target); }
-      if(id==='cinematic' && cinematicDrawerRef.current){ cinematicDrawerRef.current.autoPosition(target); }
-      if(id==='planet-legend'){
-    try { window.dispatchEvent(new CustomEvent('ef:auto-pos', { detail:{ id, target, cascade: cascading } })); } catch {/* ignore */}
+      const raw = localStorage.getItem(key);
+      if(raw){ try { const p = JSON.parse(raw); if(typeof p.x==='number') { resolvedPositions[id]={x:p.x,y:p.y}; } } catch {/* ignore */} }
+    });
+    // Choose smallest x among user-placed panels as anchor
+    Object.values(resolvedPositions).forEach(p=>{ if(p.x < anchorX) anchorX = p.x; });
+    const cascading = active.length>1;
+    active.forEach((id, idx)=>{
+      const storageKey = id==='planet-legend' ? 'panel-pos:planet-legend' : 'panel-pos:drawer-'+id;
+      if(localStorage.getItem(storageKey)) return; // Respect user positioning for this panel
+      const x = cascading ? anchorX + idx*stride : anchorX;
+      const target = { x, y: baseY };
+      if(id==='routing' && routingDrawerRef.current) routingDrawerRef.current.autoPosition(target);
+      else if(id==='cinematic' && cinematicDrawerRef.current) cinematicDrawerRef.current.autoPosition(target);
+      else if(id==='planet-legend'){
+        try { window.dispatchEvent(new CustomEvent('ef:auto-pos', { detail:{ id, target, cascade: cascading } })); } catch {/* ignore */}
       }
     });
   },[openPanels, openPanelOrder, isPlanetCountActive]);
