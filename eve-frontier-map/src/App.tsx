@@ -678,6 +678,24 @@ function App() {
   // Persist accent & open panels
   useEffect(()=>{ setAccent(accentIsBlue ? 'blue' : 'orange'); }, [accentIsBlue]);
   useEffect(()=>{ persistOpenPanels(Array.from(openPanels)); }, [openPanels]);
+
+  // Dynamic cascade: if multiple drawers opened in initial untouched state, shift right.
+  useEffect(()=>{
+    const ids = openPanelOrder.filter(id=> openPanels.has(id) && ['routing','cinematic'].includes(id));
+    if(ids.length<=1) return; // nothing to cascade
+    ids.forEach((id, idx)=>{
+      const key = 'panel-pos:drawer-'+id;
+      try {
+        const stored = localStorage.getItem(key);
+        if(stored) return; // user moved or previously stored; don't auto-shift
+        const baseX = 140;
+        const baseY = 70;
+        const targetX = baseX + idx*420;
+        // Write position so PanelDrawer hook picks it up next render cycle if opened later
+        localStorage.setItem(key, JSON.stringify({ x: targetX, y: baseY }));
+      } catch {/* ignore */}
+    });
+  }, [openPanelOrder, openPanels]);
   // Optional debug toggle (open console and set window.DEBUG_PREFS=true)
   ;(window as any).DEBUG_PREFS = (window as any).DEBUG_PREFS || false;
 
@@ -2957,9 +2975,7 @@ function App() {
             ] as any}
           />
           {openPanels.has('routing') && (
-            <PanelDrawer id="routing" title="Routing" scale={uiScale} zIndex={panelZ['routing']||1450} onActivate={bringToFront} onClose={(id)=> setOpenPanels(p=> { const n=new Set(p); n.delete(id); return n; })} resetToken={resetToken}
-              cascadeIndex={openPanelOrder.indexOf('routing')}
-            >
+            <PanelDrawer id="routing" title="Routing" scale={uiScale} zIndex={panelZ['routing']||1450} onActivate={bringToFront} onClose={(id)=> setOpenPanels(p=> { const n=new Set(p); n.delete(id); return n; })} resetToken={resetToken}>
               <RoutingPanel
                 onCalculateRoute={calculateRoute}
                 onStopCalculation={stopCalculation}
@@ -3008,9 +3024,7 @@ function App() {
             </PanelDrawer>
           )}
           {openPanels.has('cinematic') && (
-            <PanelDrawer id="cinematic" title="Cinematic Mode" scale={uiScale} zIndex={panelZ['cinematic']||1450} onActivate={bringToFront} onClose={(id)=> { setOpenPanels(p=> { const n=new Set(p); n.delete(id); return n; }); setCinematicMode(false); }} resetToken={resetToken}
-              cascadeIndex={openPanelOrder.indexOf('cinematic')}
-            >
+            <PanelDrawer id="cinematic" title="Cinematic Mode" scale={uiScale} zIndex={panelZ['cinematic']||1450} onActivate={bringToFront} onClose={(id)=> { setOpenPanels(p=> { const n=new Set(p); n.delete(id); return n; }); setCinematicMode(false); }} resetToken={resetToken}>
               <CinematicPanel
                 starColorMode={starColorMode}
                 setStarColorMode={setStarColorMode as any}

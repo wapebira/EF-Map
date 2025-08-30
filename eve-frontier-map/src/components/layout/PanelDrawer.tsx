@@ -12,7 +12,6 @@ interface PanelDrawerProps {
   zIndex?: number;
   onActivate?: (id:string)=>void;
   resetToken?: number; // when incremented externally, reset position
-  cascadeIndex?: number; // if provided and no stored position yet, offset horizontally
 }
 
 const baseDefaults: Record<string,{x:number;y:number}> = {
@@ -20,29 +19,9 @@ const baseDefaults: Record<string,{x:number;y:number}> = {
   cinematic: { x:140, y:70 },
 };
 
-const PanelDrawer: React.FC<PanelDrawerProps> = ({ id, title, onClose, children, defaultPos, scale=1, zIndex=1450, onActivate, resetToken, cascadeIndex }) => {
-  let initial = defaultPos || baseDefaults[id] || { x:140, y:70 };
-  try {
-    const existing = localStorage.getItem('panel-pos:'+'drawer-'+id);
-    if(!existing && typeof cascadeIndex === 'number' && cascadeIndex>0){
-      initial = { ...initial, x: initial.x + cascadeIndex * 420 };
-    }
-  } catch {/* ignore */}
+const PanelDrawer: React.FC<PanelDrawerProps> = ({ id, title, onClose, children, defaultPos, scale=1, zIndex=1450, onActivate, resetToken }) => {
+  const initial = defaultPos || baseDefaults[id] || { x:140, y:70 };
   const drag = useDraggable('drawer-'+id, initial);
-  // After first paint, if we applied a cascade offset (cascadeIndex>0) but initial position got overridden by a late stored value, re-apply once.
-  React.useEffect(()=>{
-    if(typeof cascadeIndex==='number' && cascadeIndex>0){
-      try {
-        const stored = localStorage.getItem('panel-pos:'+'drawer-'+id);
-        if(!stored){
-          const expectedX = (baseDefaults[id]?.x ?? 140) + cascadeIndex*420;
-          if(Math.abs(drag.pos.x - expectedX) > 1){ drag.setPos({ x: expectedX, y: drag.pos.y }); }
-        }
-      } catch {/* ignore */}
-    }
-    // one-time
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[]);
   // Respond to external reset
   const lastResetRef = React.useRef(resetToken);
   React.useEffect(()=>{
