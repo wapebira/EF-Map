@@ -16,7 +16,7 @@ interface PanelDrawerProps {
 
 const baseDefaults: Record<string,{x:number;y:number}> = {
   routing: { x:140, y:70 },
-  cinematic: { x:140+420, y:70 },
+  cinematic: { x:140, y:70 },
 };
 
 const PanelDrawer: React.FC<PanelDrawerProps> = ({ id, title, onClose, children, defaultPos, scale=1, zIndex=1450, onActivate, resetToken }) => {

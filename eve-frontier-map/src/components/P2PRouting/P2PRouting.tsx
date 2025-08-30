@@ -275,6 +275,15 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
   const [optimizeFor, setOptimizeFor] = useState<'fuel' | 'jumps'>(initialOptimizeFor);
   const [algorithm, setAlgorithm] = useState<'astar' | 'dijkstra'>(initialAlgorithm);
 
+  // Keep internal state in sync if persisted prefs load after first mount.
+  useEffect(()=>{
+    // Only update if different to avoid clobbering active user edits mid-session.
+    if(jumpDistance !== String(initialJumpDistance)) setJumpDistance(String(initialJumpDistance));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialJumpDistance]);
+  useEffect(()=>{ if(optimizeFor !== initialOptimizeFor) setOptimizeFor(initialOptimizeFor); }, [initialOptimizeFor]);
+  useEffect(()=>{ if(algorithm !== initialAlgorithm) setAlgorithm(initialAlgorithm); }, [initialAlgorithm]);
+
   const [notePages, setNotePages] = useState<string[]>([]);
   const [includeLegend, setIncludeLegend] = useState(true);
   const [includeStats, setIncludeStats] = useState(false);
