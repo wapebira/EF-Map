@@ -768,6 +768,15 @@ function App() {
     if (!mapData) { alert('Map data is not loaded yet.'); return; }
     if(!fromSystemName || !toSystemName){ alert('Both From and To are required.'); return; }
 
+    // Sync destination into shared state so subsequent waypoint additions don't incorrectly promote
+    // the newly added waypoint to destination (observed bug when user manually typed destination
+    // then added a waypoint: lastDestinationSystemName stayed empty, causing auto-promotion logic).
+    // Only set if different to avoid unnecessary re-renders; do NOT lock so user can still override
+    // via context menu 'Set Destination'.
+    if(toSystemName && toSystemName !== lastDestinationSystemName){
+      setLastDestinationSystemName(toSystemName);
+    }
+
     if (scoutRouteResult) { setScoutRouteResult(null); setScoutInvalidateToken(t=> t+1); }
     clearCurrentRoute();
 
