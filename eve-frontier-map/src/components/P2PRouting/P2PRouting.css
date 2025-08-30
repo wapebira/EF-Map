@@ -159,6 +159,38 @@ input[type=number].p2p-input { -moz-appearance: textfield; appearance: textfield
 
 .p2p-warning { color:#ffa640; font-size:0.75rem; }
 
+/* Waypoint / Avoid system chips */
+.p2p-chip-list { 
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.p2p-chip { 
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #111;
+  border: 1px solid #333;
+  padding: 4px 8px;
+  border-radius: 14px;
+  font-size: 12px;
+  line-height: 1;
+  font-weight: 600;
+  max-width: 100%;
+}
+.p2p-chip button { 
+  background: transparent;
+  border: none;
+  color: #ccc;
+  cursor: pointer;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1;
+}
+.p2p-chip button:hover { color: #fff; }
+/* Subtle variant for avoid chips */
+.p2p-chip.avoid { background:#180000; border-color:#552222; }
+
 /* Neutral select (no accent colors) */
 .neutral-select-wrapper { position: relative; width: 100%; }
 .neutral-select-trigger {
