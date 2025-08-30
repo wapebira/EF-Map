@@ -358,9 +358,9 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
   // Update From system when an external system selection occurs
   useEffect(()=>{ if(selectedSystemName){ setFromSystem(prev=> prev || selectedSystemName); } }, [selectedSystemName]);
 
-  // Update To system when external destination selection occurs
+  // Update To system when external destination selection occurs (always override to stay in sync with context menu)
   useEffect(()=>{
-    if(selectedDestinationSystemName){ setToSystem(prev=> prev || selectedDestinationSystemName); }
+    if(selectedDestinationSystemName){ setToSystem(selectedDestinationSystemName); }
   }, [selectedDestinationSystemName]);
 
   // Build waypoint & avoided system UI blocks (only if non-empty)
