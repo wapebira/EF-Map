@@ -2763,10 +2763,13 @@ function App() {
       destItem.addEventListener('click', e => {
         e.stopPropagation();
         if(contextMenuSystemRef.current){
-          // If no explicit destination yet and user already has a destination set via earlier waypoints rule (first waypoint becomes destination) we still allow override.
+          // Explicit user action: always override destination with chosen system.
           setLastDestinationSystemName(contextMenuSystemRef.current.name);
-          destinationLockedRef.current = true; // lock so future waypoints won't shift destination
-          // legacy activePanel call removed (multi-panel)
+          destinationLockedRef.current = true; // lock so future waypoint adds won't shift destination
+          // Auto-open routing panel if a start system exists but routing panel is not yet open.
+          if(lastSelectedSystemName && !openPanels.has('routing')){
+            try { ensurePanel('routing'); } catch { /* ignore */ }
+          }
         }
         closeMenu();
       });
@@ -2851,7 +2854,7 @@ function App() {
   currentRenderer.domElement.removeEventListener('contextmenu', onContextMenu);
   window.removeEventListener('mousedown', closeOnLeftClick);
     };
-  }, [isLoaded, hoveredSystem, isDraggingRef, mouseDownPosRef, mouseDownTimeRef, createSystemLabelElement, selectSystem, isPlanetCountActive, showDistance, highlightedSystem, cinematicMode, cinematicLabels]);
+  }, [isLoaded, hoveredSystem, isDraggingRef, mouseDownPosRef, mouseDownTimeRef, createSystemLabelElement, selectSystem, isPlanetCountActive, showDistance, highlightedSystem, cinematicMode, cinematicLabels, openPanels, ensurePanel, lastSelectedSystemName]);
 
   const handleSearch = (event: React.KeyboardEvent<HTMLInputElement>, systemNameFromSelection?: string) => {
     if (event.key === 'Enter' && mapData) {

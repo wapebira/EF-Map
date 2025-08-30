@@ -358,27 +358,28 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
   // Update From system when an external system selection occurs
   useEffect(()=>{ if(selectedSystemName){ setFromSystem(prev=> prev || selectedSystemName); } }, [selectedSystemName]);
 
-  // Update To system when external destination selection occurs
+  // Update To system when external destination selection occurs (always override to stay in sync with context menu)
   useEffect(()=>{
-    if(selectedDestinationSystemName){ setToSystem(prev=> prev || selectedDestinationSystemName); }
+    if(selectedDestinationSystemName){ setToSystem(selectedDestinationSystemName); }
   }, [selectedDestinationSystemName]);
 
   // Build waypoint & avoided system UI blocks (only if non-empty)
   const waypointBlock = waypoints.length > 0 && (
     <div className="p2p-input-group">
-      <label style={{ display:'flex', alignItems:'center', gap:8 }}>
-        Waypoints
-        <span style={{ fontSize:11, opacity:.65 }}>({waypoints.length})</span>
+      <label style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
+        Waypoints <span style={{ fontSize:11, opacity:.65 }}>({waypoints.length})</span>
       </label>
-      <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+      <div className="p2p-chip-list">
         {waypoints.map(w => (
-          <div key={w} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', background:'#111', border:'1px solid #333', padding:'4px 8px', borderRadius:4, fontSize:12 }}>
-            <span style={{ fontWeight:600 }}>{w}</span>
-            {onRemoveWaypoint && (<button style={{ background:'transparent', color:'#ccc', border:'none', cursor:'pointer', fontSize:12 }} onClick={()=> onRemoveWaypoint(w)} aria-label={`Remove waypoint ${w}`}>✕</button>)}
+          <div key={w} className="p2p-chip" title={w}>
+            <span>{w}</span>
+            {onRemoveWaypoint && (
+              <button onClick={()=> onRemoveWaypoint(w)} aria-label={`Remove waypoint ${w}`}>✕</button>
+            )}
           </div>
         ))}
       </div>
-      <label style={{ display:'flex', gap:6, alignItems:'center', marginTop:6, fontSize:11, background:'#0c0c0c', padding:'4px 6px', borderRadius:4, border:'1px solid #222' }}>
+      <label style={{ display:'flex', gap:6, alignItems:'center', marginTop:4, fontSize:11, background:'#0c0c0c', padding:'4px 6px', borderRadius:4, border:'1px solid #222' }}>
         <input type="checkbox" checked={waypointOptimize} onChange={e=> onWaypointOptimizeChange && onWaypointOptimizeChange(e.target.checked)} /> Optimize waypoint order (experimental)
       </label>
     </div>
@@ -386,15 +387,16 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
 
   const avoidBlock = avoidSystems.length > 0 && (
     <div className="p2p-input-group">
-      <label style={{ display:'flex', alignItems:'center', gap:8 }}>
-        Avoid Systems
-        <span style={{ fontSize:11, opacity:.65 }}>({avoidSystems.length})</span>
+      <label style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
+        Avoid Systems <span style={{ fontSize:11, opacity:.65 }}>({avoidSystems.length})</span>
       </label>
-      <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+      <div className="p2p-chip-list">
         {avoidSystems.map(a => (
-          <div key={a} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', background:'#180000', border:'1px solid #552222', padding:'4px 8px', borderRadius:4, fontSize:12 }}>
-            <span style={{ fontWeight:600 }}>{a}</span>
-            {onRemoveAvoidSystem && (<button style={{ background:'transparent', color:'#ccc', border:'none', cursor:'pointer', fontSize:12 }} onClick={()=> onRemoveAvoidSystem(a)} aria-label={`Remove avoided system ${a}`}>✕</button>)}
+          <div key={a} className="p2p-chip avoid" title={a}>
+            <span>{a}</span>
+            {onRemoveAvoidSystem && (
+              <button onClick={()=> onRemoveAvoidSystem(a)} aria-label={`Remove avoided system ${a}`}>✕</button>
+            )}
           </div>
         ))}
       </div>
