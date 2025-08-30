@@ -14,3 +14,11 @@
   # Reverting to full path so Netlify detects functions.
   directory = "eve-frontier-map/netlify/functions"
   node_bundler = "esbuild"
+
+# Cache the large SQLite bundle aggressively (versioned via filename when changed).
+[[headers]]
+  for = "/map_data.db"
+  [headers.values]
+    # One year; safe because we'll rename (e.g. map_data.v2.db) when contents change.
+    Cache-Control = "public, max-age=31536000, immutable"
+    Access-Control-Allow-Origin = "*"
