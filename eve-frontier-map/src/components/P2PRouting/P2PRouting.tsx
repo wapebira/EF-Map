@@ -274,6 +274,13 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
   const [jumpDistance, setJumpDistance] = useState(String(initialJumpDistance)); // editing this must not reset from/to
   const [optimizeFor, setOptimizeFor] = useState<'fuel' | 'jumps'>(initialOptimizeFor);
   const [algorithm, setAlgorithm] = useState<'astar' | 'dijkstra'>(initialAlgorithm);
+  // Simple debounce helper for jump distance persistence
+  const debouncePersist = useRef<{ cancel:()=>void}|null>(null);
+  const schedule = (fn:()=>void, ms:number) => {
+    let active = true;
+    const id = setTimeout(()=>{ if(active) fn(); }, ms);
+    return { cancel:()=>{ active=false; clearTimeout(id); } };
+  };
 
   // Keep internal state in sync if persisted prefs load after first mount.
   // Sync initial jump distance only on first mount; subsequent preference changes shouldn't overwrite in-progress user edits.
@@ -330,12 +337,11 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
     }
   };
 
-  // Respond to external reset requests
+  // Respond ONLY to explicit external reset requests (do not tie to changing persisted params)
   const firstMountRef = useRef(true);
   useEffect(() => {
     if(firstMountRef.current){ firstMountRef.current=false; return; }
     if(resetToken === undefined) return;
-    // Reset all local input states to initial defaults (respect persisted initial props)
     setFromSystem('');
     setToSystem('');
     setJumpDistance(String(initialJumpDistance));
@@ -347,7 +353,7 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
     setCopyButtonText('Copy');
     setIncludeLegend(true);
     setIncludeStats(false);
-  }, [resetToken, initialJumpDistance, initialOptimizeFor, initialAlgorithm]);
+  }, [resetToken]);
 
   // Update From system when an external system selection occurs
   useEffect(()=>{ if(selectedSystemName){ setFromSystem(prev=> prev || selectedSystemName); } }, [selectedSystemName]);
@@ -427,7 +433,16 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
               id="jump-distance"
               type="number"
               value={jumpDistance}
-              onChange={(e) => { setJumpDistance(e.target.value); const v=parseFloat(e.target.value); if(!isNaN(v) && onParamChange){ onParamChange(v, optimizeFor, algorithm); try { if((window as any).DEBUG_PREFS) console.log('[p2p] jump change ->', v); } catch {/* ignore */} } }}
+              onChange={(e) => {
+                const newVal = e.target.value;
+                setJumpDistance(newVal);
+                const v = parseFloat(newVal);
+                // Debounce persistence so intermediate deletions (e.g., going from 65 -> 6 -> 60) don't cause parent rerender cascade wiping fields.
+                if(!isNaN(v)) {
+                  debouncePersist.current?.cancel();
+                  debouncePersist.current = schedule(()=>{ if(onParamChange) onParamChange(v, optimizeFor, algorithm); }, 300);
+                }
+              }}
               className="p2p-input"
             />
           </div>
