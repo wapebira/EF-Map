@@ -430,7 +430,9 @@ function App() {
     root.style.setProperty('--accent', accentIsBlue ? 'var(--selection-blue)' : 'var(--selection-orange)');
     // Tag root for CSS theme-specific rules
     root.setAttribute('data-accent', accentIsBlue ? 'blue' : 'orange');
+  root.classList.add('cinematic-active');
     if (!accentIsBlue) {
+  root.classList.remove('cinematic-active');
       // Pastel versions for orange mode only
       root.style.setProperty('--accent-pastel', '#ffb9ab'); // lightened orange
       root.style.setProperty('--accent-pastel-border', '#ff8665');

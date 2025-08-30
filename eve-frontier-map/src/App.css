@@ -89,9 +89,37 @@ body {
   height: 96px; /* doubled */
   opacity: 0.9;
   z-index: 3000;
-  border-radius: 8px;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.7);
+  border-radius: 10px;
+  /* Add subtle translucent panel + light border so it reads on pure black */
+  background: rgba(0,0,0,0.55);
+  border: 1px solid rgba(255,255,255,0.18);
+  backdrop-filter: blur(3px);
+  box-shadow:
+    0 2px 10px rgba(0,0,0,0.65), /* existing depth */
+    0 0 0 1px rgba(255,255,255,0.05), /* inner stroke for definition */
+    0 0 10px rgba(255,255,255,0.08); /* faint ambient glow so edge isn't lost */
   cursor: default;
+  transition: box-shadow .35s ease, border-color .35s ease, background .35s ease;
+}
+
+/* Slightly amplify accent + glow in cinematic mode */
+.cinematic-active .ef-small-logo {
+  border-color: var(--accent);
+  box-shadow:
+    0 3px 14px rgba(0,0,0,0.75),
+    0 0 0 1px rgba(255,255,255,0.10),
+    0 0 14px rgba(255,255,255,0.12),
+    0 0 26px -4px var(--accent);
+  background: linear-gradient(rgba(0,0,0,0.60), rgba(0,0,0,0.50));
+}
+
+.ef-small-logo:hover {
+  box-shadow:
+    0 4px 18px rgba(0,0,0,0.75),
+    0 0 0 1px rgba(255,255,255,0.12),
+    0 0 16px rgba(255,255,255,0.16),
+    0 0 32px -4px var(--accent);
+  border-color: var(--accent);
 }
 
 /* Support button wrapper sits to the LEFT of the persistent logo (logo: 96px wide + 20px gap) */
