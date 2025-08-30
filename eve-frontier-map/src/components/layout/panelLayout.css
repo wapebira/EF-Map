@@ -1,7 +1,8 @@
 .ef-rail { position:absolute; top:70px; left:10px; display:flex; flex-direction:column; gap:6px; z-index:1400; background:rgba(0,0,0,0.45); padding:8px 8px 10px; border:1px solid rgba(255,255,255,0.12); border-radius:12px; backdrop-filter:blur(6px); }
-.ef-rail-btn { all:unset; cursor:pointer; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; font-size:11px; font-weight:600; letter-spacing:.3px; color:#d6d6d4; padding:6px 6px 5px; border-radius:7px; position:relative; text-align:center; width:88px; min-height:44px; max-width:88px; line-height:1.08; background:rgba(255,255,255,0.03); white-space:normal; word-break:break-word; }
+.ef-rail-btn { all:unset; cursor:pointer; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; font-size:11px; font-weight:600; letter-spacing:.3px; color:#d6d6d4; padding:6px 6px 5px; border-radius:7px; position:relative; text-align:center; width:66px; max-width:66px; min-height:54px; line-height:1.08; background:rgba(255,255,255,0.03); white-space:normal; word-break:break-word; box-shadow:none; }
 .ef-rail-btn:hover { background:rgba(255,255,255,0.07); }
 .ef-rail-btn.active { border:1px solid var(--accent); background:rgba(255,255,255,0.05); color:#fff; }
+.ef-rail-btn:focus, .ef-rail-btn:focus-visible { outline:none; }
 .ef-rail-label { font-size:11px; line-height:1.05; display:inline-block; }
 @media (max-height:760px){ .ef-rail { flex-wrap:wrap; width:244px; } }
 
