@@ -32,20 +32,19 @@ const PanelRail: React.FC<PanelRailProps> = ({ items, style }) => {
   <div className="ef-rail" role="toolbar" aria-label="Tool & panel rail" style={style}>
       {items.map(item => {
         const common: any = {
-          key: item.id,
           className: `ef-rail-btn ${item.active ? 'active' : ''}`,
-      title: `${item.label}${item.hotkey ? ` (${item.hotkey.toUpperCase()})` : ''}`,
+          title: `${item.label}${item.hotkey ? ` (${item.hotkey.toUpperCase()})` : ''}`,
           'data-id': item.id
         };
         if (item.type === 'toggle') {
           return (
-            <button {...common} role="switch" aria-checked={item.active} onClick={item.onToggle}>
+            <button key={item.id} {...common} role="switch" aria-checked={item.active} onClick={item.onToggle}>
         <span className="ef-rail-label">{item.display ?? item.label}</span>
             </button>
           );
         }
         return (
-            <button {...common} role="button" aria-pressed={item.active} onClick={item.onSelect}>
+            <button key={item.id} {...common} role="button" aria-pressed={item.active} onClick={item.onSelect}>
         <span className="ef-rail-label">{item.display ?? item.label}</span>
             </button>
         );

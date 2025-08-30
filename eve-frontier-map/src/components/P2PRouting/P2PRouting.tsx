@@ -328,21 +328,23 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
   };
 
   // Respond to external reset requests
+  const firstMountRef = useRef(true);
   useEffect(() => {
+    if(firstMountRef.current){ firstMountRef.current=false; return; }
     if(resetToken === undefined) return;
-    // Reset all local input states to initial defaults
+    // Reset all local input states to initial defaults (respect persisted initial props)
     setFromSystem('');
     setToSystem('');
-    setJumpDistance('60');
-    setOptimizeFor('fuel');
-    setAlgorithm('astar');
+    setJumpDistance(String(initialJumpDistance));
+    setOptimizeFor(initialOptimizeFor);
+    setAlgorithm(initialAlgorithm);
     setNotePages([]);
     setSummary(null);
     setActiveNotePage(0);
-  setCopyButtonText('Copy');
-  setIncludeLegend(true);
-  setIncludeStats(false);
-  }, [resetToken]);
+    setCopyButtonText('Copy');
+    setIncludeLegend(true);
+    setIncludeStats(false);
+  }, [resetToken, initialJumpDistance, initialOptimizeFor, initialAlgorithm]);
 
   // Update From system when an external system selection occurs
   useEffect(()=>{
