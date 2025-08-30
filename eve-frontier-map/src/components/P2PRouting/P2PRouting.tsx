@@ -195,7 +195,7 @@ interface P2PRoutingProps {
   onCalculateRoute: (from: string, to: string, jumpDist: number, optimize: 'fuel' | 'jumps', algorithm: 'astar' | 'dijkstra') => void;
   onStopCalculation?: () => void;
   isCalculating: boolean;
-  routeResult: { path: string[] | null; error?: string } | null;
+  routeResult: { path: string[] | null; error?: string; minRequiredShipRange?: number } | null;
   mapData: MapData | null;
   systemNames: string[];
   progress?: { explored: number; frontier: number; elapsedMs: number; message: string } | null;
@@ -464,7 +464,14 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
             </div>
           )}
 
-          {routeResult && routeResult.error && <p className="error">Error: {routeResult.error}</p>}
+          {routeResult && routeResult.error && (
+            <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+              <p className="error" style={{ margin:0 }}>Error: {routeResult.error}</p>
+              {routeResult.minRequiredShipRange !== undefined && isFinite(routeResult.minRequiredShipRange) && (
+                <div className="p2p-warning">Minimum ship range required to connect start and destination: {routeResult.minRequiredShipRange.toFixed(2)} LY</div>
+              )}
+            </div>
+          )}
 
           {summary && (
             <div className="p2p-results">

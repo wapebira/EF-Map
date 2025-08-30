@@ -265,7 +265,7 @@ function App() {
   // State for P2P Routing
   const routingWorkerRef = useRef<Worker | null>(null);
   const [isCalculatingRoute, setIsCalculatingRoute] = useState(false);
-  const [routeResult, setRouteResult] = useState<{ path: string[] | null; error?: string } | null>(null);
+  const [routeResult, setRouteResult] = useState<{ path: string[] | null; error?: string; minRequiredShipRange?: number } | null>(null);
   const [scoutRouteResult, setScoutRouteResult] = useState<{ path: string[] | null } | null>(null);
   const [scoutInvalidateToken, setScoutInvalidateToken] = useState(0);
   const [routeProgress, setRouteProgress] = useState<{ explored: number; frontier: number; elapsedMs: number; message: string } | null>(null);
@@ -592,7 +592,7 @@ function App() {
           setRouteProgress({ explored: data.explored ?? 0, frontier: data.frontier ?? 0, elapsedMs: data.elapsedMs ?? 0, message: data.message ?? '' });
           return;
         }
-        const { path, error } = data;
+  const { path, error, minRequiredShipRange } = data;
         setIsCalculatingRoute(false);
         // compute and store elapsed time if we started one
         if (routeCalcStartRef.current) {
@@ -602,8 +602,13 @@ function App() {
         }
         setRouteProgress(null);
         if (error) {
-          alert(`Routing Error: ${error}`);
-          setRouteResult({ path: null, error });
+          // If minRequiredShipRange present, include in alert detail
+          if(minRequiredShipRange !== undefined){
+            alert(`Routing Error: ${error}${minRequiredShipRange?`\nMinimum ship range required: ${minRequiredShipRange.toFixed(2)} LY`:''}`);
+          } else {
+            alert(`Routing Error: ${error}`);
+          }
+          setRouteResult({ path: null, error, minRequiredShipRange });
           return;
         }
   setRouteResult({ path, error: undefined });
@@ -724,7 +729,7 @@ function App() {
         setRouteProgress({ explored: data.explored ?? 0, frontier: data.frontier ?? 0, elapsedMs: data.elapsedMs ?? 0, message: data.message ?? '' });
         return;
       }
-      const { path, error } = data;
+  const { path, error, minRequiredShipRange } = data;
       setIsCalculatingRoute(false);
       if (routeCalcStartRef.current) {
         const elapsed = Date.now() - routeCalcStartRef.current;
@@ -733,8 +738,12 @@ function App() {
       }
       setRouteProgress(null);
       if (error) {
-        alert(`Routing Error: ${error}`);
-        setRouteResult({ path: null, error });
+        if(minRequiredShipRange !== undefined){
+          alert(`Routing Error: ${error}${minRequiredShipRange?`\nMinimum ship range required: ${minRequiredShipRange.toFixed(2)} LY`:''}`);
+        } else {
+          alert(`Routing Error: ${error}`);
+        }
+        setRouteResult({ path: null, error, minRequiredShipRange });
         return;
       }
   setRouteResult({ path, error: undefined });
@@ -821,9 +830,9 @@ function App() {
       routingWorkerRef.current.onmessage = (e) => {
         const data = e.data;
         if(data && data.type==='progress') { setRouteProgress(p=> ({ ...(p||{}), ...data })); return; }
-        const { path, error } = data;
+  const { path, error, minRequiredShipRange } = data;
         if(error || !path){
-          setIsCalculatingRoute(false); setRouteProgress(null); setRouteResult({ path:null, error: error || `No path for segment ${segFrom} → ${segTo}` }); return;
+          setIsCalculatingRoute(false); setRouteProgress(null); setRouteResult({ path:null, error: error || `No path for segment ${segFrom} → ${segTo}` , minRequiredShipRange }); return;
         }
         if(fullPath.length){ // avoid duplicating junction node
           fullPath.push(...path.slice(1));

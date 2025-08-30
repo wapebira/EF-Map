@@ -15,7 +15,7 @@ interface RoutingRequest {
   avoidSystemNames?: string[]; // optional list of systems to exclude
 }
 
-interface RoutingResponse { path: string[] | null; error?: string }
+interface RoutingResponse { path: string[] | null; error?: string; minRequiredShipRange?: number }
 
 // Simple PQ for A*
 class PriorityQueue<T> {
@@ -155,6 +155,82 @@ const getNeighbors = (
 };
 
 // --- A* (basic) ---
+// Compute minimal required ship range (bottleneck distance) to connect start & end via ship jumps + gate network.
+// Approach: Collapse gate-connected systems into components. If start & end in different components, we grow a frontier
+// of components starting from start using Prim-like expansion choosing the smallest inter-component distance each step.
+// The maximum edge length chosen during this expansion until the end component is included is the minimal max jump needed.
+const computeMinRequiredRangePair = (systems: { [k:string]: SolarSystem }, stargates: { [k:string]: Stargate }, from: SolarSystem, to: SolarSystem): number => {
+  // Build gate adjacency
+  const gateAdj = new Map<number, number[]>();
+  for(const g of Object.values(stargates)){
+    if(!gateAdj.has(g.source_system_id)) gateAdj.set(g.source_system_id, []);
+    if(!gateAdj.has(g.destination_system_id)) gateAdj.set(g.destination_system_id, []);
+    gateAdj.get(g.source_system_id)!.push(g.destination_system_id);
+    gateAdj.get(g.destination_system_id)!.push(g.source_system_id);
+  }
+  // Assign gate components (restricted to all systems for simplicity)
+  const compOf = new Map<number, number>();
+  let compCounter = 0;
+  const all = Object.values(systems);
+  for(const s of all){
+    if(compOf.has(s.id)) continue;
+    const q=[s.id]; compOf.set(s.id, compCounter);
+    while(q.length){
+      const cur=q.shift()!;
+      for(const nxt of gateAdj.get(cur)||[]){ if(!compOf.has(nxt)){ compOf.set(nxt, compCounter); q.push(nxt); } }
+    }
+    compCounter++;
+  }
+  const startComp = compOf.get(from.id)!;
+  const endComp = compOf.get(to.id)!;
+  if(startComp === endComp) return 0; // already connected purely by gates (should not normally reach here on failure)
+  // Pre-group system ids per component for quick iteration
+  const compSystems: number[][] = Array.from({length: compCounter}, ()=>[]);
+  for(const s of all){ compSystems[compOf.get(s.id)!].push(s.id); }
+  // Precompute minimal distances between components lazily when needed.
+  // We'll maintain a min-heap (implemented via array linear scan due to moderate size) of candidate edges from visited set.
+  const visited = new Set<number>(); visited.add(startComp);
+  let maxEdge = 0;
+  // Helper to push edges from a component into candidate list
+  const candidates: {a:number; b:number; d:number}[] = [];
+  const pushEdges = (compIdx:number) => {
+    for(let other=0; other<compSystems.length; other++){
+      if(other===compIdx || visited.has(other)) continue;
+      // Compute minimal distance between any system in compIdx and any in other
+      let best=Infinity;
+      for(const idA of compSystems[compIdx]){
+        const A = systems[idA.toString()]; if(!A) continue;
+        for(const idB of compSystems[other]){
+          const B = systems[idB.toString()]; if(!B) continue;
+          const d = heuristic(A,B);
+          if(d < best){ best = d; if(best === 0) break; }
+        }
+        if(best === 0) break;
+      }
+      candidates.push({ a: compIdx, b: other, d: best });
+    }
+  };
+  pushEdges(startComp);
+  while(candidates.length){
+    // Extract smallest distance edge where exactly one side visited
+    let bestIdx = -1; let bestD = Infinity;
+    for(let i=0;i<candidates.length;i++){
+      const c = candidates[i];
+      const inA = visited.has(c.a); const inB = visited.has(c.b);
+      if(inA === inB) continue; // skip edges internal to visited or entirely outside
+      if(c.d < bestD){ bestD = c.d; bestIdx = i; }
+    }
+    if(bestIdx === -1) break; // no connecting edges (disconnected)
+    const edge = candidates.splice(bestIdx,1)[0];
+    const newComp = visited.has(edge.a) ? edge.b : edge.a;
+    visited.add(newComp);
+    if(edge.d > maxEdge) maxEdge = edge.d;
+    if(newComp === endComp) return maxEdge; // reached target
+    pushEdges(newComp);
+  }
+  return Infinity; // no possible connection
+};
+
 const findPathAstar = (request: RoutingRequest): RoutingResponse => {
   const { systems, stargates, fromSystemName, toSystemName, maxJumpDistance, optimizeFor, avoidSystemNames } = request;
 
@@ -204,7 +280,13 @@ const findPathAstar = (request: RoutingRequest): RoutingResponse => {
     }
   }
 
-  return { path: null, error: 'No path found.' };
+  // Path not found: compute minimal required ship range to inform user.
+  let minRequired: number | undefined = undefined;
+  try {
+    minRequired = computeMinRequiredRangePair(systems, stargates, startNode, endNode);
+    if(!isFinite(minRequired)) minRequired = undefined;
+  } catch { /* ignore */ }
+  return { path: null, error: 'No path found.', minRequiredShipRange: minRequired };
 };
 
 // --- Dijkstra (advanced/fuel-optimal) ---
@@ -330,7 +412,13 @@ const findPathDijkstra = (request: RoutingRequest): RoutingResponse => {
     }
   }
 
-  return { path: null, error: 'No path found.' };
+  // Path not found: compute minimal required ship range similar to A*
+  let minRequired: number | undefined = undefined;
+  try {
+    minRequired = computeMinRequiredRangePair(systems, stargates, startNode, endNode);
+    if(!isFinite(minRequired)) minRequired = undefined;
+  } catch { /* ignore */ }
+  return { path: null, error: 'No path found.', minRequiredShipRange: minRequired };
 };
 
 // Dispatcher

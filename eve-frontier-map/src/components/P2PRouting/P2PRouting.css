@@ -157,6 +157,8 @@ input[type=number].p2p-input { -moz-appearance: textfield; appearance: textfield
   font-weight: bold;
 }
 
+.p2p-warning { color:#ffa640; font-size:0.75rem; }
+
 /* Neutral select (no accent colors) */
 .neutral-select-wrapper { position: relative; width: 100%; }
 .neutral-select-trigger {
