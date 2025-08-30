@@ -2885,7 +2885,7 @@ function App() {
 
   return (
     <>
-  <DonateCryptoModal open={cryptoModalOpen} onClose={()=> setCryptoModalOpen(false)} address="0xC1204805b018ec2Ad06e6119965134AfFa212C10" />
+  <DonateCryptoModal open={cryptoModalOpen} onClose={()=> setCryptoModalOpen(false)} address="0xC1204805b018ec2Ad06e6119965134AfFa212C10" ensName="lacal.eth" />
   {/* Referral code copy state */}
   {/* ...existing code... */}
   <div className="ef-top-toolbar" style={hideUI?{display:'none'}:{}}>
