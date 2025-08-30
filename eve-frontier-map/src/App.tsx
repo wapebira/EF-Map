@@ -2785,6 +2785,12 @@ function App() {
   <div className="ef-top-toolbar" style={hideUI?{display:'none'}:{}}>
     <div style={topRightScaleStyle} className="ef-top-toolbar-inner">
       <div className="ef-toolbar-shifting">
+      {/* Support button placed at start so it shifts with referral/share when Help panel opens */}
+      <button
+        className="ef-support-btn"
+        onClick={()=> setSupportExpandRequestId(id=> id+1)}
+        aria-label="Support this project (opens Help panel to Support section)"
+      >Support this project</button>
       <button
         className="share-route-btn"
         onClick={async () => {
@@ -2828,12 +2834,6 @@ function App() {
       </button>
       <ReferralBadge />
   </div>
-  {/* Support button moved into top toolbar for consistent sizing */}
-  <button
-    className="ef-support-btn"
-    onClick={()=> setSupportExpandRequestId(id=> id+1)}
-    aria-label="Support this project (opens Help panel to Support section)"
-  >Support</button>
   {/* Help button should remain to the right of referral always */}
   <HelpPanel accentIsBlue={accentIsBlue} supportExpandRequestId={supportExpandRequestId} supportContent={supportContent} />
     </div>
