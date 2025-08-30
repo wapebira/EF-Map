@@ -44,7 +44,7 @@ export const DonateCryptoModal: React.FC<DonateCryptoModalProps> = ({ open, onCl
   return (
     <div style={{ position:'fixed', inset:0, zIndex:4000, display:'flex', alignItems:'center', justifyContent:'center' }}>
       <div onClick={onClose} style={{ position:'absolute', inset:0, background:'rgba(0,0,0,0.7)', backdropFilter:'blur(4px)' }} />
-      <div style={{ position:'relative', width:'min(720px,92%)', maxHeight:'82vh', overflowY:'auto', background:'rgba(20,20,22,0.92)', border:'1px solid rgba(255,255,255,0.15)', borderRadius:28, padding:'28px 30px 34px', boxShadow:'0 12px 42px -6px rgba(0,0,0,0.65)', display:'flex', flexDirection:'column', gap:18 }}>
+  <div style={{ position:'relative', width:'min(720px,92%)', maxHeight:'82vh', overflowY:'auto', background:'rgba(20,20,22,0.92)', border:'1px solid rgba(255,255,255,0.15)', borderRadius:28, padding:'28px 30px 34px', boxShadow:'0 12px 42px -6px rgba(0,0,0,0.65)', display:'flex', flexDirection:'column', gap:18, color:'#f5f6f7' }}>
         <div style={{ display:'flex', justifyContent:'flex-start', alignItems:'flex-start' }}>
           <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
             <h2 style={{ margin:0, fontSize:22, fontWeight:600 }}>Donate via Crypto</h2>
