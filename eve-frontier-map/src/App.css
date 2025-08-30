@@ -8,6 +8,7 @@ body {
   --selection-orange: #ff4c26;
   /* default to orange */
   --accent: var(--selection-orange);
+    --accent-rgb: 255,76,38;
  }
 
 #root {

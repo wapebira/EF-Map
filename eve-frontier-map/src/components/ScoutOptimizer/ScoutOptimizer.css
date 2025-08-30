@@ -36,6 +36,7 @@
   cursor: pointer;
   font-weight: bold;
 }
+.scout-button.calculating { animation: p2p-pulse 1.6s ease-in-out infinite; position:relative; }
 .scout-button:disabled { background:#555; cursor: not-allowed; }
 .scout-status { font-size: 0.75rem; color: #bbb; white-space: pre-line; max-height: 120px; overflow-y: auto; border:1px solid #444; padding:6px; background:#0d0d0d; }
 .scout-warning { color:#ffa640; font-size:0.75rem; }

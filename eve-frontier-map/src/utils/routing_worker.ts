@@ -246,8 +246,14 @@ const findPathAstar = (request: RoutingRequest): RoutingResponse => {
 
   const avoidSet = new Set<string>((avoidSystemNames||[]).map(n=> n.toLowerCase()).filter(n=> n!==fromSystemName.toLowerCase() && n!==toSystemName.toLowerCase()));
 
+  // Progress instrumentation
+  const startTime = Date.now();
+  let lastEmit = 0;
+  let exploredCount = 0;
+
   while (!openSet.isEmpty()) {
     const current = openSet.dequeue()!;
+    exploredCount++;
 
     if (current.id === endNode.id) return { path: reconstructPath(cameFrom, current, systemsById) };
 
@@ -262,6 +268,16 @@ const findPathAstar = (request: RoutingRequest): RoutingResponse => {
         fScore[neighbor.system.id] = tentativeGScore + heuristic(neighbor.system, endNode);
         openSet.enqueue(neighbor.system, fScore[neighbor.system.id]);
       }
+    }
+
+    // Throttled progress emission every ~200ms
+    const now = Date.now();
+    if(now - lastEmit >= 200){
+      lastEmit = now;
+      try {
+        // @ts-ignore worker context
+        self.postMessage({ type:'progress', explored: exploredCount, frontier: openSet.size(), elapsedMs: now - startTime, message: `Explored ${exploredCount} nodes` });
+      } catch { /* ignore */ }
     }
   }
 
