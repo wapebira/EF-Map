@@ -78,6 +78,11 @@ export function fullReset(){
   clearPanelPositions();
 }
 
+// Reset only input/preferences (do NOT clear panel positions)
+export function softReset(){
+  resetAllPrefs(); // keeps version + defaults, leaves panel-pos:* keys untouched
+}
+
 // Flush on visibility change/unload for safety (in case future buffering added)
 try {
   window.addEventListener('beforeunload', writeNow);

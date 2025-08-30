@@ -20,7 +20,7 @@ import PlanetLegendPanel from './components/Planets/PlanetLegendPanel';
 import './components/layout/panelLayout.css';
 import AutoCompleteInput from './components/AutoCompleteInput/AutoCompleteInput';
 import HelpPanel from './components/HelpPanel/HelpPanel';
-import { loadPrefs, setAccent, setOpenPanels as persistOpenPanels, setRoutingPrefs, fullReset, getPrefs } from './utils/prefs';
+import { loadPrefs, setAccent, setOpenPanels as persistOpenPanels, setRoutingPrefs, fullReset, getPrefs, softReset } from './utils/prefs';
 import { encodeShare, decodeShare } from './utils/share';
 import { createShortShare, fetchShortShare } from './utils/shortShare';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
@@ -150,7 +150,8 @@ function App() {
   const mountRef = useRef<HTMLDivElement>(null);
   const [mapData, setMapData] = useState<MapData | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [resetToken, setResetToken] = useState(0); // increments to signal UI reset
+  const [resetToken, setResetToken] = useState(0); // input/forms reset
+  const [layoutResetToken, setLayoutResetToken] = useState(0); // layout-only reset for panel positions
   // UI visibility + scaling
   const [hideUI, setHideUI] = useState(false);
   const uiScaleStops = [0.5,0.6,0.7,0.8,0.9,1.0,1.1,1.2,1.3];
@@ -670,7 +671,8 @@ function App() {
       setOpenPanels(set);
       setOpenPanelOrder(prefs.openPanels);
     }
-    if(prefs.lastJumpDistance){ lastP2PParamsRef.current.jump = prefs.lastJumpDistance; setPersistedJump(prefs.lastJumpDistance); }
+  if(prefs.lastJumpDistance){ lastP2PParamsRef.current.jump = prefs.lastJumpDistance; setPersistedJump(prefs.lastJumpDistance); }
+  // (Scout ship max range persistence removed; ignore any existing value)
     if(prefs.optimizeFor){ lastP2PParamsRef.current.optimize = prefs.optimizeFor; setPersistedOptimize(prefs.optimizeFor); }
     if(prefs.algorithm){ lastP2PParamsRef.current.algo = prefs.algorithm; setPersistedAlgo(prefs.algorithm); }
   },[]);
@@ -738,6 +740,7 @@ function App() {
   const [persistedJump, setPersistedJump] = useState<number>(initialPrefsRef.current.lastJumpDistance ?? lastP2PParamsRef.current.jump);
   const [persistedOptimize, setPersistedOptimize] = useState<'fuel'|'jumps'>(initialPrefsRef.current.optimizeFor ?? lastP2PParamsRef.current.optimize);
   const [persistedAlgo, setPersistedAlgo] = useState<'astar'|'dijkstra'>(initialPrefsRef.current.algorithm ?? lastP2PParamsRef.current.algo);
+  // Scout ship range persists inside ScoutOptimizer component; no App-level state needed
 
   // Apply shared route from URL hash (supports short form #s=ID) once map data is loaded
   useEffect(()=>{
@@ -2968,18 +2971,17 @@ function App() {
               alignItems:'center'
             }}
             onClick={()=>{
+              // Soft reset: clear inputs & routes but KEEP panel positions
+              softReset(); // resets prefs (jump distance etc.) but not panel-pos:* keys
               setRouteResult(null);
               setScoutRouteResult(null);
               setScoutInvalidateToken(t=> t+1);
               if(window.location.hash){ try { history.replaceState(null,'', window.location.pathname + window.location.search); } catch {/* ignore */} }
               setSearchQuery('');
-              // Clear advanced routing state
               setWaypoints([]);
               setAvoidSystems([]);
               setWaypointOptimize(false);
-              // (Destination not explicitly required to reset per spec, keep unless you want to uncomment next line)
-              // setLastDestinationSystemName('');
-              setResetToken(t=> t+1);
+              setResetToken(t=> t+1); // signal input-bearing panels to clear their internal state
             }}
             aria-label="Reset all inputs"
           >Reset</button>
@@ -2998,11 +3000,11 @@ function App() {
               { id:'region', type:'toggle', label:'Highlight Region', display:(<>Highlight<br/>Region</>), icon:null, active:isRegionHighlighterActive, onToggle:()=> setIsRegionHighlighterActive(v=> !v) },
               { id:'planets', type:'toggle', label:'Display Planet Counts', display:(<>Planet<br/>Counts</>), icon:null, active:isPlanetCountActive, onToggle:()=> setIsPlanetCountActive(v=> !v) },
               { id:'distance', type:'toggle', label:'Show Distance', display:(<>Show<br/>Distance</>), icon:null, active:showDistance, onToggle:()=> setShowDistance(v=> !v) },
-        { id:'reset-layout', type:'panel', label:'Reset Layout', display:(<>Reset<br/>Layout</>), icon:null, active:false, onSelect:()=> { if(window.confirm('Reset panel positions and preferences?')) { fullReset(); setOpenPanels(new Set()); setAccentIsBlue(false); setResetToken(t=> t+1); } } },
+  { id:'reset-layout', type:'panel', label:'Reset Layout', display:(<>Reset<br/>Layout</>), icon:null, active:false, onSelect:()=> { if(window.confirm('Reset panel positions and layout?')) { fullReset(); setOpenPanels(new Set()); setAccentIsBlue(false); setResetToken(t=> t+1); setLayoutResetToken(t=> t+1); } } },
             ] as any}
           />
           {openPanels.has('routing') && (
-            <PanelDrawer ref={routingDrawerRef} id="routing" title="Routing" scale={uiScale} zIndex={panelZ['routing']||1450} onActivate={bringToFront} onClose={(id)=> setOpenPanels(p=> { const n=new Set(p); n.delete(id); return n; })} resetToken={resetToken}>
+            <PanelDrawer ref={routingDrawerRef} id="routing" title="Routing" scale={uiScale} zIndex={panelZ['routing']||1450} onActivate={bringToFront} onClose={(id)=> setOpenPanels(p=> { const n=new Set(p); n.delete(id); return n; })} resetToken={layoutResetToken}>
               <RoutingPanel
                 onCalculateRoute={calculateRoute}
                 onStopCalculation={stopCalculation}
@@ -3051,7 +3053,7 @@ function App() {
             </PanelDrawer>
           )}
           {openPanels.has('cinematic') && (
-            <PanelDrawer ref={cinematicDrawerRef} id="cinematic" title="Cinematic Mode" scale={uiScale} zIndex={panelZ['cinematic']||1450} onActivate={bringToFront} onClose={(id)=> { setOpenPanels(p=> { const n=new Set(p); n.delete(id); return n; }); setCinematicMode(false); }} resetToken={resetToken}>
+            <PanelDrawer ref={cinematicDrawerRef} id="cinematic" title="Cinematic Mode" scale={uiScale} zIndex={panelZ['cinematic']||1450} onActivate={bringToFront} onClose={(id)=> { setOpenPanels(p=> { const n=new Set(p); n.delete(id); return n; }); setCinematicMode(false); }} resetToken={layoutResetToken}>
               <CinematicPanel
                 starColorMode={starColorMode}
                 setStarColorMode={setStarColorMode as any}
@@ -3092,7 +3094,7 @@ function App() {
               zIndex={panelZ['planetLegend']||1425}
               onActivate={()=> bringToFront('planetLegend')}
               onClose={()=> setIsPlanetCountActive(false)}
-              resetToken={resetToken}
+              resetToken={layoutResetToken}
             >
               {generatePlanetCountLegend()}
             </PlanetLegendPanel>

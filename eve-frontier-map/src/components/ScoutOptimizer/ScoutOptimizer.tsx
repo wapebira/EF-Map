@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState, useEffect } from 'react';
+// Persistence of ship max range removed per request (always starts at default)
 import '../P2PRouting/P2PRouting.css';
 import './ScoutOptimizer.css';
 import AutoCompleteInput from '../AutoCompleteInput/AutoCompleteInput';
@@ -38,6 +39,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	// Minimum required ship range (computed when baseline error received)
 	const [minRequiredShipRange, setMinRequiredShipRange] = useState<number|null>(null);
 	// Ship vs Gate preference inputs
+	// Ship max jump range (no persistence)
 	const [shipMaxRange, setShipMaxRange] = useState('60');
 	const [shipTradeDistance, setShipTradeDistance] = useState('0');
 	const [minGateHopsSaved, setMinGateHopsSaved] = useState('999');
@@ -123,9 +125,11 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	// Update start system when external system selection occurs
 	useEffect(()=>{
 		if(selectedSystemName){
-			setStartSystem(selectedSystemName);
+			setStartSystem(prev=> prev || selectedSystemName); // do not overwrite if user already entered one
 		}
 	}, [selectedSystemName]);
+
+	// (persistence now handled inline in input onChange, mirroring P2P debounce pattern)
 
 	const stargatesArray = mapData ? Object.values(mapData.stargates) : [];
 	const gatesBySource: {[id:number]: number[]} = {}; stargatesArray.forEach(g=>{ if(!gatesBySource[g.source_system_id]) gatesBySource[g.source_system_id]=[]; gatesBySource[g.source_system_id].push(g.destination_system_id); if(!gatesBySource[g.destination_system_id]) gatesBySource[g.destination_system_id]=[]; gatesBySource[g.destination_system_id].push(g.source_system_id); });
