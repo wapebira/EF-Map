@@ -1,6 +1,7 @@
 .autocomplete-container {
   position: relative;
   width: 100%;
+  z-index: 1500; /* ensure stacking context above rail (1400) */
 }
 
 .suggestions-list {
@@ -16,7 +17,8 @@
   margin: 0;
   max-height: 200px;
   overflow-y: auto;
-  z-index: 1000; /* Ensure it appears above other elements */
+  z-index: 2000; /* above rail & drawers */
+  box-shadow: 0 6px 18px -4px rgba(0,0,0,0.6);
 }
 
 .suggestions-list li {
