@@ -14,7 +14,9 @@ interface PlanetLegendPanelProps {
 
 // Small secondary panel that visually matches the main drawer styling.
 const PlanetLegendPanel: React.FC<PlanetLegendPanelProps> = ({ children, onClose, anchoredBelowDrawer, scale=1, zIndex=1425, onActivate, resetToken }) => {
-  const base = { x: 140, y: anchoredBelowDrawer? 70 + 340 : 70 };
+  // Base position: when not cascading below a drawer we align with y=70 like drawers.
+  // anchoredBelowDrawer only applies when legend is the sole panel with drawers closed.
+  const base = { x: 140, y: anchoredBelowDrawer ? 70 + 340 : 70 };
   const drag = useDraggable('planet-legend', base);
   const lastResetRef = React.useRef(resetToken);
   React.useEffect(()=>{
@@ -31,9 +33,11 @@ const PlanetLegendPanel: React.FC<PlanetLegendPanelProps> = ({ children, onClose
     const handler = (e:Event)=>{
       const ce = e as CustomEvent<any>;
       if(!ce.detail || ce.detail.id!=='planet-legend') return;
-      const { target } = ce.detail;
+      const { target, cascade } = ce.detail;
       if(target && typeof target.x==='number' && typeof target.y==='number'){
-        drag.setPosSilent({ x: target.x, y: anchoredBelowDrawer? target.y + 340 : target.y });
+        // During cascade we always align vertically with y=target.y (no +340 offset)
+        const y = cascade ? target.y : (anchoredBelowDrawer ? target.y + 340 : target.y);
+        drag.setPosSilent({ x: target.x, y });
       }
     };
     window.addEventListener('ef:auto-pos', handler as any);

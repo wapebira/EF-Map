@@ -702,7 +702,8 @@ function App() {
     const active = openPanelOrder.filter(id=> candidates.includes(id) && (id==='planet-legend' ? isPlanetCountActive : openPanels.has(id)));
     if(active.length===0) return;
     const baseX = 140; const baseY = 70; const stride = 420;
-    active.forEach((id, idx)=>{
+  const cascading = active.length > 1; // flag to inform panels (esp. legend) to align uniformly
+  active.forEach((id, idx)=>{
       const key = id==='planet-legend' ? 'panel-pos:planet-legend' : 'panel-pos:drawer-'+id;
       const stored = localStorage.getItem(key);
       if(stored) return; // user has dragged; don't auto-move
@@ -711,7 +712,7 @@ function App() {
       if(id==='routing' && routingDrawerRef.current){ routingDrawerRef.current.autoPosition(target); }
       if(id==='cinematic' && cinematicDrawerRef.current){ cinematicDrawerRef.current.autoPosition(target); }
       if(id==='planet-legend'){
-        try { window.dispatchEvent(new CustomEvent('ef:auto-pos', { detail:{ id, target } })); } catch {/* ignore */}
+    try { window.dispatchEvent(new CustomEvent('ef:auto-pos', { detail:{ id, target, cascade: cascading } })); } catch {/* ignore */}
       }
     });
   },[openPanels, openPanelOrder, isPlanetCountActive]);

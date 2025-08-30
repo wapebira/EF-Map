@@ -31,12 +31,6 @@ export function useDraggable(storageKey:string, defaultPos:DragPos){
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
   },[pos]);
 
-  const frameRef = useRef<number| null>(null);
-  const pendingPosRef = useRef<DragPos|null>(null);
-  const flush = () => {
-    if(pendingPosRef.current){ setPos(pendingPosRef.current); pendingPosRef.current=null; }
-    frameRef.current = null;
-  };
   const onPointerMove = useCallback((e:PointerEvent)=>{
     if(!draggingRef.current) return;
     const nx = e.clientX - offsetRef.current.dx;
@@ -44,9 +38,8 @@ export function useDraggable(storageKey:string, defaultPos:DragPos){
     const margin = 20; const vw = window.innerWidth; const vh = window.innerHeight;
     const clampedX = Math.min(Math.max(nx, margin), vw - margin - 80);
     const clampedY = Math.min(Math.max(ny, margin), vh - margin - 80);
-    pendingPosRef.current = { x: clampedX, y: clampedY };
+  setPos({ x: clampedX, y: clampedY }); // immediate for low latency
     movedDuringDragRef.current = true;
-    if(frameRef.current==null){ frameRef.current = requestAnimationFrame(flush); }
   },[]);
 
   const endDrag = useCallback(()=>{ 
@@ -60,7 +53,6 @@ export function useDraggable(storageKey:string, defaultPos:DragPos){
     return ()=>{
       window.removeEventListener('pointermove', onPointerMove as any);
       window.removeEventListener('pointerup', endDrag as any);
-      if(frameRef.current) cancelAnimationFrame(frameRef.current);
     };
   },[onPointerMove,endDrag]);
 
