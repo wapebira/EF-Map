@@ -33,16 +33,10 @@ export function loadPrefs(): EFMapPreferences {
   } catch { return { ...defaultPrefs }; }
 }
 
-let writeScheduled = false;
 let currentPrefs: EFMapPreferences = loadPrefs();
 
-function scheduleWrite(){
-  if(writeScheduled) return;
-  writeScheduled = true;
-  setTimeout(()=>{
-    try { localStorage.setItem(KEY, JSON.stringify(currentPrefs)); } catch {/* ignore */}
-    writeScheduled = false;
-  }, 25);
+function writeNow(){
+  try { localStorage.setItem(KEY, JSON.stringify(currentPrefs)); } catch {/* ignore */}
 }
 
 export function getPrefs(): EFMapPreferences { return currentPrefs; }
@@ -51,7 +45,7 @@ export function updatePrefs(mut: (draft: EFMapPreferences)=>void){
   const draft = { ...currentPrefs } as EFMapPreferences;
   mut(draft);
   currentPrefs = draft;
-  scheduleWrite();
+  writeNow();
 }
 
 export function resetAllPrefs(){
@@ -82,3 +76,9 @@ export function fullReset(){
   resetAllPrefs();
   clearPanelPositions();
 }
+
+// Flush on visibility change/unload for safety (in case future buffering added)
+try {
+  window.addEventListener('beforeunload', writeNow);
+  document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='hidden') writeNow(); });
+} catch {/* non-browser env */}

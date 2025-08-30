@@ -311,6 +311,7 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
       return;
     }
   onCalculateRoute(fromSystem, toSystem, distance, optimizeFor, algorithm);
+  // Force persistence even if user hasn't changed fields since mount
   if(onParamChange) onParamChange(distance, optimizeFor, algorithm);
   };
 
