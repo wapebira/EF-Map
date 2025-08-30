@@ -29,13 +29,35 @@ const PanelDrawer: React.FC<PanelDrawerProps> = ({ id, title, onClose, children,
     }
   } catch {/* ignore */}
   const drag = useDraggable('drawer-'+id, initial);
+  // After first paint, if we applied a cascade offset (cascadeIndex>0) but initial position got overridden by a late stored value, re-apply once.
+  React.useEffect(()=>{
+    if(typeof cascadeIndex==='number' && cascadeIndex>0){
+      try {
+        const stored = localStorage.getItem('panel-pos:'+'drawer-'+id);
+        if(!stored){
+          const expectedX = (baseDefaults[id]?.x ?? 140) + cascadeIndex*420;
+          if(Math.abs(drag.pos.x - expectedX) > 1){ drag.setPos({ x: expectedX, y: drag.pos.y }); }
+        }
+      } catch {/* ignore */}
+    }
+    // one-time
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[]);
   // Respond to external reset
+  const lastResetRef = React.useRef(resetToken);
   React.useEffect(()=>{
     if(resetToken===undefined) return;
-    // Clear stored pos and apply fresh base default
-    try { localStorage.removeItem('panel-pos:'+'drawer-'+id); } catch {/* ignore */}
-    const fresh = baseDefaults[id] || { x:140, y:70 };
-    drag.setPos(fresh as any);
+    if(lastResetRef.current === resetToken) return; // skip on initial mount or unchanged
+    lastResetRef.current = resetToken;
+    // Only reposition if panel was already open during reset (i.e., it existed pre-reset)
+    // Heuristic: if localStorage had a position key at reset time (removed externally), keep base default.
+    const storedKey = 'panel-pos:'+'drawer-'+id;
+    // If key exists now we reposition and remove; if it does not exist we skip so cascade applies.
+    if(localStorage.getItem(storedKey)){
+      try { localStorage.removeItem(storedKey); } catch {/* ignore */}
+      const fresh = baseDefaults[id] || { x:140, y:70 };
+      drag.setPos(fresh as any);
+    }
   },[resetToken,id]);
   return (
     <div className={`ef-drawer ${drag.isDragging? 'dragging':''}`} aria-label={`${title||'Panel'} drawer`} style={{ left: drag.pos.x, top: drag.pos.y, transform:`scale(${scale})`, transformOrigin:'top left', zIndex }} onMouseDown={()=> onActivate && onActivate(id)}>

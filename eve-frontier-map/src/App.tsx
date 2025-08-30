@@ -678,6 +678,8 @@ function App() {
   // Persist accent & open panels
   useEffect(()=>{ setAccent(accentIsBlue ? 'blue' : 'orange'); }, [accentIsBlue]);
   useEffect(()=>{ persistOpenPanels(Array.from(openPanels)); }, [openPanels]);
+  // Optional debug toggle (open console and set window.DEBUG_PREFS=true)
+  ;(window as any).DEBUG_PREFS = (window as any).DEBUG_PREFS || false;
 
   // Reinforce jump persistence after route completion (extra safety)
   useEffect(()=>{

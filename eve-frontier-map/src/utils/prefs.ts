@@ -37,6 +37,7 @@ let currentPrefs: EFMapPreferences = loadPrefs();
 
 function writeNow(){
   try { localStorage.setItem(KEY, JSON.stringify(currentPrefs)); } catch {/* ignore */}
+  try { if((window as any).DEBUG_PREFS) console.log('[prefs] write', currentPrefs); } catch {/* ignore */}
 }
 
 export function getPrefs(): EFMapPreferences { return currentPrefs; }

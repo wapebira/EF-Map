@@ -428,7 +428,7 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
               id="jump-distance"
               type="number"
               value={jumpDistance}
-              onChange={(e) => { setJumpDistance(e.target.value); const v=parseFloat(e.target.value); if(!isNaN(v) && onParamChange) onParamChange(v, optimizeFor, algorithm); }}
+              onChange={(e) => { setJumpDistance(e.target.value); const v=parseFloat(e.target.value); if(!isNaN(v) && onParamChange){ onParamChange(v, optimizeFor, algorithm); try { if((window as any).DEBUG_PREFS) console.log('[p2p] jump change ->', v); } catch {/* ignore */} } }}
               className="p2p-input"
             />
           </div>
