@@ -89,36 +89,42 @@ body {
   height: 96px; /* doubled */
   opacity: 0.9;
   z-index: 3000;
-  border-radius: 8px;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.7);
+  border-radius: 10px;
+  /* Add subtle translucent panel + light border so it reads on pure black */
+  background: rgba(0,0,0,0.55);
+  border: 1px solid rgba(255,255,255,0.18);
+  backdrop-filter: blur(3px);
+  box-shadow:
+    0 2px 10px rgba(0,0,0,0.65), /* existing depth */
+    0 0 0 1px rgba(255,255,255,0.05), /* inner stroke for definition */
+    0 0 10px rgba(255,255,255,0.08); /* faint ambient glow so edge isn't lost */
   cursor: default;
+  transition: box-shadow .35s ease, border-color .35s ease, background .35s ease;
+}
+
+/* Slightly amplify accent + glow in cinematic mode */
+.cinematic-active .ef-small-logo {
+  border-color: var(--accent);
+  box-shadow:
+    0 3px 14px rgba(0,0,0,0.75),
+    0 0 0 1px rgba(255,255,255,0.10),
+    0 0 14px rgba(255,255,255,0.12),
+    0 0 26px -4px var(--accent);
+  background: linear-gradient(rgba(0,0,0,0.60), rgba(0,0,0,0.50));
+}
+
+.ef-small-logo:hover {
+  box-shadow:
+    0 4px 18px rgba(0,0,0,0.75),
+    0 0 0 1px rgba(255,255,255,0.12),
+    0 0 16px rgba(255,255,255,0.16),
+    0 0 32px -4px var(--accent);
+  border-color: var(--accent);
 }
 
 /* Support button wrapper sits to the LEFT of the persistent logo (logo: 96px wide + 20px gap) */
-.ef-support-btn-wrapper { position:fixed; right: calc(12px + 96px + 20px); bottom:12px; z-index:3200; display:flex; align-items:flex-end; }
-.ef-support-btn {
-  display:flex;
-  flex-direction:column;
-  justify-content:center;
-  align-items:center;
-  padding:8px 10px 10px;
-  background:var(--accent);
-  border:none;
-  border-radius:4px;
-  font-family: system-ui, sans-serif;
-  font-weight:600;
-  letter-spacing:.5px;
-  font-size:14px;
-  line-height:1.15;
-  cursor:pointer;
-  color:#fff;
-  min-width:122px;
-  box-shadow:0 2px 6px rgba(0,0,0,0.45);
-  position:relative;
-  overflow:hidden;
-}
-.ef-support-btn .line1 { font-size:14px; font-weight:600; }
-.ef-support-btn .line2 { font-size:14px; font-weight:600; }
+/* Legacy bottom-right support wrapper removed (button now in top toolbar). */
+.ef-support-btn { background:var(--accent); color:#fff; border:none; padding:6px 12px; font-size:13px; font-weight:600; letter-spacing:.5px; border-radius:4px; cursor:pointer; box-shadow:0 2px 6px rgba(0,0,0,0.45); display:flex; align-items:center; gap:6px; line-height:1.15; max-width:160px; text-align:center; white-space:normal; }
 .ef-support-btn:hover { filter:brightness(1.08); }
 .ef-support-btn:active { transform:translateY(1px); }
 
@@ -151,14 +157,15 @@ body {
 }
 /* Shift left by panel width (responsive) minus small gap (8px) so referral right edge sits just left of panel */
 /* Panel widths: default 33vw (max 520px min 340px) with breakpoints. We approximate with same vw then override in media queries. */
-:root.help-open .ef-toolbar-shifting { transform: translateX(calc(-1 * (var(--help-panel-width, 33vw) + 8px))); }
+/* When help is open shift only by (panel width - toggle button width - desired gap) to keep consistent spacing */
+:root.help-open .ef-toolbar-shifting { transform: translateX(calc(-1 * ((var(--help-panel-width, 33vw) - var(--help-toggle-width, 0px)) + 8px))); }
 
 .ef-referral {
   position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 6px 14px;
+  padding: 6px 12px; /* align with other top toolbar buttons */
   background: rgba(0,0,0,0.55);
   color: #fff;
   font-size: 13px;
@@ -171,7 +178,7 @@ body {
   box-shadow: 0 2px 6px rgba(0,0,0,0.5);
   pointer-events: auto;
   white-space: nowrap;
-  min-height: 38px;
+  line-height:1.3; /* natural height alignment */
 }
 
 .ef-referral-code { margin-left:4px; font-weight:700; }
@@ -201,8 +208,8 @@ body {
   background: var(--accent);
   color: #fff;
   border: none;
-  padding: 8px 14px;
-  font-size: 14px; /* match help button */
+  padding: 6px 12px; /* align with reset button */
+  font-size: 13px; /* align with reset button */
   font-weight: 600;
   letter-spacing: .5px;
   font-family: system-ui, sans-serif;
@@ -212,7 +219,7 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
-  min-height: 38px;
+  line-height: 1.3;
   transition: filter .2s ease, transform .15s ease, background .3s ease;
 }
 .share-route-btn:hover:not(:disabled) { filter: brightness(1.08); }
@@ -220,11 +227,11 @@ body {
 .share-route-btn:disabled { opacity: .45; cursor: not-allowed; filter:none; }
 .share-feedback { font-size:11px; position:absolute; bottom:-16px; left:0; right:0; text-align:center; color:#fff; opacity:.85; pointer-events:none; }
 
-@media (max-width: 1200px){ :root.help-open .ef-toolbar-shifting { transform: translateX(calc(-1 * (var(--help-panel-width, 40vw) + 8px))); } }
-@media (max-width: 900px){ :root.help-open .ef-toolbar-shifting { transform: translateX(calc(-1 * (var(--help-panel-width, 50vw) + 8px))); } }
+@media (max-width: 1200px){ :root.help-open .ef-toolbar-shifting { transform: translateX(calc(-1 * ((var(--help-panel-width, 40vw) - var(--help-toggle-width, 0px)) + 8px))); } }
+@media (max-width: 900px){ :root.help-open .ef-toolbar-shifting { transform: translateX(calc(-1 * ((var(--help-panel-width, 50vw) - var(--help-toggle-width, 0px)) + 8px))); } }
 @media (max-width: 700px){
   .ef-top-toolbar { right:50%; transform:translateX(50%); }
   .ef-toolbar-shifting { flex-wrap:wrap; justify-content:center; }
-  :root.help-open .ef-toolbar-shifting { transform: translate(calc(-1 * (var(--help-panel-width, 100vw) - 8px)),0); }
+  :root.help-open .ef-toolbar-shifting { transform: translate(calc(-1 * ((var(--help-panel-width, 100vw) - var(--help-toggle-width, 0px)) - 8px)),0); }
 }
 /* .system-label--selected intentionally left unstyled - uses same styles as .system-label */
