@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import './AutoCompleteInput.css';
 
 interface AutoCompleteInputProps {
@@ -12,6 +13,7 @@ interface AutoCompleteInputProps {
 const AutoCompleteInput = ({ value, onChange, onSelect, dataSource, placeholder }: AutoCompleteInputProps) => {
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [isSuggestionsVisible, setIsSuggestionsVisible] = useState(false);
+  const [dropdownPos, setDropdownPos] = useState<{left:number; top:number; width:number}>({ left:0, top:0, width:0 });
   const componentRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -25,6 +27,29 @@ const AutoCompleteInput = ({ value, onChange, onSelect, dataSource, placeholder 
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, []);
+
+  const recalcPosition = () => {
+    if (!componentRef.current) return;
+    const input = componentRef.current.querySelector('input');
+    if (!input) return;
+    const rect = (input as HTMLInputElement).getBoundingClientRect();
+    setDropdownPos({
+      left: rect.left + window.scrollX,
+      top: rect.bottom + window.scrollY,
+      width: rect.width
+    });
+  };
+
+  useEffect(()=>{
+    if (isSuggestionsVisible) recalcPosition();
+  },[isSuggestionsVisible,value]);
+
+  useEffect(()=>{
+    const onWin = () => { if(isSuggestionsVisible) recalcPosition(); };
+    window.addEventListener('resize', onWin);
+    window.addEventListener('scroll', onWin, true);
+    return ()=> { window.removeEventListener('resize', onWin); window.removeEventListener('scroll', onWin, true); };
+  },[isSuggestionsVisible]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newValue = e.target.value;
@@ -47,6 +72,16 @@ const AutoCompleteInput = ({ value, onChange, onSelect, dataSource, placeholder 
     setIsSuggestionsVisible(false);
   };
 
+  const dropdown = (isSuggestionsVisible && suggestions.length > 0) ? createPortal(
+      <ul className="suggestions-list" style={{ position:'fixed', left:dropdownPos.left, top:dropdownPos.top, width:dropdownPos.width, zIndex:3000 }}>
+        {suggestions.map((item, index) => (
+          <li key={index} onClick={() => handleSelect(item)}>
+            {item}
+          </li>
+        ))}
+      </ul>, document.body
+    ) : null;
+
   return (
     <div className="autocomplete-container" ref={componentRef}>
       <input
@@ -55,16 +90,9 @@ const AutoCompleteInput = ({ value, onChange, onSelect, dataSource, placeholder 
         onChange={handleChange}
         placeholder={placeholder}
         className="p2p-input"
+        onFocus={()=> { if(value.length>=3 && suggestions.length>0){ setIsSuggestionsVisible(true); recalcPosition(); }}}
       />
-      {isSuggestionsVisible && suggestions.length > 0 && (
-        <ul className="suggestions-list">
-          {suggestions.map((item, index) => (
-            <li key={index} onClick={() => handleSelect(item)}>
-              {item}
-            </li>
-          ))}
-        </ul>
-      )}
+      {dropdown}
     </div>
   );
 };
