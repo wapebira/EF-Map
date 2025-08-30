@@ -105,6 +105,26 @@ input[type=number].p2p-input { -moz-appearance: textfield; appearance: textfield
   cursor: not-allowed;
 }
 
+/* Active pulse while calculating */
+.p2p-calculate-button.calculating {
+  position: relative;
+  animation: p2p-pulse 1.6s ease-in-out infinite;
+}
+@keyframes p2p-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(var(--accent-rgb,0,170,255),0.6); }
+  70% { box-shadow: 0 0 0 12px rgba(var(--accent-rgb,0,170,255),0); }
+  100% { box-shadow: 0 0 0 0 rgba(var(--accent-rgb,0,170,255),0); }
+}
+
+/* Inline spinner */
+.p2p-spinner { width:14px; height:14px; border:2px solid rgba(255,255,255,0.25); border-top-color:#fff; border-radius:50%; animation: p2p-spin .7s linear infinite; flex:0 0 auto; }
+@keyframes p2p-spin { to { transform: rotate(360deg); } }
+
+/* Shimmer bar shown before first progress */
+.p2p-shimmer-bar { position: relative; overflow:hidden; height:6px; background:#222; border-radius:4px; }
+.p2p-shimmer-bar::after { content:""; position:absolute; inset:0; background:linear-gradient(100deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.35) 50%, rgba(255,255,255,0.05) 100%); transform:translateX(-100%); animation: p2p-shimmer 1.2s infinite; }
+@keyframes p2p-shimmer { to { transform: translateX(100%); } }
+
 .p2p-results {
   margin-top: 10px;
   border-top: 1px solid #555;

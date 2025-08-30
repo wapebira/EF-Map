@@ -314,6 +314,28 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
     }
   }, [routeResult, mapData, includeLegend, includeStats]);
 
+  const [localElapsedMs, setLocalElapsedMs] = useState(0);
+  const [hasProgress, setHasProgress] = useState(false);
+  // Track local elapsed timer independent of worker progress messages
+  useEffect(()=>{
+    if(isCalculating){
+      const start = performance.now();
+      let frame: number;
+      const loop = () => {
+        setLocalElapsedMs(performance.now() - start);
+        frame = requestAnimationFrame(loop);
+      };
+      frame = requestAnimationFrame(loop);
+      return ()=> cancelAnimationFrame(frame);
+    } else {
+      setLocalElapsedMs(0);
+      setHasProgress(false);
+    }
+  }, [isCalculating]);
+
+  // Detect first progress event
+  useEffect(()=>{ if(progress && isCalculating){ setHasProgress(true); } }, [progress, isCalculating]);
+
   const handleCalculate = () => {
     const distance = parseFloat(jumpDistance);
     if (isNaN(distance) || distance <= 0) {
@@ -477,8 +499,13 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
             />
           </div>
 
-          <button className="p2p-calculate-button" onClick={handleCalculate} disabled={isCalculating}>
-            {isCalculating ? 'Calculating...' : 'Calculate Route'}
+          <button className={`p2p-calculate-button ${isCalculating?'calculating':''}`} onClick={handleCalculate} disabled={isCalculating}>
+            {isCalculating ? (
+              <span style={{ display:'inline-flex', alignItems:'center', gap:8 }}>
+                <span className="p2p-spinner" />
+                Calculating...
+              </span>
+            ) : 'Calculate Route'}
           </button>
           {isCalculating && (
             <button className="p2p-stop-button" onClick={() => { onStopCalculation && onStopCalculation(); }}>
@@ -486,12 +513,28 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
             </button>
           )}
 
-          {isCalculating && progress && (
-            <div className="p2p-progress">
-              <div className="p2p-progress-bar" style={{ width: '100%', background: '#222', height: '8px', borderRadius: '4px', overflow: 'hidden', marginTop: '8px' }}>
-                <div style={{ width: `${Math.min(100, (progress.explored / (progress.explored + progress.frontier + 1)) * 100).toFixed(0)}%`, background: '#4caf50', height: '100%' }} />
-              </div>
-              <div style={{ marginTop: '6px', fontSize: '12px', color: '#ddd' }}>{progress.message} • frontier: {progress.frontier} • elapsed: {(progress.elapsedMs/1000).toFixed(1)}s</div>
+          {isCalculating && (
+            <div className="p2p-progress" style={{ marginTop:8 }}>
+              {hasProgress && progress ? (
+                <>
+                  <div className="p2p-progress-bar" style={{ width: '100%', background: '#222', height: '8px', borderRadius: '4px', overflow: 'hidden' }}>
+                    <div style={{ width: `${Math.min(100, (progress.explored / (progress.explored + progress.frontier + 1)) * 100).toFixed(0)}%`, background: 'var(--accent)', height: '100%', transition:'width .25s linear' }} />
+                  </div>
+                  <div style={{ marginTop: '6px', fontSize: '12px', color: '#ddd', display:'flex', flexWrap:'wrap', gap:8 }}>
+                    <span>{progress.message}</span>
+                    <span>frontier: {progress.frontier}</span>
+                    <span>elapsed: {(localElapsedMs/1000).toFixed(1)}s</span>
+                  </div>
+                </>
+              ) : (
+                <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+                  <div className="p2p-shimmer-bar" />
+                  <div style={{ fontSize:12, color:'#bbb', display:'flex', alignItems:'center', gap:6 }}>
+                    <span className="p2p-spinner" /> Initializing search…
+                    <span style={{ opacity:.6 }}>(A* heuristic warmup)</span>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
