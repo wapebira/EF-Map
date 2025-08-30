@@ -4,7 +4,7 @@ import './panelLayout.css';
 export interface RailItemBase {
   id: string;
   label: string;
-  icon: React.ReactNode;
+  icon: React.ReactNode | null; // retained for compatibility but not rendered now
   hotkey?: string;
 }
 
@@ -37,14 +37,12 @@ const PanelRail: React.FC<PanelRailProps> = ({ items, style }) => {
         if (item.type === 'toggle') {
           return (
             <button {...common} role="switch" aria-checked={item.active} onClick={item.onToggle}>
-              <span className="ef-rail-icon">{item.icon}</span>
               <span className="ef-rail-label">{item.label}</span>
             </button>
           );
         }
         return (
             <button {...common} role="button" aria-pressed={item.active} onClick={item.onSelect}>
-              <span className="ef-rail-icon">{item.icon}</span>
               <span className="ef-rail-label">{item.label}</span>
             </button>
         );
