@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState, useEffect } from 'react';
+// Persistence of ship max range removed per request (always starts at default)
 import '../P2PRouting/P2PRouting.css';
 import './ScoutOptimizer.css';
 import AutoCompleteInput from '../AutoCompleteInput/AutoCompleteInput';
@@ -21,11 +22,12 @@ interface ScoutOptimizerProps {
 	importedRoutePath?: string[] | null; // path supplied from shared URL (expanded display path)
 	resetToken?: number; // external reset for clearing all inputs
 	selectedSystemName?: string; // externally selected system (map click / global search)
+	embedded?: boolean; // omit toggle wrapper and always show content
 }
 
 const MAX_SYSTEMS_WARNING = 300;
 
-const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, onReturnToStartChange, onBaselineRoute, onOptimizedRoute, onClearRoute, invalidateToken, importedRoutePath, resetToken, selectedSystemName }: ScoutOptimizerProps) => {
+const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, onReturnToStartChange, onBaselineRoute, onOptimizedRoute, onClearRoute, invalidateToken, importedRoutePath, resetToken, selectedSystemName, embedded = false }: ScoutOptimizerProps) => {
 	const [startSystem, setStartSystem] = useState('');
 	const [radius, setRadius] = useState('50');
 	const [useRegion, setUseRegion] = useState(false);
@@ -37,6 +39,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	// Minimum required ship range (computed when baseline error received)
 	const [minRequiredShipRange, setMinRequiredShipRange] = useState<number|null>(null);
 	// Ship vs Gate preference inputs
+	// Ship max jump range (no persistence)
 	const [shipMaxRange, setShipMaxRange] = useState('60');
 	const [shipTradeDistance, setShipTradeDistance] = useState('0');
 	const [minGateHopsSaved, setMinGateHopsSaved] = useState('999');
@@ -44,11 +47,9 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	const [statusLog, setStatusLog] = useState<string[]>([]);
 	const [isCalculating, setIsCalculating] = useState(false);
 	// User toggles
-	const [compactPref, setCompactPref] = useState(false);
 	const [hideInputsPref, setHideInputsPref] = useState(false); // persists after optimization
 	const [smallViewport, setSmallViewport] = useState(false);
-	const effectiveCompact = compactPref || smallViewport; // no longer forced by optimization
-	const effectiveHideInputs = hideInputsPref; // inputs hidden only if user (or auto-set at start) chose so
+	const effectiveHideInputs = hideInputsPref; // inputs hidden only if user chose so
 	// Macro path = optimization path (visited target systems order)
 	const [championPath, setChampionPath] = useState<string[]|null>(null);
 	// Display path = macro path expanded into individual gate hops (BFS) so gate segments are shown instead of ship jumps when possible
@@ -106,7 +107,6 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		setWorkerCount(Math.max(1,(navigator.hardwareConcurrency||4)-2).toString());
 		setStatusLog([]);
 		setIsCalculating(false);
-		setCompactPref(false);
 		setHideInputsPref(false);
 		setChampionPath(null); championPathRef.current=null;
 		setChampionDisplayPath(null); championDisplayPathRef.current=null;
@@ -125,9 +125,11 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	// Update start system when external system selection occurs
 	useEffect(()=>{
 		if(selectedSystemName){
-			setStartSystem(selectedSystemName);
+			setStartSystem(prev=> prev || selectedSystemName); // do not overwrite if user already entered one
 		}
 	}, [selectedSystemName]);
+
+	// (persistence now handled inline in input onChange, mirroring P2P debounce pattern)
 
 	const stargatesArray = mapData ? Object.values(mapData.stargates) : [];
 	const gatesBySource: {[id:number]: number[]} = {}; stargatesArray.forEach(g=>{ if(!gatesBySource[g.source_system_id]) gatesBySource[g.source_system_id]=[]; gatesBySource[g.source_system_id].push(g.destination_system_id); if(!gatesBySource[g.destination_system_id]) gatesBySource[g.destination_system_id]=[]; gatesBySource[g.destination_system_id].push(g.source_system_id); });
@@ -155,7 +157,8 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		return candidates.map(c=>c.name);
 	},[mapData, startSystem, radius, useRegion, gateReachableOnly, gatesBySource]);
 
-	const systemsWarning = open ? (collectSystems().length > MAX_SYSTEMS_WARNING) : false;
+	const effectiveOpen = open || embedded;
+	const systemsWarning = effectiveOpen ? (collectSystems().length > MAX_SYSTEMS_WARNING) : false;
 
 	// Stats helper: counts before/after gateReachable filter (for testing region mode correctness)
 	const collectSystemsStats = useCallback(()=>{
@@ -172,7 +175,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		return { all, filtered: candidates.length };
 	},[mapData, startSystem, radius, useRegion, gateReachableOnly, gatesBySource]);
 
-	const systemStats = open ? collectSystemsStats() : { all:0, filtered:0 };
+	const systemStats = effectiveOpen ? collectSystemsStats() : { all:0, filtered:0 };
 
 	const ensureWorkers = useCallback(()=>{
 		const desired = parseInt(workerCount,10); if(workersRef.current.length===desired) return;
@@ -473,7 +476,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 
 	// Log when region vs radius or gateReachableOnly toggles to aid testing
 	useEffect(()=>{
-		if(!open) return;
+		if(!effectiveOpen) return;
 		const { all, filtered } = systemStats;
 		if(useRegion){
 			log(`Region selection: ${filtered}${gateReachableOnly?` (gate-filtered from ${all})`:''}`);
@@ -481,7 +484,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 			log(`Radius selection: ${filtered}${gateReachableOnly?` (gate-filtered from ${all})`:''}`);
 		}
 	// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [useRegion, gateReachableOnly, startSystem, radius, open]);
+	}, [useRegion, gateReachableOnly, startSystem, radius, effectiveOpen]);
 
 	// Detect dataset changes after a baseline/optimization has been produced
 	useEffect(()=>{
@@ -749,7 +752,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		return ()=>{ if(globalMonitorRef.current!==undefined){ clearInterval(globalMonitorRef.current); globalMonitorRef.current=undefined; } };
 	},[]);
 
-	// Detect small viewport height to auto-force compact
+	// Detect small viewport height (might influence future layout adjustments)
 	useEffect(()=>{
 		const check = () => { setSmallViewport(window.innerHeight < 820); };
 		check();
@@ -757,21 +760,13 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		return ()=> window.removeEventListener('resize', check);
 	},[]);
 
-	return (
-		<div className="scout-optimizer-container">
-			<label className="module-toggle-label">
-				<input type="checkbox" checked={open} onChange={(e)=> onToggle(e.target.checked)} /> Scout Optimizer
-			</label>
-			{open && (
-				<div className={`scout-optimizer-panel ${effectiveCompact? 'compact':''} ${effectiveHideInputs? 'hide-inputs':''}`}>
+	const panel = (
+		<div className={`scout-optimizer-panel ${effectiveHideInputs? 'hide-inputs':''}`}>
 					<div style={{display:'flex', gap:'10px', flexWrap:'wrap', alignItems:'center'}}>
-						<label style={{fontSize:'0.7rem', display:'flex', gap:4, alignItems:'center'}}>
-							<input type="checkbox" checked={compactPref || smallViewport} onChange={(e)=> setCompactPref(e.target.checked)} /> Compact{smallViewport && !compactPref ? ' (auto)' : ''}
-						</label>
 						<label style={{fontSize:'0.7rem', display:'flex', gap:4, alignItems:'center'}}>
 							<input type="checkbox" checked={effectiveHideInputs} onChange={(e)=> setHideInputsPref(e.target.checked)} /> Hide Inputs
 						</label>
-						{smallViewport && <span style={{fontSize:'0.6rem', opacity:0.7}}>Small viewport auto-compact</span>}
+						{smallViewport && <span style={{fontSize:'0.6rem', opacity:0.7}}>Small viewport</span>}
 					</div>
 					{(!effectiveHideInputs) && <div className="scout-input-row">
 						<label>Start System</label>
@@ -871,8 +866,19 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 						</div>
 					)}
 					<div className="scout-status" aria-live="polite">{statusLog.join('\n')}</div>
-				</div>
-			)}
+		</div>
+	);
+
+	if (embedded) {
+		return panel;
+	}
+
+	return (
+		<div className="scout-optimizer-container">
+			<label className="module-toggle-label">
+				<input type="checkbox" checked={open} onChange={(e)=> onToggle(e.target.checked)} /> Scout Optimizer
+			</label>
+			{open && panel}
 		</div>
 	);
 };

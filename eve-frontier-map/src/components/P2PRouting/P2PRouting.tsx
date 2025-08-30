@@ -195,7 +195,7 @@ interface P2PRoutingProps {
   onCalculateRoute: (from: string, to: string, jumpDist: number, optimize: 'fuel' | 'jumps', algorithm: 'astar' | 'dijkstra') => void;
   onStopCalculation?: () => void;
   isCalculating: boolean;
-  routeResult: { path: string[] | null; error?: string } | null;
+  routeResult: { path: string[] | null; error?: string; minRequiredShipRange?: number } | null;
   mapData: MapData | null;
   systemNames: string[];
   progress?: { explored: number; frontier: number; elapsedMs: number; message: string } | null;
@@ -211,6 +211,11 @@ interface P2PRoutingProps {
   onRemoveAvoidSystem?: (name: string)=>void;
   waypointOptimize?: boolean; // false = visit in added order, true = optimize order (future)
   onWaypointOptimizeChange?: (v: boolean)=>void;
+  embedded?: boolean; // if true, omit outer toggle wrapper and always show panel
+  initialJumpDistance?: number; // persisted default
+  initialOptimizeFor?: 'fuel' | 'jumps';
+  initialAlgorithm?: 'astar' | 'dijkstra';
+  onParamChange?: (jump:number, optimize:'fuel'|'jumps', algorithm:'astar'|'dijkstra')=>void;
 }
 
 // Minimal neutral custom select (no accent colors) for consistent option highlight across platforms
@@ -263,12 +268,31 @@ const NeutralSelect = <T extends string>({ value, onChange, options, ariaLabel, 
   );
 };
 
-const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeResult, mapData, systemNames, progress, routeCalcTimeMs, open, onToggle, resetToken, selectedSystemName, selectedDestinationSystemName, waypoints = [], avoidSystems = [], onRemoveWaypoint, onRemoveAvoidSystem, waypointOptimize = false, onWaypointOptimizeChange }: P2PRoutingProps) => {
+const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeResult, mapData, systemNames, progress, routeCalcTimeMs, open, onToggle, resetToken, selectedSystemName, selectedDestinationSystemName, waypoints = [], avoidSystems = [], onRemoveWaypoint, onRemoveAvoidSystem, waypointOptimize = false, onWaypointOptimizeChange, embedded = false, initialJumpDistance=60, initialOptimizeFor='fuel', initialAlgorithm='astar', onParamChange }: P2PRoutingProps) => {
   const [fromSystem, setFromSystem] = useState('');
   const [toSystem, setToSystem] = useState('');
-  const [jumpDistance, setJumpDistance] = useState('60');
-  const [optimizeFor, setOptimizeFor] = useState<'fuel' | 'jumps'>('fuel');
-  const [algorithm, setAlgorithm] = useState<'astar' | 'dijkstra'>('astar');
+  const [jumpDistance, setJumpDistance] = useState(String(initialJumpDistance)); // editing this must not reset from/to
+  const [optimizeFor, setOptimizeFor] = useState<'fuel' | 'jumps'>(initialOptimizeFor);
+  const [algorithm, setAlgorithm] = useState<'astar' | 'dijkstra'>(initialAlgorithm);
+  // Simple debounce helper for jump distance persistence
+  const debouncePersist = useRef<{ cancel:()=>void}|null>(null);
+  const schedule = (fn:()=>void, ms:number) => {
+    let active = true;
+    const id = setTimeout(()=>{ if(active) fn(); }, ms);
+    return { cancel:()=>{ active=false; clearTimeout(id); } };
+  };
+
+  // Keep internal state in sync if persisted prefs load after first mount.
+  // Sync initial jump distance only on first mount; subsequent preference changes shouldn't overwrite in-progress user edits.
+  const initJumpAppliedRef = useRef(false);
+  useEffect(()=>{
+    if(initJumpAppliedRef.current) return;
+    setJumpDistance(String(initialJumpDistance));
+    initJumpAppliedRef.current = true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialJumpDistance]);
+  useEffect(()=>{ if(optimizeFor !== initialOptimizeFor) setOptimizeFor(initialOptimizeFor); }, [initialOptimizeFor]);
+  useEffect(()=>{ if(algorithm !== initialAlgorithm) setAlgorithm(initialAlgorithm); }, [initialAlgorithm]);
 
   const [notePages, setNotePages] = useState<string[]>([]);
   const [includeLegend, setIncludeLegend] = useState(true);
@@ -297,6 +321,8 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
       return;
     }
   onCalculateRoute(fromSystem, toSystem, distance, optimizeFor, algorithm);
+  // Force persistence even if user hasn't changed fields since mount
+  if(onParamChange) onParamChange(distance, optimizeFor, algorithm);
   };
 
   const handleCopy = (pageIndex: number) => {
@@ -311,35 +337,30 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
     }
   };
 
-  // Respond to external reset requests
+  // Respond ONLY to explicit external reset requests (do not tie to changing persisted params)
+  const firstMountRef = useRef(true);
   useEffect(() => {
+    if(firstMountRef.current){ firstMountRef.current=false; return; }
     if(resetToken === undefined) return;
-    // Reset all local input states to initial defaults
     setFromSystem('');
     setToSystem('');
-    setJumpDistance('60');
-    setOptimizeFor('fuel');
-    setAlgorithm('astar');
+    setJumpDistance(String(initialJumpDistance));
+    setOptimizeFor(initialOptimizeFor);
+    setAlgorithm(initialAlgorithm);
     setNotePages([]);
     setSummary(null);
     setActiveNotePage(0);
-  setCopyButtonText('Copy');
-  setIncludeLegend(true);
-  setIncludeStats(false);
+    setCopyButtonText('Copy');
+    setIncludeLegend(true);
+    setIncludeStats(false);
   }, [resetToken]);
 
   // Update From system when an external system selection occurs
-  useEffect(()=>{
-    if(selectedSystemName){
-      setFromSystem(selectedSystemName);
-    }
-  }, [selectedSystemName]);
+  useEffect(()=>{ if(selectedSystemName){ setFromSystem(prev=> prev || selectedSystemName); } }, [selectedSystemName]);
 
   // Update To system when external destination selection occurs
   useEffect(()=>{
-    if(selectedDestinationSystemName){
-      setToSystem(selectedDestinationSystemName);
-    }
+    if(selectedDestinationSystemName){ setToSystem(prev=> prev || selectedDestinationSystemName); }
   }, [selectedDestinationSystemName]);
 
   // Build waypoint & avoided system UI blocks (only if non-empty)
@@ -380,19 +401,8 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
     </div>
   );
 
-  return (
-    <div className="p2p-routing-container">
-      <label className="module-toggle-label">
-        <input
-          type="checkbox"
-          checked={open}
-          onChange={(e) => onToggle(e.target.checked)}
-        />
-        Point-to-Point Routing
-      </label>
-
-      {open && (
-        <div className="p2p-routing-panel">
+  const panel = (
+    <div className="p2p-routing-panel">
           <div className="p2p-input-group">
             <label htmlFor="from-system">From</label>
             <AutoCompleteInput
@@ -423,8 +433,17 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
               id="jump-distance"
               type="number"
               value={jumpDistance}
-              onChange={(e) => setJumpDistance(e.target.value)}
-                className="p2p-input"
+              onChange={(e) => {
+                const newVal = e.target.value;
+                setJumpDistance(newVal);
+                const v = parseFloat(newVal);
+                // Debounce persistence so intermediate deletions (e.g., going from 65 -> 6 -> 60) don't cause parent rerender cascade wiping fields.
+                if(!isNaN(v)) {
+                  debouncePersist.current?.cancel();
+                  debouncePersist.current = schedule(()=>{ if(onParamChange) onParamChange(v, optimizeFor, algorithm); }, 300);
+                }
+              }}
+              className="p2p-input"
             />
           </div>
 
@@ -434,7 +453,7 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
               id="optimize-for"
               ariaLabel="Optimize For"
               value={optimizeFor}
-              onChange={(v)=> setOptimizeFor(v as 'fuel'|'jumps')}
+              onChange={(v)=> { const val=v as 'fuel'|'jumps'; setOptimizeFor(val); if(onParamChange){ const dist=parseFloat(jumpDistance); if(!isNaN(dist)) onParamChange(dist, val, algorithm); } }}
               options={[
                 { value: 'fuel', label: 'Fuel (Prefer Gates)' },
                 { value: 'jumps', label: 'Jumps' },
@@ -448,7 +467,7 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
               id="algorithm-select"
               ariaLabel="Algorithm"
               value={algorithm}
-              onChange={(v)=> setAlgorithm(v as 'astar'|'dijkstra')}
+              onChange={(v)=> { const val=v as 'astar'|'dijkstra'; setAlgorithm(val); if(onParamChange){ const dist=parseFloat(jumpDistance); if(!isNaN(dist)) onParamChange(dist, optimizeFor, val); } }}
               options={[
                 { value: 'astar', label: 'A* (basic)' },
                 { value: 'dijkstra', label: 'Dijkstra (advanced)' },
@@ -474,7 +493,14 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
             </div>
           )}
 
-          {routeResult && routeResult.error && <p className="error">Error: {routeResult.error}</p>}
+          {routeResult && routeResult.error && (
+            <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
+              <p className="error" style={{ margin:0 }}>Error: {routeResult.error}</p>
+              {routeResult.minRequiredShipRange !== undefined && isFinite(routeResult.minRequiredShipRange) && (
+                <div className="p2p-warning">Minimum ship range required to connect start and destination: {routeResult.minRequiredShipRange.toFixed(2)} LY</div>
+              )}
+            </div>
+          )}
 
           {summary && (
             <div className="p2p-results">
@@ -514,8 +540,23 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
               </div>
             </div>
           )}
-        </div>
-      )}
+    </div>
+  );
+
+  if (embedded) {
+    return <div className="p2p-routing-embedded">{panel}</div>;
+  }
+  return (
+    <div className="p2p-routing-container">
+      <label className="module-toggle-label">
+        <input
+          type="checkbox"
+          checked={open}
+          onChange={(e) => onToggle(e.target.checked)}
+        />
+        Point-to-Point Routing
+      </label>
+      {open && panel}
     </div>
   );
 };

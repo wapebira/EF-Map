@@ -1,23 +1,10 @@
 .autocomplete-container {
   position: relative;
   width: 100%;
+  z-index: 1500; /* ensure stacking context above rail (1400) */
 }
 
-.suggestions-list {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  right: 0;
-  background-color: #2d2d2d;
-  border: 1px solid #555;
-  border-top: none;
-  list-style-type: none;
-  padding: 0;
-  margin: 0;
-  max-height: 200px;
-  overflow-y: auto;
-  z-index: 1000; /* Ensure it appears above other elements */
-}
+.suggestions-list { background-color:#2d2d2d; border:1px solid #555; border-top:none; list-style-type:none; padding:0; margin:0; max-height:200px; overflow-y:auto; box-shadow:0 6px 18px -4px rgba(0,0,0,0.6); }
 
 .suggestions-list li {
   padding: 8px 12px;
@@ -27,4 +14,9 @@
 
 .suggestions-list li:hover {
   background-color: #555;
+}
+
+.suggestions-list li.active {
+  background-color: var(--accent);
+  color: #fff;
 }

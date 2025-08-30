@@ -15,7 +15,7 @@ interface RoutingRequest {
   avoidSystemNames?: string[]; // optional list of systems to exclude
 }
 
-interface RoutingResponse { path: string[] | null; error?: string }
+interface RoutingResponse { path: string[] | null; error?: string; minRequiredShipRange?: number }
 
 // Simple PQ for A*
 class PriorityQueue<T> {
@@ -155,6 +155,67 @@ const getNeighbors = (
 };
 
 // --- A* (basic) ---
+// Fast existence probe using spatial grid + BFS (gates + ship jumps up to threshold).
+const existsPathWithin = (
+  systems: { [k:string]: SolarSystem },
+  stargates: { [k:string]: Stargate },
+  from: SolarSystem,
+  to: SolarSystem,
+  maxJump: number,
+  systemsById: { [id:number]: SolarSystem }
+): boolean => {
+  if(from.id === to.id) return true;
+  const allSystems = Object.values(systems);
+  const cellSize = Math.max(1, Math.floor(maxJump));
+  // Build or reuse grid (reuse spatialGrids)
+  let grid = spatialGrids.get(cellSize);
+  if(!grid){
+    grid = buildGrid(cellSize, allSystems);
+    spatialGrids.set(cellSize, grid);
+  }
+  const visited = new Set<number>();
+  const q:number[] = [from.id];
+  visited.add(from.id);
+  // Pre-build gate adjacency for fast gate expansion for this scan
+  const gateAdjLocal = new Map<number, number[]>();
+  for(const g of Object.values(stargates)){
+    if(!gateAdjLocal.has(g.source_system_id)) gateAdjLocal.set(g.source_system_id, []);
+    if(!gateAdjLocal.has(g.destination_system_id)) gateAdjLocal.set(g.destination_system_id, []);
+    gateAdjLocal.get(g.source_system_id)!.push(g.destination_system_id);
+    gateAdjLocal.get(g.destination_system_id)!.push(g.source_system_id);
+  }
+  while(q.length){
+    const curId = q.shift()!;
+    if(curId === to.id) return true;
+    // Gate neighbors
+    for(const ng of gateAdjLocal.get(curId)||[]){
+      if(!visited.has(ng)){ visited.add(ng); q.push(ng); if(ng===to.id) return true; }
+    }
+    // Ship neighbors (spatial grid query)
+    const cur = systemsById[curId]; if(!cur) continue;
+    const ix = Math.floor(cur.position.x / cellSize);
+    const iy = Math.floor(cur.position.y / cellSize);
+    const iz = Math.floor(cur.position.z / cellSize);
+    const r = Math.ceil(maxJump / cellSize);
+    for(let dx=-r; dx<=r; dx++){
+      for(let dy=-r; dy<=r; dy++){
+        for(let dz=-r; dz<=r; dz++){
+          const bucket = grid!.get(`${ix+dx},${iy+dy},${iz+dz}`);
+          if(!bucket) continue;
+          for(const cand of bucket){
+            if(cand.id === curId || visited.has(cand.id)) continue;
+            const d = heuristic(cur, cand);
+            if(d <= maxJump){
+              visited.add(cand.id); q.push(cand.id); if(cand.id===to.id) return true;
+            }
+          }
+        }
+      }
+    }
+  }
+  return false;
+};
+
 const findPathAstar = (request: RoutingRequest): RoutingResponse => {
   const { systems, stargates, fromSystemName, toSystemName, maxJumpDistance, optimizeFor, avoidSystemNames } = request;
 
@@ -204,7 +265,40 @@ const findPathAstar = (request: RoutingRequest): RoutingResponse => {
     }
   }
 
-  return { path: null, error: 'No path found.' };
+  // Path not found: approximate minimal required ship range by probing existence with increasing jump distance
+  let minRequired: number | undefined = undefined;
+  try {
+    const direct = heuristic(startNode, endNode);
+    if(direct <= request.maxJumpDistance + 1e-6){
+      minRequired = direct; // should have succeeded, fallback to direct
+    } else {
+      let low = request.maxJumpDistance;
+      let high = Math.min(direct, Math.max(low*2, low + 1));
+      const systemsById: { [id:number]: SolarSystem } = {}; Object.values(systems).forEach(s=> systemsById[s.id]=s);
+      // Exponential expansion
+      while(high < direct + 1e-6 && !existsPathWithin(systems, stargates, startNode, endNode, high, systemsById)){
+        low = high;
+        high = Math.min(direct, high * 2);
+        if(high >= direct - 1e-6) break;
+      }
+      let pathExistsAtHigh = existsPathWithin(systems, stargates, startNode, endNode, high, systemsById);
+      if(!pathExistsAtHigh){
+        minRequired = direct; // could not find path even at direct distance threshold
+      } else {
+        // Binary refine
+        for(let i=0;i<7;i++){
+          const mid = (low + high) / 2;
+            if(existsPathWithin(systems, stargates, startNode, endNode, mid, systemsById)){
+              high = mid;
+            } else {
+              low = mid;
+            }
+        }
+        minRequired = high;
+      }
+    }
+  } catch { /* ignore */ }
+  return { path: null, error: 'No path found.', minRequiredShipRange: minRequired };
 };
 
 // --- Dijkstra (advanced/fuel-optimal) ---
@@ -330,7 +424,29 @@ const findPathDijkstra = (request: RoutingRequest): RoutingResponse => {
     }
   }
 
-  return { path: null, error: 'No path found.' };
+  // Path not found (Dijkstra): reuse A* style probing for minimal required range
+  let minRequired: number | undefined = undefined;
+  try {
+    const direct = heuristic(startNode, endNode);
+    if(direct <= request.maxJumpDistance + 1e-6){
+      minRequired = direct;
+    } else {
+      const systemsById: { [id:number]: SolarSystem } = {}; Object.values(systems).forEach(s=> systemsById[s.id]=s);
+      let low = request.maxJumpDistance; let high = Math.min(direct, Math.max(low*2, low+1));
+      while(high < direct + 1e-6 && !existsPathWithin(systems, stargates, startNode, endNode, high, systemsById)){
+        low = high; high = Math.min(direct, high*2); if(high >= direct - 1e-6) break; }
+      if(!existsPathWithin(systems, stargates, startNode, endNode, high, systemsById)){
+        minRequired = direct;
+      } else {
+        for(let i=0;i<7;i++){
+          const mid = (low + high)/2;
+          if(existsPathWithin(systems, stargates, startNode, endNode, mid, systemsById)) high = mid; else low = mid;
+        }
+        minRequired = high;
+      }
+    }
+  } catch { /* ignore */ }
+  return { path: null, error: 'No path found.', minRequiredShipRange: minRequired };
 };
 
 // Dispatcher
