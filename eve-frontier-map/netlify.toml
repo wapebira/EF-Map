@@ -6,3 +6,9 @@
   node_bundler = "esbuild"
 
 # Optional: enforce edge function regions or other settings later
+
+[[headers]]
+  for = "/map_data.db"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+    Access-Control-Allow-Origin = "*"
