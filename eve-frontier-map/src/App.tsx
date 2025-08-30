@@ -682,32 +682,39 @@ function App() {
   // Refs to panel drawers for programmatic (non-persisting) positioning
   const routingDrawerRef = useRef<PanelDrawerHandle|null>(null);
   const cinematicDrawerRef = useRef<PanelDrawerHandle|null>(null);
+  // Track planet legend in open order when active
+  useEffect(()=>{
+    setOpenPanelOrder(prev=>{
+      let next = prev;
+      const hasLegend = prev.includes('planet-legend');
+      if(isPlanetCountActive && !hasLegend){ next = [...prev, 'planet-legend']; }
+      if(!isPlanetCountActive && hasLegend){ next = prev.filter(p=> p!=='planet-legend'); }
+      return next;
+    });
+  }, [isPlanetCountActive]);
 
   // Dynamic cascade: when multiple panels (routing, cinematic, planet legend) open and user has not dragged them (no stored pos), arrange side-by-side.
   useEffect(()=>{
-    const active = openPanelOrder.filter(id=> openPanels.has(id) && ['routing','cinematic','planet-legend'].includes(id));
-    if(active.length<=1) return;
+    // Determine which panels are open for cascade: drawers from openPanels plus legend if active
+    const candidates = ['routing','cinematic'];
+    if(isPlanetCountActive) candidates.push('planet-legend');
+    // Preserve original open order sequence for consistency
+    const active = openPanelOrder.filter(id=> candidates.includes(id) && (id==='planet-legend' ? isPlanetCountActive : openPanels.has(id)));
+    if(active.length===0) return;
     const baseX = 140; const baseY = 70; const stride = 420;
     active.forEach((id, idx)=>{
-      const key = 'panel-pos:drawer-'+id;
-      let stored = localStorage.getItem(key);
-      if(id==='planet-legend'){ // legend has its own key format
-        stored = localStorage.getItem('panel-pos:planet-legend');
-      }
-      if(stored) return; // user moved/persisted -> skip
-      const target = { x: baseX + idx*stride, y: baseY };
+      const key = id==='planet-legend' ? 'panel-pos:planet-legend' : 'panel-pos:drawer-'+id;
+      const stored = localStorage.getItem(key);
+      if(stored) return; // user has dragged; don't auto-move
+      const isSingle = active.length===1;
+      const target = { x: isSingle? baseX : baseX + idx*stride, y: baseY };
       if(id==='routing' && routingDrawerRef.current){ routingDrawerRef.current.autoPosition(target); }
       if(id==='cinematic' && cinematicDrawerRef.current){ cinematicDrawerRef.current.autoPosition(target); }
       if(id==='planet-legend'){
-        // Direct DOM adjustment via custom event? Simpler: mutate style through position hook ref by dispatching window event
-        try {
-          const ev = new CustomEvent('ef:auto-pos', { detail:{ id, target } });
-          window.dispatchEvent(ev);
-        } catch {/* ignore */}
-        // Also store ephemeral coordinates in a temp map for legend fallback (no persistence)
+        try { window.dispatchEvent(new CustomEvent('ef:auto-pos', { detail:{ id, target } })); } catch {/* ignore */}
       }
     });
-  },[openPanels, openPanelOrder]);
+  },[openPanels, openPanelOrder, isPlanetCountActive]);
   // Optional debug toggle (open console and set window.DEBUG_PREFS=true)
   ;(window as any).DEBUG_PREFS = (window as any).DEBUG_PREFS || false;
 

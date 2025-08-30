@@ -31,17 +31,22 @@ export function useDraggable(storageKey:string, defaultPos:DragPos){
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
   },[pos]);
 
+  const frameRef = useRef<number| null>(null);
+  const pendingPosRef = useRef<DragPos|null>(null);
+  const flush = () => {
+    if(pendingPosRef.current){ setPos(pendingPosRef.current); pendingPosRef.current=null; }
+    frameRef.current = null;
+  };
   const onPointerMove = useCallback((e:PointerEvent)=>{
     if(!draggingRef.current) return;
     const nx = e.clientX - offsetRef.current.dx;
     const ny = e.clientY - offsetRef.current.dy;
-    // Clamp within viewport with some margin
-    const margin = 20;
-    const vw = window.innerWidth; const vh = window.innerHeight;
-    const clampedX = Math.min(Math.max(nx, margin), vw - margin - 80); // assume min width 80
+    const margin = 20; const vw = window.innerWidth; const vh = window.innerHeight;
+    const clampedX = Math.min(Math.max(nx, margin), vw - margin - 80);
     const clampedY = Math.min(Math.max(ny, margin), vh - margin - 80);
-    setPos({ x: clampedX, y: clampedY });
+    pendingPosRef.current = { x: clampedX, y: clampedY };
     movedDuringDragRef.current = true;
+    if(frameRef.current==null){ frameRef.current = requestAnimationFrame(flush); }
   },[]);
 
   const endDrag = useCallback(()=>{ 
@@ -50,11 +55,12 @@ export function useDraggable(storageKey:string, defaultPos:DragPos){
   },[]);
 
   useEffect(()=>{
-    window.addEventListener('pointermove', onPointerMove);
-    window.addEventListener('pointerup', endDrag);
+    window.addEventListener('pointermove', onPointerMove, { passive:true });
+    window.addEventListener('pointerup', endDrag, { passive:true });
     return ()=>{
-      window.removeEventListener('pointermove', onPointerMove);
-      window.removeEventListener('pointerup', endDrag);
+      window.removeEventListener('pointermove', onPointerMove as any);
+      window.removeEventListener('pointerup', endDrag as any);
+      if(frameRef.current) cancelAnimationFrame(frameRef.current);
     };
   },[onPointerMove,endDrag]);
 
