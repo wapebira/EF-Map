@@ -37,11 +37,11 @@ const AssetCard: React.FC<AssetCardProps> = ({ title, subtitle, etherscanHref, o
         </div>
         <div style={{ display:'flex', gap:8, flexWrap:'wrap', alignItems:'center' }}>
           <code style={{ flex:'1 1 220px', minWidth:140, fontFamily:'monospace', fontSize:12, padding:'8px 10px', borderRadius:10, background:'rgba(0,0,0,0.35)', border:'1px solid rgba(255,255,255,0.13)', color:'#fff', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{etherscanHref.includes('token') ? etherscanHref.split('=')[1] : etherscanHref.split('/').pop()}</code>
-          <button onClick={onCopy} style={{ display:'inline-flex', alignItems:'center', gap:6, background:'rgba(255,255,255,0.08)', border:'1px solid rgba(255,255,255,0.15)', padding:'8px 12px', borderRadius:10, color:'#fff', fontSize:12, fontWeight:500, cursor:'pointer' }}>
+          <button onClick={onCopy} style={{ display:'inline-flex', alignItems:'center', gap:6, background:'var(--accent)', border:'none', padding:'8px 14px', borderRadius:10, color:'#fff', fontSize:12, fontWeight:600, cursor:'pointer', letterSpacing:'.4px', boxShadow:'0 2px 6px rgba(0,0,0,0.4)' }}>
             {copied ? (<><Check size={16}/>Copied</>) : (<><Copy size={16}/>Copy</>)}
           </button>
-          <a href={etherscanHref} target="_blank" rel="noreferrer" style={{ textDecoration:'none', display:'inline-flex', alignItems:'center', gap:6, background:'rgba(255,255,255,0.08)', border:'1px solid rgba(255,255,255,0.15)', padding:'8px 12px', borderRadius:10, color:'#fff', fontSize:12, fontWeight:500 }}>
-            <ExternalLink size={16}/>View
+          <a href={etherscanHref} target="_blank" rel="noreferrer" style={{ textDecoration:'none', display:'inline-flex', alignItems:'center', gap:6, background:'var(--accent)', padding:'8px 14px', borderRadius:10, color:'#fff', fontSize:12, fontWeight:600, letterSpacing:'.4px', boxShadow:'0 2px 6px rgba(0,0,0,0.4)' }}>
+            <ExternalLink size={16}/>View on Etherscan
           </a>
         </div>
         <p style={{ margin:0, fontSize:11, lineHeight:1.4, opacity:.65 }}>Scan the QR or copy the address then choose the asset in your wallet.</p>
@@ -90,8 +90,8 @@ export const DonateCryptoModal: React.FC<DonateCryptoModalProps> = ({ open, onCl
             <h2 style={{ margin:0, fontSize:22, fontWeight:600 }}>Donate via Crypto</h2>
             <p style={{ margin:0, fontSize:13, opacity:.78, lineHeight:1.5 }}>Choose an asset on <strong>Ethereum Mainnet (Chain ID 1)</strong>. QR codes are provided for convenience.</p>
           </div>
-          <button onClick={onClose} aria-label="Close" style={{ background:'rgba(255,255,255,0.08)', border:'1px solid rgba(255,255,255,0.18)', width:40, height:40, display:'flex', alignItems:'center', justifyContent:'center', borderRadius:14, cursor:'pointer', color:'#fff' }}>
-            <X size={20} />
+          <button onClick={onClose} aria-label="Close" style={{ background:'rgba(255,255,255,0.08)', border:'1px solid rgba(255,255,255,0.18)', width:40, height:40, display:'flex', alignItems:'center', justifyContent:'center', borderRadius:14, cursor:'pointer', color:'#fff', fontSize:20, lineHeight:1 }}>
+            <X size={20} strokeWidth={2} />
           </button>
         </div>
         <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
