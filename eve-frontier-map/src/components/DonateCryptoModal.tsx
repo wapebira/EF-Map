@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Copy, Check, ExternalLink, AlertTriangle } from 'lucide-react';
+import { Copy, Check, ExternalLink, AlertTriangle } from 'lucide-react';
 
 interface DonateCryptoModalProps {
   open: boolean;
@@ -85,14 +85,11 @@ export const DonateCryptoModal: React.FC<DonateCryptoModalProps> = ({ open, onCl
     <div style={{ position:'fixed', inset:0, zIndex:4000, display:'flex', alignItems:'center', justifyContent:'center' }}>
       <div onClick={onClose} style={{ position:'absolute', inset:0, background:'rgba(0,0,0,0.7)', backdropFilter:'blur(4px)' }} />
       <div style={{ position:'relative', width:'min(720px,92%)', maxHeight:'82vh', overflowY:'auto', background:'rgba(20,20,22,0.92)', border:'1px solid rgba(255,255,255,0.15)', borderRadius:28, padding:'28px 30px 34px', boxShadow:'0 12px 42px -6px rgba(0,0,0,0.65)', display:'flex', flexDirection:'column', gap:18 }}>
-        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:18 }}>
+        <div style={{ display:'flex', justifyContent:'flex-start', alignItems:'flex-start' }}>
           <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
             <h2 style={{ margin:0, fontSize:22, fontWeight:600 }}>Donate via Crypto</h2>
-            <p style={{ margin:0, fontSize:13, opacity:.78, lineHeight:1.5 }}>Choose an asset on <strong>Ethereum Mainnet (Chain ID 1)</strong>. QR codes are provided for convenience.</p>
+            <p style={{ margin:0, fontSize:13, opacity:.78, lineHeight:1.5 }}>Choose an asset on <strong>Ethereum Mainnet (Chain ID 1)</strong>. QR codes are provided for convenience. Click outside this window to close.</p>
           </div>
-          <button onClick={onClose} aria-label="Close" style={{ background:'rgba(255,255,255,0.08)', border:'1px solid rgba(255,255,255,0.18)', width:40, height:40, display:'flex', alignItems:'center', justifyContent:'center', borderRadius:14, cursor:'pointer', color:'#fff', fontSize:20, lineHeight:1 }}>
-            <X size={20} strokeWidth={2} />
-          </button>
         </div>
         <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
           <AssetCard
