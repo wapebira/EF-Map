@@ -675,6 +675,14 @@ function App() {
   useEffect(()=>{ setAccent(accentIsBlue ? 'blue' : 'orange'); }, [accentIsBlue]);
   useEffect(()=>{ persistOpenPanels(Array.from(openPanels)); }, [openPanels]);
 
+  // Reinforce jump persistence after route completion (extra safety)
+  useEffect(()=>{
+    if(routeResult && lastP2PParamsRef.current.jump !== persistedJump){
+      setRoutingPrefs(lastP2PParamsRef.current.jump, lastP2PParamsRef.current.optimize, lastP2PParamsRef.current.algo);
+      setPersistedJump(lastP2PParamsRef.current.jump);
+    }
+  },[routeResult]);
+
   // Routing persisted param state for initial props
   const [persistedJump, setPersistedJump] = useState<number>(lastP2PParamsRef.current.jump);
   const [persistedOptimize, setPersistedOptimize] = useState<'fuel'|'jumps'>(lastP2PParamsRef.current.optimize);
@@ -2943,7 +2951,9 @@ function App() {
             ] as any}
           />
           {openPanels.has('routing') && (
-            <PanelDrawer id="routing" title="Routing" scale={uiScale} zIndex={panelZ['routing']||1450} onActivate={bringToFront} onClose={(id)=> setOpenPanels(p=> { const n=new Set(p); n.delete(id); return n; })} resetToken={resetToken}>
+            <PanelDrawer id="routing" title="Routing" scale={uiScale} zIndex={panelZ['routing']||1450} onActivate={bringToFront} onClose={(id)=> setOpenPanels(p=> { const n=new Set(p); n.delete(id); return n; })} resetToken={resetToken}
+              cascadeIndex={[...openPanels].filter(id=>['routing','cinematic'].includes(id)).sort((a,b)=> a.localeCompare(b)).indexOf('routing')}
+            >
               <RoutingPanel
                 onCalculateRoute={calculateRoute}
                 onStopCalculation={stopCalculation}
@@ -2992,7 +3002,9 @@ function App() {
             </PanelDrawer>
           )}
           {openPanels.has('cinematic') && (
-      <PanelDrawer id="cinematic" title="Cinematic Mode" scale={uiScale} zIndex={panelZ['cinematic']||1450} onActivate={bringToFront} onClose={(id)=> { setOpenPanels(p=> { const n=new Set(p); n.delete(id); return n; }); setCinematicMode(false); }} resetToken={resetToken}>
+            <PanelDrawer id="cinematic" title="Cinematic Mode" scale={uiScale} zIndex={panelZ['cinematic']||1450} onActivate={bringToFront} onClose={(id)=> { setOpenPanels(p=> { const n=new Set(p); n.delete(id); return n; }); setCinematicMode(false); }} resetToken={resetToken}
+              cascadeIndex={[...openPanels].filter(id=>['routing','cinematic'].includes(id)).sort((a,b)=> a.localeCompare(b)).indexOf('cinematic')}
+            >
               <CinematicPanel
                 starColorMode={starColorMode}
                 setStarColorMode={setStarColorMode as any}

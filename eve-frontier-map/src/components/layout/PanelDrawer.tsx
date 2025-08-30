@@ -12,6 +12,7 @@ interface PanelDrawerProps {
   zIndex?: number;
   onActivate?: (id:string)=>void;
   resetToken?: number; // when incremented externally, reset position
+  cascadeIndex?: number; // if provided and no stored position yet, offset horizontally
 }
 
 const baseDefaults: Record<string,{x:number;y:number}> = {
@@ -19,8 +20,14 @@ const baseDefaults: Record<string,{x:number;y:number}> = {
   cinematic: { x:140, y:70 },
 };
 
-const PanelDrawer: React.FC<PanelDrawerProps> = ({ id, title, onClose, children, defaultPos, scale=1, zIndex=1450, onActivate, resetToken }) => {
-  const initial = defaultPos || baseDefaults[id] || { x:140, y:70 };
+const PanelDrawer: React.FC<PanelDrawerProps> = ({ id, title, onClose, children, defaultPos, scale=1, zIndex=1450, onActivate, resetToken, cascadeIndex }) => {
+  let initial = defaultPos || baseDefaults[id] || { x:140, y:70 };
+  try {
+    const existing = localStorage.getItem('panel-pos:'+'drawer-'+id);
+    if(!existing && typeof cascadeIndex === 'number' && cascadeIndex>0){
+      initial = { ...initial, x: initial.x + cascadeIndex * 420 };
+    }
+  } catch {/* ignore */}
   const drag = useDraggable('drawer-'+id, initial);
   // Respond to external reset
   React.useEffect(()=>{
