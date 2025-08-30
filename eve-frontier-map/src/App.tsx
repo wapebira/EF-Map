@@ -11,8 +11,13 @@ import logo from './assets/logo/logo.png';
 import { openDbFromArrayBuffer } from "./lib/sql";
 import type { SystemRow, StargateRow, RegionRow, ConstellationRow } from "./types/db";
 import LoadingScreen from './components/LoadingScreen';
-import P2PRouting from './components/P2PRouting/P2PRouting';
-import ScoutOptimizer from './components/ScoutOptimizer/ScoutOptimizer';
+// Legacy panel components kept for reference removed in favor of unified RoutingPanel
+import PanelRail from './components/layout/PanelRail';
+import PanelDrawer from './components/layout/PanelDrawer';
+import RoutingPanel from './components/Routing/RoutingPanel';
+import CinematicPanel from './components/Cinematic/CinematicPanel';
+import PlanetLegendPanel from './components/Planets/PlanetLegendPanel';
+import './components/layout/panelLayout.css';
 import AutoCompleteInput from './components/AutoCompleteInput/AutoCompleteInput';
 import HelpPanel from './components/HelpPanel/HelpPanel';
 import { encodeShare, decodeShare } from './utils/share';
@@ -162,7 +167,7 @@ function App() {
   const [showDistance, setShowDistance] = useState(false);
   const [minPlanets, setMinPlanets] = useState(0);
   const [maxPlanets, setMaxPlanets] = useState(0);
-  // Cinematic mode + locked parameters (UI removed)
+  // Cinematic mode active flag (enables scene post-processing & behavior changes)
   const [cinematicMode, setCinematicMode] = useState(false);
   // External trigger for expanding Support section in Help
   const [supportExpandRequestId, setSupportExpandRequestId] = useState(0);
@@ -236,15 +241,13 @@ function App() {
   // Experimental aurora veil refs
   const auroraMeshRef = useRef<THREE.Mesh|null>(null);
   const auroraMatRef = useRef<THREE.ShaderMaterial|null>(null);
-  // Cinematic user-exposed controls (initial minimal set)
-  const [cinematicExpanded, setCinematicExpanded] = useState(false);
+  // Cinematic user-exposed controls (handled in drawer panel)
   const [starColorMode, setStarColorMode] = useState<'purple'|'white'|'blue'|'red'|'yellow'|'random'>('blue');
   // Haze: separate draft states to avoid perf spikes on continuous drag
   const [hazeColor, setHazeColor] = useState('#ff5555'); // default red from picker
   const [hazeIntensity, setHazeIntensity] = useState(0.05); // default lowered per request
   const [hazeRadius, setHazeRadius] = useState(250); // committed spread factor default
   const [hazeRadiusDraft, setHazeRadiusDraft] = useState(250);
-  const [hazePickerOpen,setHazePickerOpen] = useState(false);
   const [aberrationAmt, setAberrationAmt] = useState(0.002);
   // Optional display of labels while in cinematic mode
   const [cinematicLabels, setCinematicLabels] = useState(false); // Toggle to optionally show hover & selection labels during cinematic mode
@@ -633,22 +636,21 @@ function App() {
   const routeCalcStartRef = useRef<number | null>(null);
   const [routeCalcTimeMs, setRouteCalcTimeMs] = useState<number | null>(null);
 
-  // Panel open states (mutually exclusive upcoming with Scout Optimizer)
-  const [p2pOpen, setP2POpen] = useState(false);
-  const [_scoutOpen, _setScoutOpen] = useState(false); // placeholder for future Scout panel
-  const [scoutOpen, setScoutOpenReal] = useState(false);
+  // Multi-panel open state (allow several drawers at once)
+  const [openPanels, setOpenPanels] = useState<Set<string>>(new Set());
+  // Z-index management for draggable panels
+  const [panelZ, setPanelZ] = useState<Record<string, number>>({});
+  const topZRef = useRef(1500);
+  const bringToFront = (id:string) => {
+    setPanelZ(prev=> { const next={...prev}; topZRef.current +=1; next[id]= topZRef.current; return next; });
+  };
   const [returnToStart, setReturnToStart] = useState(false);
   // One-time hash import ref
   const initialHashAppliedRef = useRef(false);
 
-  const toggleP2P = (open: boolean) => {
-    setP2POpen(open);
-    if (open) { setScoutOpenReal(false); }
-  };
-  const toggleScout = (open: boolean) => {
-    setScoutOpenReal(open);
-    if (open) { setP2POpen(false); }
-  };
+  // (legacy openPanel removed after multi-panel refactor)
+  const togglePanel = (id:string) => setOpenPanels(prev => { const next = new Set(prev); if(next.has(id)) next.delete(id); else next.add(id); return next; });
+  const ensurePanel = (id:string) => setOpenPanels(prev => { if(prev.has(id)) return prev; const next = new Set(prev); next.add(id); return next; });
 
   // Apply shared route from URL hash (supports short form #s=ID) once map data is loaded
   useEffect(()=>{
@@ -664,12 +666,17 @@ function App() {
       if(!allExist || share.path.length < 2) return;
       if(share.type==='p'){
         lastP2PParamsRef.current = { jump: share.jump, optimize: share.optimize, algo: share.algo, from: share.from, to: share.to };
-        setRouteResult({ path: share.path });
-        setP2POpen(true); setScoutOpenReal(false);
+  setRouteResult({ path: share.path });
+  // (legacy setActivePanel call removed)
+  ensurePanel('routing');
       } else if(share.type==='s') {
-        setReturnToStart(share.returnToStart);
-        setScoutRouteResult({ path: share.path });
-        setScoutOpenReal(true); setP2POpen(false);
+  setReturnToStart(share.returnToStart);
+  setReturnToStart(share.returnToStart);
+  setScoutRouteResult({ path: share.path });
+  ensurePanel('routing');
+          if(lastSelectedSystemName){ ensurePanel('routing'); }
+          if(lastSelectedSystemName){ ensurePanel('routing'); }
+          if(lastSelectedSystemName){ ensurePanel('routing'); }
       }
       const startSys = systemsByLower.get(share.path[0].toLowerCase()); if(startSys) selectSystem(startSys);
     };
@@ -2665,7 +2672,7 @@ function App() {
           // If no explicit destination yet and user already has a destination set via earlier waypoints rule (first waypoint becomes destination) we still allow override.
           setLastDestinationSystemName(contextMenuSystemRef.current.name);
           destinationLockedRef.current = true; // lock so future waypoints won't shift destination
-          if(lastSelectedSystemName){ setP2POpen(true); setScoutOpenReal(false); }
+          // legacy activePanel call removed (multi-panel)
         }
         closeMenu();
       });
@@ -2687,7 +2694,7 @@ function App() {
           // Conflict rule (b): adding waypoint removes from avoid if present (handled above) OR if it was destination? we treat destination separately
           addWaypoint(name);
           // Auto-open panel
-          if(lastSelectedSystemName){ setP2POpen(true); setScoutOpenReal(false); }
+          // legacy activePanel call removed (multi-panel)
           // If destination not locked and no explicit destination set yet and no destination chosen -> first waypoint becomes destination
           if(!destinationLockedRef.current && !lastDestinationSystemName){
             setLastDestinationSystemName(name);
@@ -2711,7 +2718,7 @@ function App() {
           // If waypoint currently, remove it then add to avoid (rule b)
           if(waypoints.includes(name)){ setWaypoints(prev => prev.filter(w => w !== name)); }
           if(!avoidSystems.includes(name)) addAvoidSystem(name);
-          if(lastSelectedSystemName){ setP2POpen(true); setScoutOpenReal(false); }
+          // legacy activePanel call removed (multi-panel)
         }
         closeMenu();
       });
@@ -2887,172 +2894,114 @@ function App() {
           >Reset</button>
         </div>
   {/* ...existing controls... (accent toggle removed from here) */}
-        <div className="ef-control-group" style={{ marginTop: '10px' }}>
-          <label className="module-toggle-label">
-            <input
-              type="checkbox"
-              checked={isRegionHighlighterActive}
-              onChange={(e) => {
-                setIsRegionHighlighterActive(e.target.checked);
-              }}
-            />
-            Highlight Region
-          </label>
-        </div>
-        <div className="ef-control-group" style={{ marginTop: '10px' }}>
-          <label className="module-toggle-label">
-            <input
-              type="checkbox"
-              checked={isPlanetCountActive}
-              onChange={(e) => {
-                setIsPlanetCountActive(e.target.checked);
-              }}
-            />
-            Display Planet Counts
-          </label>
-        </div>
-        <div className="ef-control-group" style={{ marginTop: '10px' }}>
-          <label className="module-toggle-label">
-            <input
-              type="checkbox"
-              checked={showDistance}
-              onChange={(e) => setShowDistance(e.target.checked)}
-            />
-            Show Distance
-          </label>
-        </div>
-        <div className="ef-control-group" style={{ marginTop: '10px' }}>
-          <label className="module-toggle-label" style={{ display:'flex', gap:'6px', alignItems:'center', cursor:'pointer' }}>
-            <input type="checkbox" checked={cinematicMode} onChange={e=> { setCinematicMode(e.target.checked); if(e.target.checked) setCinematicExpanded(true); }} />
-            <span onClick={()=> cinematicMode && setCinematicExpanded(v=> !v)} style={{ display:'flex', alignItems:'center' }}>
-              Cinematic Mode
-            </span>
-          </label>
-          {cinematicMode && cinematicExpanded && (
-            <div style={{ marginTop:'8px', padding:'8px 10px', border:'1px solid rgba(255,255,255,0.15)', borderRadius:6, background:'rgba(255,255,255,0.06)', display:'flex', flexDirection:'column', gap:'10px' }}>
-              <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
-                <label style={{ fontSize:12, fontWeight:600, letterSpacing:.5 }}>Star Colors</label>
-                <select value={starColorMode} onChange={e=> setStarColorMode(e.target.value as any)} style={{ background:'#111', color:'#fff', border:'1px solid var(--accent)', padding:'4px 6px', borderRadius:4, fontSize:12 }}>
-                  <option value="purple">Purple / Blue</option>
-                  <option value="white">White</option>
-                  <option value="blue">Blue</option>
-                  <option value="red">Red / Warm</option>
-                  <option value="yellow">Yellow / Gold</option>
-                  <option value="random">Mixed (Random)</option>
-                </select>
-              </div>
-              <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
-                <label style={{ fontSize:12, fontWeight:600 }}>Bloom Strength <span style={{ opacity:.65 }}>({bloomStrengthDraft.toFixed(2)})</span></label>
-                <input type="range" min={0} max={1.0} step={0.01} value={bloomStrengthDraft} onChange={e=> setBloomStrengthDraft(parseFloat(e.target.value))} onPointerUp={e=> { const v=parseFloat((e.target as HTMLInputElement).value); setBloomStrength(v); }} onBlur={e=> { const v=parseFloat((e.target as HTMLInputElement).value); setBloomStrength(v); }} />
-                <small style={{ fontSize:10, opacity:.55 }}>Applies on release</small>
-              </div>
-              <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
-                <label style={{ fontSize:12, fontWeight:600 }}>Chromatic Aberration <span style={{ opacity:.65 }}>({aberrationAmt.toFixed(3)})</span></label>
-                <input type="range" min={0} max={0.006} step={0.0005} value={aberrationAmt} onChange={e=> setAberrationAmt(parseFloat(e.target.value))} />
-              </div>
-              <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
-                <label style={{ fontSize:12, fontWeight:600 }}>Haze Color</label>
-                <div style={{ position:'relative', display:'flex', alignItems:'center', gap:8 }}>
-                  <div onClick={()=> setHazePickerOpen(o=>!o)} style={{ width:44, height:22, background:hazeColor, border:'1px solid #666', cursor:'pointer', borderRadius:4 }} title={hazePickerOpen? 'Click to close':'Click to pick color'} />
-                  <button onClick={()=> setAutoCamPaused(p=> !p)} style={{ background:'#111', color:'#fff', border:'1px solid var(--accent)', borderRadius:4, fontSize:11, padding:'4px 8px', cursor:'pointer', marginLeft:12 }} title={autoCamPaused? 'Resume auto camera drift':'Pause auto camera drift'}>
-                    {autoCamPaused? 'Resume' : 'Pause'}
-                  </button>
-                  <label style={{ display:'flex', alignItems:'center', gap:4, fontSize:11, marginLeft:8 }} title="Show labels while in cinematic mode (hover + selection)">
-                    <input type="checkbox" checked={cinematicLabels} onChange={e=> setCinematicLabels(e.target.checked)} /> Labels
-                  </label>
-                  {hazePickerOpen && (
-                    <div style={{ position:'absolute', top:26, left:0, background:'#111', padding:'8px 10px', border:'1px solid #444', borderRadius:6, zIndex:50, display:'flex', flexDirection:'column', gap:8, boxShadow:'0 4px 12px rgba(0,0,0,0.5)' }}>
-                      <div style={{ display:'grid', gridTemplateColumns:'repeat(6,18px)', gap:6 }}>
-                        {['#5d8fff','#7aa8ff','#a0c2ff','#cde0ff','#ffffff','#ffd700','#ffcc55','#ff8844','#ff5555','#55aaff','#55ffcc','#aa88ff'].map(c=> (
-                          <div key={c} onClick={()=>{ setHazeColor(c); setHazePickerOpen(false); }} style={{ width:18, height:18, background:c, border:'1px solid #777', cursor:'pointer', borderRadius:3 }} />
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-              <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
-                <label style={{ fontSize:12, fontWeight:600 }}>Haze Intensity <span style={{ opacity:.65 }}>({hazeIntensity.toFixed(2)})</span></label>
-                <input type="range" min={0} max={0.4} step={0.01} value={hazeIntensity} onChange={e=> setHazeIntensity(parseFloat(e.target.value))} />
-              </div>
-              <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
-                <label style={{ fontSize:12, fontWeight:600 }}>Haze Radius <span style={{ opacity:.65 }}>({hazeRadiusDraft.toFixed(1)})</span></label>
-                <input type="range" min={0} max={500} step={1} value={hazeRadiusDraft} onChange={e=> setHazeRadiusDraft(parseFloat(e.target.value))} onPointerUp={e=> setHazeRadius(parseFloat((e.target as HTMLInputElement).value))} onBlur={e=> setHazeRadius(parseFloat((e.target as HTMLInputElement).value))} />
-              </div>
-              <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
-                <label style={{ fontSize:11, display:'flex', gap:6, alignItems:'center' }}>
-                  <input type="checkbox" checked={showAurora} onChange={e=> setShowAurora(e.target.checked)} /> Aurora
-                </label>
-              </div>
-              <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
-                <label style={{ fontSize:12, fontWeight:600 }}>Background Intensity <span style={{ opacity:.65 }}>({bgIntensity.toFixed(2)})</span></label>
-                <input type="range" min={0} max={1.5} step={0.01} value={bgIntensity} onChange={e=> setBgIntensity(parseFloat(e.target.value))} />
-              </div>
-              <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
-                <label style={{ fontSize:12, fontWeight:600 }}>Aurora Intensity <span style={{ opacity:.65 }}>({auroraIntensity.toFixed(2)})</span></label>
-                <input type="range" min={0} max={1.0} step={0.01} value={auroraIntensity} onChange={e=> setAuroraIntensity(parseFloat(e.target.value))} />
-              </div>
-              <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
-                <label style={{ fontSize:11, display:'flex', gap:6, alignItems:'center' }}>
-                  <input type="checkbox" checked={autoClusterTour} onChange={e=> setAutoClusterTour(e.target.checked)} /> Auto Cluster Tour
-                </label>
-              </div>
-            </div>
-          )}
-        </div>
-        <P2PRouting 
-          onCalculateRoute={calculateRoute}
-          onStopCalculation={stopCalculation}
-          isCalculating={isCalculatingRoute}
-          routeCalcTimeMs={routeCalcTimeMs}
-          routeResult={routeResult}
-          mapData={mapData}
-          systemNames={mapData ? Object.values(mapData.solar_systems).map(s => s.name) : []}
-          progress={routeProgress}
-          open={p2pOpen}
-          onToggle={toggleP2P}
-          resetToken={resetToken}
-          selectedSystemName={lastSelectedSystemName}
-          selectedDestinationSystemName={lastDestinationSystemName}
-            waypoints={waypoints}
-            avoidSystems={avoidSystems}
-            onRemoveWaypoint={removeWaypoint}
-            onRemoveAvoidSystem={removeAvoidSystem}
-            waypointOptimize={waypointOptimize}
-            onWaypointOptimizeChange={setWaypointOptimize}
-        />
-        <ScoutOptimizer
-          open={scoutOpen}
-          onToggle={toggleScout}
-          mapData={mapData}
-          systemNames={mapData ? Object.values(mapData.solar_systems).map(s => s.name) : []}
-          returnToStart={returnToStart}
-          onReturnToStartChange={setReturnToStart}
-          invalidateToken={scoutInvalidateToken}
-          importedRoutePath={scoutRouteResult?.path || null}
-          resetToken={resetToken}
-          selectedSystemName={lastSelectedSystemName}
-          onBaselineRoute={(path)=>{ 
-            setScoutRouteResult({ path }); 
-            // Clear existing hash on new scout route
-            if(window.location.hash){ try { history.replaceState(null,'', window.location.pathname + window.location.search); } catch { /* ignore */ } }
-            if(mapData && path.length){
-              const first = Object.values(mapData.solar_systems).find(s=> s.name.toLowerCase()===path[0].toLowerCase());
-              if(first){ selectSystem(first); }
-            }
-          }}
-          onOptimizedRoute={(path)=>{ 
-            setScoutRouteResult({ path }); 
-            if(window.location.hash){ try { history.replaceState(null,'', window.location.pathname + window.location.search); } catch { /* ignore */ } }
-            if(mapData && path.length){
-              const first = Object.values(mapData.solar_systems).find(s=> s.name.toLowerCase()===path[0].toLowerCase());
-              if(first){ selectSystem(first); }
-            }
-          }}
-          onClearRoute={()=> setScoutRouteResult(null)}
-        />
-        {isPlanetCountActive && generatePlanetCountLegend()}
+  {/* Planet legend relocated to floating overlay to avoid being obscured by rail */}
       </div>
+      {!hideUI && (
+        <>
+          <PanelRail
+            // @ts-ignore style prop for scaling; compensate slight position shift when scaling up
+            style={{ transform:`scale(${uiScale})`, transformOrigin:'top left' }}
+            items={[
+              { id:'routing', type:'panel', label:'Routing', icon:'🧭', active:openPanels.has('routing'), onSelect:()=> togglePanel('routing') },
+              { id:'cinematic', type:'panel', label:'Cinema', icon:'🎬', active:openPanels.has('cinematic'), onSelect:()=> { if(openPanels.has('cinematic')) { setCinematicMode(false); } else { setCinematicMode(true); } togglePanel('cinematic'); } },
+              { id:'region', type:'toggle', label:'Region', icon:'📍', active:isRegionHighlighterActive, onToggle:()=> setIsRegionHighlighterActive(v=> !v) },
+              { id:'planets', type:'toggle', label:'Planets', icon:'🪐', active:isPlanetCountActive, onToggle:()=> setIsPlanetCountActive(v=> !v) },
+              { id:'distance', type:'toggle', label:'Distance', icon:'📏', active:showDistance, onToggle:()=> setShowDistance(v=> !v) },
+            ] as any}
+          />
+          {openPanels.has('routing') && (
+            <PanelDrawer id="routing" title="Routing" scale={uiScale} zIndex={panelZ['routing']||1450} onActivate={bringToFront} onClose={(id)=> setOpenPanels(p=> { const n=new Set(p); n.delete(id); return n; })}>
+              <RoutingPanel
+                onCalculateRoute={calculateRoute}
+                onStopCalculation={stopCalculation}
+                isCalculating={isCalculatingRoute}
+                routeResult={routeResult}
+                mapData={mapData}
+                systemNames={mapData ? Object.values(mapData.solar_systems).map(s => s.name) : []}
+                progress={routeProgress}
+                routeCalcTimeMs={routeCalcTimeMs}
+                resetToken={resetToken}
+                selectedSystemName={lastSelectedSystemName}
+                selectedDestinationSystemName={lastDestinationSystemName}
+                waypoints={waypoints}
+                avoidSystems={avoidSystems}
+                onRemoveWaypoint={removeWaypoint}
+                onRemoveAvoidSystem={removeAvoidSystem}
+                waypointOptimize={waypointOptimize}
+                onWaypointOptimizeChange={setWaypointOptimize}
+                returnToStart={returnToStart}
+                onReturnToStartChange={setReturnToStart}
+                scoutInvalidateToken={scoutInvalidateToken}
+                importedScoutPath={scoutRouteResult?.path || null}
+                scoutResetToken={resetToken}
+                onBaselineRoute={(path)=>{ 
+                  setScoutRouteResult({ path }); 
+                  if(window.location.hash){ try { history.replaceState(null,'', window.location.pathname + window.location.search); } catch { /* ignore */ } }
+                  if(mapData && path.length){
+                    const first = Object.values(mapData.solar_systems).find(s=> s.name.toLowerCase()===path[0].toLowerCase());
+                    if(first){ selectSystem(first); }
+                  }
+                }}
+                onOptimizedRoute={(path)=>{ 
+                  setScoutRouteResult({ path }); 
+                  if(window.location.hash){ try { history.replaceState(null,'', window.location.pathname + window.location.search); } catch { /* ignore */ } }
+                  if(mapData && path.length){
+                    const first = Object.values(mapData.solar_systems).find(s=> s.name.toLowerCase()===path[0].toLowerCase());
+                    if(first){ selectSystem(first); }
+                  }
+                }}
+                onScoutClearRoute={()=> setScoutRouteResult(null)}
+              />
+            </PanelDrawer>
+          )}
+          {openPanels.has('cinematic') && (
+            <PanelDrawer id="cinematic" title="Cinematic Mode" scale={uiScale} zIndex={panelZ['cinematic']||1450} onActivate={bringToFront} defaultPos={{ x: 76 + 380, y:70 }} onClose={(id)=> { setOpenPanels(p=> { const n=new Set(p); n.delete(id); return n; }); setCinematicMode(false); }}>
+              <CinematicPanel
+                starColorMode={starColorMode}
+                setStarColorMode={setStarColorMode as any}
+                bloomStrength={bloomStrength}
+                bloomStrengthDraft={bloomStrengthDraft}
+                setBloomStrengthDraft={setBloomStrengthDraft}
+                setBloomStrength={setBloomStrength}
+                aberrationAmt={aberrationAmt}
+                setAberrationAmt={setAberrationAmt}
+                hazeColor={hazeColor}
+                setHazeColor={setHazeColor}
+                hazeIntensity={hazeIntensity}
+                setHazeIntensity={setHazeIntensity}
+                hazeRadius={hazeRadius}
+                hazeRadiusDraft={hazeRadiusDraft}
+                setHazeRadiusDraft={setHazeRadiusDraft}
+                setHazeRadius={setHazeRadius}
+                showAurora={showAurora}
+                setShowAurora={setShowAurora}
+                bgIntensity={bgIntensity}
+                setBgIntensity={setBgIntensity}
+                auroraIntensity={auroraIntensity}
+                setAuroraIntensity={setAuroraIntensity}
+                autoCamPaused={autoCamPaused}
+                setAutoCamPaused={setAutoCamPaused}
+                cinematicLabels={cinematicLabels}
+                setCinematicLabels={setCinematicLabels}
+                autoClusterTour={autoClusterTour}
+                setAutoClusterTour={setAutoClusterTour}
+              />
+            </PanelDrawer>
+          )}
+          {/* Floating planet legend (appears when planet coloring active). Separate from drawer so toggle works independently. */}
+          {isPlanetCountActive && (
+            <PlanetLegendPanel
+              scale={uiScale}
+              anchoredBelowDrawer={openPanels.size>0}
+              zIndex={panelZ['planetLegend']||1425}
+              onActivate={()=> bringToFront('planetLegend')}
+              onClose={()=> setIsPlanetCountActive(false)}
+            >
+              {generatePlanetCountLegend()}
+            </PlanetLegendPanel>
+          )}
+        </>
+      )}
       {/* Persistent quick controls (never hidden so user can un-hide UI; not scaled for pointer stability) */}
       <div style={{ position: 'fixed', left: 10, bottom: 10, zIndex: 2000 }}>
         <div style={{ display:'flex', gap:'10px', alignItems:'center', flexWrap:'wrap' }}>

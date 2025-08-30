@@ -211,6 +211,7 @@ interface P2PRoutingProps {
   onRemoveAvoidSystem?: (name: string)=>void;
   waypointOptimize?: boolean; // false = visit in added order, true = optimize order (future)
   onWaypointOptimizeChange?: (v: boolean)=>void;
+  embedded?: boolean; // if true, omit outer toggle wrapper and always show panel
 }
 
 // Minimal neutral custom select (no accent colors) for consistent option highlight across platforms
@@ -263,7 +264,7 @@ const NeutralSelect = <T extends string>({ value, onChange, options, ariaLabel, 
   );
 };
 
-const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeResult, mapData, systemNames, progress, routeCalcTimeMs, open, onToggle, resetToken, selectedSystemName, selectedDestinationSystemName, waypoints = [], avoidSystems = [], onRemoveWaypoint, onRemoveAvoidSystem, waypointOptimize = false, onWaypointOptimizeChange }: P2PRoutingProps) => {
+const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeResult, mapData, systemNames, progress, routeCalcTimeMs, open, onToggle, resetToken, selectedSystemName, selectedDestinationSystemName, waypoints = [], avoidSystems = [], onRemoveWaypoint, onRemoveAvoidSystem, waypointOptimize = false, onWaypointOptimizeChange, embedded = false }: P2PRoutingProps) => {
   const [fromSystem, setFromSystem] = useState('');
   const [toSystem, setToSystem] = useState('');
   const [jumpDistance, setJumpDistance] = useState('60');
@@ -380,19 +381,8 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
     </div>
   );
 
-  return (
-    <div className="p2p-routing-container">
-      <label className="module-toggle-label">
-        <input
-          type="checkbox"
-          checked={open}
-          onChange={(e) => onToggle(e.target.checked)}
-        />
-        Point-to-Point Routing
-      </label>
-
-      {open && (
-        <div className="p2p-routing-panel">
+  const panel = (
+    <div className="p2p-routing-panel">
           <div className="p2p-input-group">
             <label htmlFor="from-system">From</label>
             <AutoCompleteInput
@@ -514,8 +504,23 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
               </div>
             </div>
           )}
-        </div>
-      )}
+    </div>
+  );
+
+  if (embedded) {
+    return <div className="p2p-routing-embedded">{panel}</div>;
+  }
+  return (
+    <div className="p2p-routing-container">
+      <label className="module-toggle-label">
+        <input
+          type="checkbox"
+          checked={open}
+          onChange={(e) => onToggle(e.target.checked)}
+        />
+        Point-to-Point Routing
+      </label>
+      {open && panel}
     </div>
   );
 };
