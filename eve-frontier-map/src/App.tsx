@@ -13,7 +13,7 @@ import type { SystemRow, StargateRow, RegionRow, ConstellationRow } from "./type
 import LoadingScreen from './components/LoadingScreen';
 // Legacy panel components kept for reference removed in favor of unified RoutingPanel
 import PanelRail from './components/layout/PanelRail';
-import PanelDrawer from './components/layout/PanelDrawer';
+import PanelDrawer, { type PanelDrawerHandle } from './components/layout/PanelDrawer';
 import RoutingPanel from './components/Routing/RoutingPanel';
 import CinematicPanel from './components/Cinematic/CinematicPanel';
 import PlanetLegendPanel from './components/Planets/PlanetLegendPanel';
@@ -679,23 +679,24 @@ function App() {
   useEffect(()=>{ setAccent(accentIsBlue ? 'blue' : 'orange'); }, [accentIsBlue]);
   useEffect(()=>{ persistOpenPanels(Array.from(openPanels)); }, [openPanels]);
 
-  // Dynamic cascade: if multiple drawers opened in initial untouched state, shift right.
+  // Refs to panel drawers for programmatic (non-persisting) positioning
+  const routingDrawerRef = useRef<PanelDrawerHandle|null>(null);
+  const cinematicDrawerRef = useRef<PanelDrawerHandle|null>(null);
+
+  // Dynamic cascade: when multiple drawers open and user has not dragged them (no stored pos), arrange side-by-side.
   useEffect(()=>{
-    const ids = openPanelOrder.filter(id=> openPanels.has(id) && ['routing','cinematic'].includes(id));
-    if(ids.length<=1) return; // nothing to cascade
-    ids.forEach((id, idx)=>{
+    const active = openPanelOrder.filter(id=> openPanels.has(id) && ['routing','cinematic'].includes(id));
+    if(active.length<=1) return;
+    const baseX = 140; const baseY = 70; const stride = 420;
+    active.forEach((id, idx)=>{
       const key = 'panel-pos:drawer-'+id;
-      try {
-        const stored = localStorage.getItem(key);
-        if(stored) return; // user moved or previously stored; don't auto-shift
-        const baseX = 140;
-        const baseY = 70;
-        const targetX = baseX + idx*420;
-        // Write position so PanelDrawer hook picks it up next render cycle if opened later
-        localStorage.setItem(key, JSON.stringify({ x: targetX, y: baseY }));
-      } catch {/* ignore */}
+      const stored = localStorage.getItem(key);
+      if(stored) return; // user has dragged or position persisted earlier; don't override
+      const target = { x: baseX + idx*stride, y: baseY };
+      if(id==='routing' && routingDrawerRef.current){ routingDrawerRef.current.autoPosition(target); }
+      if(id==='cinematic' && cinematicDrawerRef.current){ cinematicDrawerRef.current.autoPosition(target); }
     });
-  }, [openPanelOrder, openPanels]);
+  },[openPanels, openPanelOrder]);
   // Optional debug toggle (open console and set window.DEBUG_PREFS=true)
   ;(window as any).DEBUG_PREFS = (window as any).DEBUG_PREFS || false;
 
@@ -2975,7 +2976,7 @@ function App() {
             ] as any}
           />
           {openPanels.has('routing') && (
-            <PanelDrawer id="routing" title="Routing" scale={uiScale} zIndex={panelZ['routing']||1450} onActivate={bringToFront} onClose={(id)=> setOpenPanels(p=> { const n=new Set(p); n.delete(id); return n; })} resetToken={resetToken}>
+            <PanelDrawer ref={routingDrawerRef} id="routing" title="Routing" scale={uiScale} zIndex={panelZ['routing']||1450} onActivate={bringToFront} onClose={(id)=> setOpenPanels(p=> { const n=new Set(p); n.delete(id); return n; })} resetToken={resetToken}>
               <RoutingPanel
                 onCalculateRoute={calculateRoute}
                 onStopCalculation={stopCalculation}
@@ -3024,7 +3025,7 @@ function App() {
             </PanelDrawer>
           )}
           {openPanels.has('cinematic') && (
-            <PanelDrawer id="cinematic" title="Cinematic Mode" scale={uiScale} zIndex={panelZ['cinematic']||1450} onActivate={bringToFront} onClose={(id)=> { setOpenPanels(p=> { const n=new Set(p); n.delete(id); return n; }); setCinematicMode(false); }} resetToken={resetToken}>
+            <PanelDrawer ref={cinematicDrawerRef} id="cinematic" title="Cinematic Mode" scale={uiScale} zIndex={panelZ['cinematic']||1450} onActivate={bringToFront} onClose={(id)=> { setOpenPanels(p=> { const n=new Set(p); n.delete(id); return n; }); setCinematicMode(false); }} resetToken={resetToken}>
               <CinematicPanel
                 starColorMode={starColorMode}
                 setStarColorMode={setStarColorMode as any}

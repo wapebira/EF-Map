@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useImperativeHandle, forwardRef } from 'react';
 import './panelLayout.css';
 import { useDraggable } from './useDraggable';
 
@@ -14,14 +14,21 @@ interface PanelDrawerProps {
   resetToken?: number; // when incremented externally, reset position
 }
 
+export interface PanelDrawerHandle {
+  autoPosition: (p:{x:number;y:number})=>void; // programmatic, non-persisting move
+}
+
 const baseDefaults: Record<string,{x:number;y:number}> = {
   routing: { x:140, y:70 },
   cinematic: { x:140, y:70 },
 };
 
-const PanelDrawer: React.FC<PanelDrawerProps> = ({ id, title, onClose, children, defaultPos, scale=1, zIndex=1450, onActivate, resetToken }) => {
+const PanelDrawer = forwardRef<PanelDrawerHandle, PanelDrawerProps>(({ id, title, onClose, children, defaultPos, scale=1, zIndex=1450, onActivate, resetToken }, ref) => {
   const initial = defaultPos || baseDefaults[id] || { x:140, y:70 };
   const drag = useDraggable('drawer-'+id, initial);
+  useImperativeHandle(ref, ()=>({
+    autoPosition:(p)=> drag.setPosSilent(p)
+  }), [drag]);
   // Respond to external reset
   const lastResetRef = React.useRef(resetToken);
   React.useEffect(()=>{
@@ -47,6 +54,6 @@ const PanelDrawer: React.FC<PanelDrawerProps> = ({ id, title, onClose, children,
       <div className="ef-drawer-body">{children}</div>
     </div>
   );
-};
+});
 
 export default PanelDrawer;

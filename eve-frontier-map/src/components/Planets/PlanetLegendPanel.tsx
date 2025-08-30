@@ -23,7 +23,7 @@ const PlanetLegendPanel: React.FC<PlanetLegendPanelProps> = ({ children, onClose
     lastResetRef.current = resetToken;
     if(localStorage.getItem('panel-pos:planet-legend')){
       try { localStorage.removeItem('panel-pos:planet-legend'); } catch {/* ignore */}
-      drag.setPos(base as any);
+  drag.setPosSilent(base as any);
     }
   },[resetToken, anchoredBelowDrawer]);
   return (

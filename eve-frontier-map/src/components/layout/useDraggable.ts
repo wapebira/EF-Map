@@ -9,16 +9,24 @@ export function useDraggable(storageKey:string, defaultPos:DragPos){
     return defaultPos;
   });
   const draggingRef = useRef(false);
+  const movedDuringDragRef = useRef(false); // track if pointer moved (different from click)
+  const hasUserDraggedRef = useRef(false); // becomes true permanently after first user drag
+  const skipNextPersistRef = useRef(false); // programmatic reposition without persisting
   const offsetRef = useRef<{dx:number; dy:number}>({dx:0,dy:0});
   const [isDragging,setIsDragging] = useState(false);
 
-  useEffect(()=>{ try { localStorage.setItem('panel-pos:'+storageKey, JSON.stringify(pos)); } catch {/* ignore */} },[pos, storageKey]);
+  // Persist only if user actually dragged; initial / automatic layout shouldn't set defaults
+  useEffect(()=>{
+    if(skipNextPersistRef.current){ skipNextPersistRef.current = false; return; }
+    if(!hasUserDraggedRef.current) return; // ignore until user performs a drag
+    try { localStorage.setItem('panel-pos:'+storageKey, JSON.stringify(pos)); } catch {/* ignore */}
+  },[pos, storageKey]);
 
   const onPointerDown = useCallback((e:React.PointerEvent)=>{
     const target = e.target as HTMLElement;
     // avoid starting drag from buttons/inputs
     if(target.closest('button, input, select, textarea')) return;
-    draggingRef.current = true; setIsDragging(true);
+    draggingRef.current = true; setIsDragging(true); movedDuringDragRef.current = false;
     offsetRef.current = { dx: e.clientX - pos.x, dy: e.clientY - pos.y };
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
   },[pos]);
@@ -33,9 +41,13 @@ export function useDraggable(storageKey:string, defaultPos:DragPos){
     const clampedX = Math.min(Math.max(nx, margin), vw - margin - 80); // assume min width 80
     const clampedY = Math.min(Math.max(ny, margin), vh - margin - 80);
     setPos({ x: clampedX, y: clampedY });
+    movedDuringDragRef.current = true;
   },[]);
 
-  const endDrag = useCallback(()=>{ draggingRef.current=false; setIsDragging(false); },[]);
+  const endDrag = useCallback(()=>{ 
+    if(draggingRef.current && movedDuringDragRef.current){ hasUserDraggedRef.current = true; }
+    draggingRef.current=false; setIsDragging(false); 
+  },[]);
 
   useEffect(()=>{
     window.addEventListener('pointermove', onPointerMove);
@@ -46,5 +58,8 @@ export function useDraggable(storageKey:string, defaultPos:DragPos){
     };
   },[onPointerMove,endDrag]);
 
-  return { pos, setPos, isDragging, bind:{ onPointerDown } } as const;
+  // Programmatic reposition that does not persist (used for auto cascade / reset)
+  const setPosSilent = useCallback((p:DragPos)=>{ skipNextPersistRef.current = true; setPos(p); },[]);
+
+  return { pos, setPos, setPosSilent, isDragging, bind:{ onPointerDown } } as const;
 }
