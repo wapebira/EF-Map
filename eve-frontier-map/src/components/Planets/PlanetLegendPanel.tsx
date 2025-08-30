@@ -9,11 +9,18 @@ interface PlanetLegendPanelProps {
   scale?: number;
   zIndex?: number;
   onActivate?: ()=>void;
+  resetToken?: number;
 }
 
 // Small secondary panel that visually matches the main drawer styling.
-const PlanetLegendPanel: React.FC<PlanetLegendPanelProps> = ({ children, onClose, anchoredBelowDrawer, scale=1, zIndex=1425, onActivate }) => {
-  const drag = useDraggable('planet-legend', { x: anchoredBelowDrawer? 76 : 76, y: anchoredBelowDrawer? 70 + 340 : 70 });
+const PlanetLegendPanel: React.FC<PlanetLegendPanelProps> = ({ children, onClose, anchoredBelowDrawer, scale=1, zIndex=1425, onActivate, resetToken }) => {
+  const base = { x: 140, y: anchoredBelowDrawer? 70 + 340 : 70 };
+  const drag = useDraggable('planet-legend', base);
+  React.useEffect(()=>{
+    if(resetToken===undefined) return;
+    try { localStorage.removeItem('panel-pos:planet-legend'); } catch {/* ignore */}
+    drag.setPos(base as any);
+  },[resetToken, anchoredBelowDrawer]);
   return (
     <div
       className={`ef-secondary-panel ${drag.isDragging? 'dragging':''}`}

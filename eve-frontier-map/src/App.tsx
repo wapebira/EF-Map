@@ -20,7 +20,7 @@ import PlanetLegendPanel from './components/Planets/PlanetLegendPanel';
 import './components/layout/panelLayout.css';
 import AutoCompleteInput from './components/AutoCompleteInput/AutoCompleteInput';
 import HelpPanel from './components/HelpPanel/HelpPanel';
-import { loadPrefs, setAccent, setOpenPanels as persistOpenPanels, getPrefs, setRoutingPrefs, fullReset } from './utils/prefs';
+import { loadPrefs, setAccent, setOpenPanels as persistOpenPanels, setRoutingPrefs, fullReset } from './utils/prefs';
 import { encodeShare, decodeShare } from './utils/share';
 import { createShortShare, fetchShortShare } from './utils/shortShare';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
@@ -666,11 +666,19 @@ function App() {
     if(prefs.lastJumpDistance){ lastP2PParamsRef.current.jump = prefs.lastJumpDistance; }
     if(prefs.optimizeFor){ lastP2PParamsRef.current.optimize = prefs.optimizeFor; }
     if(prefs.algorithm){ lastP2PParamsRef.current.algo = prefs.algorithm; }
+  setPersistedJump(prefs.lastJumpDistance ?? lastP2PParamsRef.current.jump);
+  setPersistedOptimize(prefs.optimizeFor ?? lastP2PParamsRef.current.optimize);
+  setPersistedAlgo(prefs.algorithm ?? lastP2PParamsRef.current.algo);
   },[]);
 
   // Persist accent & open panels
   useEffect(()=>{ setAccent(accentIsBlue ? 'blue' : 'orange'); }, [accentIsBlue]);
   useEffect(()=>{ persistOpenPanels(Array.from(openPanels)); }, [openPanels]);
+
+  // Routing persisted param state for initial props
+  const [persistedJump, setPersistedJump] = useState<number>(lastP2PParamsRef.current.jump);
+  const [persistedOptimize, setPersistedOptimize] = useState<'fuel'|'jumps'>(lastP2PParamsRef.current.optimize);
+  const [persistedAlgo, setPersistedAlgo] = useState<'astar'|'dijkstra'>(lastP2PParamsRef.current.algo);
 
   // Apply shared route from URL hash (supports short form #s=ID) once map data is loaded
   useEffect(()=>{
@@ -2935,7 +2943,7 @@ function App() {
             ] as any}
           />
           {openPanels.has('routing') && (
-            <PanelDrawer id="routing" title="Routing" scale={uiScale} zIndex={panelZ['routing']||1450} onActivate={bringToFront} onClose={(id)=> setOpenPanels(p=> { const n=new Set(p); n.delete(id); return n; })}>
+            <PanelDrawer id="routing" title="Routing" scale={uiScale} zIndex={panelZ['routing']||1450} onActivate={bringToFront} onClose={(id)=> setOpenPanels(p=> { const n=new Set(p); n.delete(id); return n; })} resetToken={resetToken}>
               <RoutingPanel
                 onCalculateRoute={calculateRoute}
                 onStopCalculation={stopCalculation}
@@ -2976,15 +2984,15 @@ function App() {
                   }
                 }}
                 onScoutClearRoute={()=> setScoutRouteResult(null)}
-                initialJumpDistance={getPrefs().lastJumpDistance || lastP2PParamsRef.current.jump}
-                initialOptimizeFor={(getPrefs().optimizeFor as any) || lastP2PParamsRef.current.optimize}
-                initialAlgorithm={(getPrefs().algorithm as any) || lastP2PParamsRef.current.algo}
-                onRoutingParamChange={(jump,opt,algo)=> { setRoutingPrefs(jump,opt,algo); lastP2PParamsRef.current.jump=jump; lastP2PParamsRef.current.optimize=opt; lastP2PParamsRef.current.algo=algo; }}
+        initialJumpDistance={persistedJump}
+        initialOptimizeFor={persistedOptimize}
+        initialAlgorithm={persistedAlgo}
+        onRoutingParamChange={(jump,opt,algo)=> { setRoutingPrefs(jump,opt,algo); lastP2PParamsRef.current.jump=jump; lastP2PParamsRef.current.optimize=opt; lastP2PParamsRef.current.algo=algo; setPersistedJump(jump); setPersistedOptimize(opt); setPersistedAlgo(algo); }}
               />
             </PanelDrawer>
           )}
           {openPanels.has('cinematic') && (
-            <PanelDrawer id="cinematic" title="Cinematic Mode" scale={uiScale} zIndex={panelZ['cinematic']||1450} onActivate={bringToFront} defaultPos={{ x: 76 + 380, y:70 }} onClose={(id)=> { setOpenPanels(p=> { const n=new Set(p); n.delete(id); return n; }); setCinematicMode(false); }}>
+      <PanelDrawer id="cinematic" title="Cinematic Mode" scale={uiScale} zIndex={panelZ['cinematic']||1450} onActivate={bringToFront} onClose={(id)=> { setOpenPanels(p=> { const n=new Set(p); n.delete(id); return n; }); setCinematicMode(false); }} resetToken={resetToken}>
               <CinematicPanel
                 starColorMode={starColorMode}
                 setStarColorMode={setStarColorMode as any}
@@ -3025,6 +3033,7 @@ function App() {
               zIndex={panelZ['planetLegend']||1425}
               onActivate={()=> bringToFront('planetLegend')}
               onClose={()=> setIsPlanetCountActive(false)}
+              resetToken={resetToken}
             >
               {generatePlanetCountLegend()}
             </PlanetLegendPanel>

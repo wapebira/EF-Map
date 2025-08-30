@@ -11,10 +11,25 @@ interface PanelDrawerProps {
   scale?: number;
   zIndex?: number;
   onActivate?: (id:string)=>void;
+  resetToken?: number; // when incremented externally, reset position
 }
 
-const PanelDrawer: React.FC<PanelDrawerProps> = ({ id, title, onClose, children, defaultPos, scale=1, zIndex=1450, onActivate }) => {
-  const drag = useDraggable('drawer-'+id, defaultPos || { x:76, y:70 });
+const baseDefaults: Record<string,{x:number;y:number}> = {
+  routing: { x:140, y:70 },
+  cinematic: { x:140+420, y:70 },
+};
+
+const PanelDrawer: React.FC<PanelDrawerProps> = ({ id, title, onClose, children, defaultPos, scale=1, zIndex=1450, onActivate, resetToken }) => {
+  const initial = defaultPos || baseDefaults[id] || { x:140, y:70 };
+  const drag = useDraggable('drawer-'+id, initial);
+  // Respond to external reset
+  React.useEffect(()=>{
+    if(resetToken===undefined) return;
+    // Clear stored pos and apply fresh base default
+    try { localStorage.removeItem('panel-pos:'+'drawer-'+id); } catch {/* ignore */}
+    const fresh = baseDefaults[id] || { x:140, y:70 };
+    drag.setPos(fresh as any);
+  },[resetToken,id]);
   return (
     <div className={`ef-drawer ${drag.isDragging? 'dragging':''}`} aria-label={`${title||'Panel'} drawer`} style={{ left: drag.pos.x, top: drag.pos.y, transform:`scale(${scale})`, transformOrigin:'top left', zIndex }} onMouseDown={()=> onActivate && onActivate(id)}>
       <div className="ef-drawer-head" {...drag.bind} style={{ cursor:'move' }} onMouseDown={()=> onActivate && onActivate(id)}>
