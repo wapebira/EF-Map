@@ -814,8 +814,16 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 					{/* Debug Mode control removed for production */}
 					{datasetChanged && !championPath && !isCalculating && <div className="scout-warning">System selection changed. Please Calculate Route again.</div>}
 					<div className="scout-actions">
-						{!championPath && <button className="scout-button" disabled={isCalculating} onClick={startCalculation}>Calculate Route</button>}
-						{championPath && <button className="scout-button" disabled={isCalculating} onClick={startContinuousOptimization}>Start Optimization</button>}
+						{!championPath && (
+							<button className={`scout-button ${isCalculating?'calculating':''}`} disabled={isCalculating} onClick={startCalculation}>
+								{isCalculating ? <span style={{ display:'inline-flex', alignItems:'center', gap:8 }}><span className="p2p-spinner" /> Calculating...</span> : 'Calculate Route'}
+							</button>
+						)}
+						{championPath && (
+							<button className={`scout-button ${isCalculating?'calculating':''}`} disabled={isCalculating} onClick={startContinuousOptimization}>
+								{isCalculating ? <span style={{ display:'inline-flex', alignItems:'center', gap:8 }}><span className="p2p-spinner" /> Optimizing...</span> : 'Start Optimization'}
+							</button>
+						)}
 						{isCalculating && <button className="scout-button" onClick={stop}>Stop</button>}
 						{/* Copy buttons now rendered below with pagination */}
 					</div>
