@@ -8,6 +8,7 @@ export function useDraggable(storageKey:string, defaultPos:DragPos){
     try { const raw = localStorage.getItem('panel-pos:'+storageKey); if(raw){ const p = JSON.parse(raw); if(typeof p.x==='number'&&typeof p.y==='number') return p; } } catch {/* ignore */}
     return defaultPos;
   });
+  const posRef = useRef(pos); useEffect(()=>{ posRef.current = pos; }, [pos]);
   const draggingRef = useRef(false);
   const movedDuringDragRef = useRef(false); // track if pointer moved (different from click)
   const hasUserDraggedRef = useRef(false); // becomes true permanently after first user drag
@@ -43,9 +44,13 @@ export function useDraggable(storageKey:string, defaultPos:DragPos){
   },[]);
 
   const endDrag = useCallback(()=>{ 
-    if(draggingRef.current && movedDuringDragRef.current){ hasUserDraggedRef.current = true; }
+    if(draggingRef.current && movedDuringDragRef.current){ 
+      hasUserDraggedRef.current = true; 
+      // Persist immediately so cascade logic sees stored position even if no further pos state change occurs
+      try { localStorage.setItem('panel-pos:'+storageKey, JSON.stringify(posRef.current)); } catch {/* ignore */}
+    }
     draggingRef.current=false; setIsDragging(false); 
-  },[]);
+  },[storageKey]);
 
   useEffect(()=>{
     window.addEventListener('pointermove', onPointerMove, { passive:true });

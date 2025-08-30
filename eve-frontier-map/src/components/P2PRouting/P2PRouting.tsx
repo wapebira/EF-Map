@@ -271,7 +271,7 @@ const NeutralSelect = <T extends string>({ value, onChange, options, ariaLabel, 
 const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeResult, mapData, systemNames, progress, routeCalcTimeMs, open, onToggle, resetToken, selectedSystemName, selectedDestinationSystemName, waypoints = [], avoidSystems = [], onRemoveWaypoint, onRemoveAvoidSystem, waypointOptimize = false, onWaypointOptimizeChange, embedded = false, initialJumpDistance=60, initialOptimizeFor='fuel', initialAlgorithm='astar', onParamChange }: P2PRoutingProps) => {
   const [fromSystem, setFromSystem] = useState('');
   const [toSystem, setToSystem] = useState('');
-  const [jumpDistance, setJumpDistance] = useState(String(initialJumpDistance));
+  const [jumpDistance, setJumpDistance] = useState(String(initialJumpDistance)); // editing this must not reset from/to
   const [optimizeFor, setOptimizeFor] = useState<'fuel' | 'jumps'>(initialOptimizeFor);
   const [algorithm, setAlgorithm] = useState<'astar' | 'dijkstra'>(initialAlgorithm);
 
@@ -350,17 +350,11 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
   }, [resetToken, initialJumpDistance, initialOptimizeFor, initialAlgorithm]);
 
   // Update From system when an external system selection occurs
-  useEffect(()=>{
-    if(selectedSystemName){
-      setFromSystem(selectedSystemName);
-    }
-  }, [selectedSystemName]);
+  useEffect(()=>{ if(selectedSystemName){ setFromSystem(prev=> prev || selectedSystemName); } }, [selectedSystemName]);
 
   // Update To system when external destination selection occurs
   useEffect(()=>{
-    if(selectedDestinationSystemName){
-      setToSystem(selectedDestinationSystemName);
-    }
+    if(selectedDestinationSystemName){ setToSystem(prev=> prev || selectedDestinationSystemName); }
   }, [selectedDestinationSystemName]);
 
   // Build waypoint & avoided system UI blocks (only if non-empty)
