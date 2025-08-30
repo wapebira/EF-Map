@@ -683,18 +683,29 @@ function App() {
   const routingDrawerRef = useRef<PanelDrawerHandle|null>(null);
   const cinematicDrawerRef = useRef<PanelDrawerHandle|null>(null);
 
-  // Dynamic cascade: when multiple drawers open and user has not dragged them (no stored pos), arrange side-by-side.
+  // Dynamic cascade: when multiple panels (routing, cinematic, planet legend) open and user has not dragged them (no stored pos), arrange side-by-side.
   useEffect(()=>{
-    const active = openPanelOrder.filter(id=> openPanels.has(id) && ['routing','cinematic'].includes(id));
+    const active = openPanelOrder.filter(id=> openPanels.has(id) && ['routing','cinematic','planet-legend'].includes(id));
     if(active.length<=1) return;
     const baseX = 140; const baseY = 70; const stride = 420;
     active.forEach((id, idx)=>{
       const key = 'panel-pos:drawer-'+id;
-      const stored = localStorage.getItem(key);
-      if(stored) return; // user has dragged or position persisted earlier; don't override
+      let stored = localStorage.getItem(key);
+      if(id==='planet-legend'){ // legend has its own key format
+        stored = localStorage.getItem('panel-pos:planet-legend');
+      }
+      if(stored) return; // user moved/persisted -> skip
       const target = { x: baseX + idx*stride, y: baseY };
       if(id==='routing' && routingDrawerRef.current){ routingDrawerRef.current.autoPosition(target); }
       if(id==='cinematic' && cinematicDrawerRef.current){ cinematicDrawerRef.current.autoPosition(target); }
+      if(id==='planet-legend'){
+        // Direct DOM adjustment via custom event? Simpler: mutate style through position hook ref by dispatching window event
+        try {
+          const ev = new CustomEvent('ef:auto-pos', { detail:{ id, target } });
+          window.dispatchEvent(ev);
+        } catch {/* ignore */}
+        // Also store ephemeral coordinates in a temp map for legend fallback (no persistence)
+      }
     });
   },[openPanels, openPanelOrder]);
   // Optional debug toggle (open console and set window.DEBUG_PREFS=true)

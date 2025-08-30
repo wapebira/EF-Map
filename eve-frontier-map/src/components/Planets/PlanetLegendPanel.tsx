@@ -26,6 +26,19 @@ const PlanetLegendPanel: React.FC<PlanetLegendPanelProps> = ({ children, onClose
   drag.setPosSilent(base as any);
     }
   },[resetToken, anchoredBelowDrawer]);
+  // Listen for global auto cascade reposition events
+  React.useEffect(()=>{
+    const handler = (e:Event)=>{
+      const ce = e as CustomEvent<any>;
+      if(!ce.detail || ce.detail.id!=='planet-legend') return;
+      const { target } = ce.detail;
+      if(target && typeof target.x==='number' && typeof target.y==='number'){
+        drag.setPosSilent({ x: target.x, y: anchoredBelowDrawer? target.y + 340 : target.y });
+      }
+    };
+    window.addEventListener('ef:auto-pos', handler as any);
+    return ()=> window.removeEventListener('ef:auto-pos', handler as any);
+  }, [anchoredBelowDrawer]);
   return (
     <div
       className={`ef-secondary-panel ${drag.isDragging? 'dragging':''}`}
