@@ -13,6 +13,7 @@ interface AutoCompleteInputProps {
 const AutoCompleteInput = ({ value, onChange, onSelect, dataSource, placeholder }: AutoCompleteInputProps) => {
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [isSuggestionsVisible, setIsSuggestionsVisible] = useState(false);
+  const [highlightIdx, setHighlightIdx] = useState<number>(-1);
   const [dropdownPos, setDropdownPos] = useState<{left:number; top:number; width:number}>({ left:0, top:0, width:0 });
   const componentRef = useRef<HTMLDivElement>(null);
 
@@ -62,9 +63,11 @@ const AutoCompleteInput = ({ value, onChange, onSelect, dataSource, placeholder 
       );
       setSuggestions(filteredSuggestions);
       setIsSuggestionsVisible(true);
+      setHighlightIdx(filteredSuggestions.length ? 0 : -1);
     } else {
       setSuggestions([]);
       setIsSuggestionsVisible(false);
+      setHighlightIdx(-1);
     }
   };
 
@@ -74,30 +77,51 @@ const AutoCompleteInput = ({ value, onChange, onSelect, dataSource, placeholder 
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if(e.key === 'Enter') {
-      // Accept typed value if it matches a system exactly (case-insensitive)
-      const match = dataSource.find(item => item.toLowerCase() === value.toLowerCase());
-      if(match) {
-        onSelect(match);
-        setIsSuggestionsVisible(false);
+    if(!isSuggestionsVisible){
+      if(e.key==='ArrowDown' && suggestions.length){ setIsSuggestionsVisible(true); setHighlightIdx(0); }
+      return;
+    }
+    if(e.key === 'ArrowDown') {
+      e.preventDefault();
+      if(suggestions.length){ setHighlightIdx(i=> (i+1>=suggestions.length? 0 : i+1)); }
+    } else if(e.key === 'ArrowUp') {
+      e.preventDefault();
+      if(suggestions.length){ setHighlightIdx(i=> (i<=0? suggestions.length-1 : i-1)); }
+    } else if(e.key === 'Enter') {
+      e.preventDefault();
+      if(suggestions.length === 1){
+        handleSelect(suggestions[0]);
+      } else if(highlightIdx>=0 && highlightIdx < suggestions.length){
+        handleSelect(suggestions[highlightIdx]);
+      } else {
+        // fallback exact match
+        const match = dataSource.find(item => item.toLowerCase() === value.toLowerCase());
+        if(match) handleSelect(match);
       }
+    } else if(e.key === 'Escape') {
+      setIsSuggestionsVisible(false); setHighlightIdx(-1);
     }
   };
 
   const dropdown = (isSuggestionsVisible && suggestions.length > 0) ? createPortal(
       <ul className="suggestions-list" data-ac-suggestions style={{ position:'fixed', left:dropdownPos.left, top:dropdownPos.top, width:dropdownPos.width, zIndex:3000 }}>
-        {suggestions.map((item, index) => (
-          <li
-            key={index}
-            data-ac-suggestion-item
-            onMouseDown={(e)=> { // use mousedown so it fires before outside handler removes list
-              e.preventDefault();
-              handleSelect(item);
-            }}
-          >
-            {item}
-          </li>
-        ))}
+        {suggestions.map((item, index) => {
+          const active = index === highlightIdx;
+          return (
+            <li
+              key={index}
+              data-ac-suggestion-item
+              className={active? 'active':''}
+              onMouseEnter={()=> setHighlightIdx(index)}
+              onMouseDown={(e)=> { // use mousedown so it fires before outside handler removes list
+                e.preventDefault();
+                handleSelect(item);
+              }}
+            >
+              {item}
+            </li>
+          );
+        })}
       </ul>, document.body
     ) : null;
 

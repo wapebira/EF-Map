@@ -15,3 +15,8 @@
 .suggestions-list li:hover {
   background-color: #555;
 }
+
+.suggestions-list li.active {
+  background-color: var(--accent);
+  color: #fff;
+}
