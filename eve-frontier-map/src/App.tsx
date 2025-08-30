@@ -434,7 +434,8 @@ function App() {
   // Theme toggle effect: update CSS variable and three.js color constants
   useEffect(() => {
     const root = document.documentElement;
-    root.style.setProperty('--accent', accentIsBlue ? 'var(--selection-blue)' : 'var(--selection-orange)');
+  root.style.setProperty('--accent', accentIsBlue ? 'var(--selection-blue)' : 'var(--selection-orange)');
+  root.style.setProperty('--accent-rgb', accentIsBlue ? '0,170,255' : '255,76,38');
     // Tag root for CSS theme-specific rules
     root.setAttribute('data-accent', accentIsBlue ? 'blue' : 'orange');
   root.classList.add('cinematic-active');

@@ -520,10 +520,18 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
                   <div className="p2p-progress-bar" style={{ width: '100%', background: '#222', height: '8px', borderRadius: '4px', overflow: 'hidden' }}>
                     <div style={{ width: `${Math.min(100, (progress.explored / (progress.explored + progress.frontier + 1)) * 100).toFixed(0)}%`, background: 'var(--accent)', height: '100%', transition:'width .25s linear' }} />
                   </div>
-                  <div style={{ marginTop: '6px', fontSize: '12px', color: '#ddd', display:'flex', flexWrap:'wrap', gap:8 }}>
-                    <span>{progress.message}</span>
-                    <span>frontier: {progress.frontier}</span>
-                    <span>elapsed: {(localElapsedMs/1000).toFixed(1)}s</span>
+                  <div style={{ marginTop: '6px', fontSize: '12px', color: '#ddd', display:'flex', flexDirection:'column', gap:4 }}>
+                    <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
+                      <span>{progress.message}</span>
+                      <span>frontier: {progress.frontier}</span>
+                      <span>elapsed: {(localElapsedMs/1000).toFixed(1)}s</span>
+                    </div>
+                    {progress.explored <= 1 && progress.frontier === 0 && localElapsedMs > 1500 && (
+                      <div style={{ fontSize:11, color:'#ffa640', display:'flex', alignItems:'center', gap:6 }}>
+                        <span className="p2p-spinner" style={{ width:12, height:12 }} />
+                        Possibly unreachable at current jump range – probing feasibility...
+                      </div>
+                    )}
                   </div>
                 </>
               ) : (
