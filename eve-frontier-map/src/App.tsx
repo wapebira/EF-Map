@@ -20,7 +20,7 @@ import PlanetLegendPanel from './components/Planets/PlanetLegendPanel';
 import './components/layout/panelLayout.css';
 import AutoCompleteInput from './components/AutoCompleteInput/AutoCompleteInput';
 import HelpPanel from './components/HelpPanel/HelpPanel';
-import { loadPrefs, setAccent, setOpenPanels as persistOpenPanels, setRoutingPrefs, fullReset } from './utils/prefs';
+import { loadPrefs, setAccent, setOpenPanels as persistOpenPanels, setRoutingPrefs, fullReset, getPrefs } from './utils/prefs';
 import { encodeShare, decodeShare } from './utils/share';
 import { createShortShare, fetchShortShare } from './utils/shortShare';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
@@ -139,8 +139,10 @@ let SELECTED_STAR_COLOR = new THREE.Color(0xff4c26); // Will track accent (orang
 const REGION_OUTLINE_COLOR = new THREE.Color(0x00aaff); // Shared blue for region outlines
 
 function App() {
+  // Synchronous initial prefs load for reliable first render
+  const initialPrefsRef = useRef(getPrefs());
   // Accent color (persisted)
-  const [accentIsBlue, setAccentIsBlue] = useState(false);
+  const [accentIsBlue, setAccentIsBlue] = useState(initialPrefsRef.current.accent === 'blue');
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [loadingStatus, setLoadingStatus] = useState('Initializing...');
   const [isLoaded, setIsLoaded] = useState(false);
@@ -655,20 +657,22 @@ function App() {
   const initialHashAppliedRef = useRef(false);
 
   // (legacy openPanel removed after multi-panel refactor)
-  const togglePanel = (id:string) => setOpenPanels(prev => { const next = new Set(prev); if(next.has(id)) next.delete(id); else next.add(id); return next; });
-  const ensurePanel = (id:string) => setOpenPanels(prev => { if(prev.has(id)) return prev; const next = new Set(prev); next.add(id); return next; });
+  const [openPanelOrder, setOpenPanelOrder] = useState<string[]>([]); // track open order for cascade positioning
+  const togglePanel = (id:string) => setOpenPanels(prev => { const next = new Set(prev); if(next.has(id)) { next.delete(id); setOpenPanelOrder(o=> o.filter(p=> p!==id)); } else { next.add(id); setOpenPanelOrder(o=> o.includes(id)? o : [...o, id]); } return next; });
+  const ensurePanel = (id:string) => setOpenPanels(prev => { if(prev.has(id)) return prev; const next = new Set(prev); next.add(id); setOpenPanelOrder(o=> o.includes(id)? o : [...o, id]); return next; });
 
   // Load persisted prefs once
   useEffect(()=>{
+    // Effect still syncs open panels from prefs (order is reconstructed in same sequence)
     const prefs = loadPrefs();
-    setAccentIsBlue(prefs.accent === 'blue');
-    if(prefs.openPanels?.length){ setOpenPanels(new Set(prefs.openPanels)); }
-    if(prefs.lastJumpDistance){ lastP2PParamsRef.current.jump = prefs.lastJumpDistance; }
-    if(prefs.optimizeFor){ lastP2PParamsRef.current.optimize = prefs.optimizeFor; }
-    if(prefs.algorithm){ lastP2PParamsRef.current.algo = prefs.algorithm; }
-  setPersistedJump(prefs.lastJumpDistance ?? lastP2PParamsRef.current.jump);
-  setPersistedOptimize(prefs.optimizeFor ?? lastP2PParamsRef.current.optimize);
-  setPersistedAlgo(prefs.algorithm ?? lastP2PParamsRef.current.algo);
+    if(prefs.openPanels?.length){
+      const set = new Set(prefs.openPanels);
+      setOpenPanels(set);
+      setOpenPanelOrder(prefs.openPanels);
+    }
+    if(prefs.lastJumpDistance){ lastP2PParamsRef.current.jump = prefs.lastJumpDistance; setPersistedJump(prefs.lastJumpDistance); }
+    if(prefs.optimizeFor){ lastP2PParamsRef.current.optimize = prefs.optimizeFor; setPersistedOptimize(prefs.optimizeFor); }
+    if(prefs.algorithm){ lastP2PParamsRef.current.algo = prefs.algorithm; setPersistedAlgo(prefs.algorithm); }
   },[]);
 
   // Persist accent & open panels
@@ -684,9 +688,9 @@ function App() {
   },[routeResult]);
 
   // Routing persisted param state for initial props
-  const [persistedJump, setPersistedJump] = useState<number>(lastP2PParamsRef.current.jump);
-  const [persistedOptimize, setPersistedOptimize] = useState<'fuel'|'jumps'>(lastP2PParamsRef.current.optimize);
-  const [persistedAlgo, setPersistedAlgo] = useState<'astar'|'dijkstra'>(lastP2PParamsRef.current.algo);
+  const [persistedJump, setPersistedJump] = useState<number>(initialPrefsRef.current.lastJumpDistance ?? lastP2PParamsRef.current.jump);
+  const [persistedOptimize, setPersistedOptimize] = useState<'fuel'|'jumps'>(initialPrefsRef.current.optimizeFor ?? lastP2PParamsRef.current.optimize);
+  const [persistedAlgo, setPersistedAlgo] = useState<'astar'|'dijkstra'>(initialPrefsRef.current.algorithm ?? lastP2PParamsRef.current.algo);
 
   // Apply shared route from URL hash (supports short form #s=ID) once map data is loaded
   useEffect(()=>{
@@ -2952,7 +2956,7 @@ function App() {
           />
           {openPanels.has('routing') && (
             <PanelDrawer id="routing" title="Routing" scale={uiScale} zIndex={panelZ['routing']||1450} onActivate={bringToFront} onClose={(id)=> setOpenPanels(p=> { const n=new Set(p); n.delete(id); return n; })} resetToken={resetToken}
-              cascadeIndex={[...openPanels].filter(id=>['routing','cinematic'].includes(id)).sort((a,b)=> a.localeCompare(b)).indexOf('routing')}
+              cascadeIndex={openPanelOrder.indexOf('routing')}
             >
               <RoutingPanel
                 onCalculateRoute={calculateRoute}
@@ -3003,7 +3007,7 @@ function App() {
           )}
           {openPanels.has('cinematic') && (
             <PanelDrawer id="cinematic" title="Cinematic Mode" scale={uiScale} zIndex={panelZ['cinematic']||1450} onActivate={bringToFront} onClose={(id)=> { setOpenPanels(p=> { const n=new Set(p); n.delete(id); return n; }); setCinematicMode(false); }} resetToken={resetToken}
-              cascadeIndex={[...openPanels].filter(id=>['routing','cinematic'].includes(id)).sort((a,b)=> a.localeCompare(b)).indexOf('cinematic')}
+              cascadeIndex={openPanelOrder.indexOf('cinematic')}
             >
               <CinematicPanel
                 starColorMode={starColorMode}
