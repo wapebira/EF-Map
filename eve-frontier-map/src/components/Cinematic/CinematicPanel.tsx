@@ -47,7 +47,7 @@ const CinematicPanel: React.FC<CinematicPanelProps> = (p) => {
         <label style={{ fontSize:12, fontWeight:600 }}>Haze Color</label>
         <div style={{ position:'relative', display:'flex', alignItems:'center', gap:8 }}>
           <div onClick={()=> setHazePickerOpen(o=>!o)} style={{ width:44, height:22, background:p.hazeColor, border:'1px solid #666', cursor:'pointer', borderRadius:4 }} />
-          <button onClick={()=> p.setAutoCamPaused(v=> !v)} style={{ background:'#111', color:'#fff', border:'1px solid var(--accent)', borderRadius:4, fontSize:11, padding:'4px 8px', cursor:'pointer', marginLeft:12 }}>{p.autoCamPaused? 'Resume' : 'Pause Cam'}</button>
+          <button onClick={()=> p.setAutoCamPaused(!p.autoCamPaused)} style={{ background:'#111', color:'#fff', border:'1px solid var(--accent)', borderRadius:4, fontSize:11, padding:'4px 8px', cursor:'pointer', marginLeft:12 }}>{p.autoCamPaused? 'Resume' : 'Pause Cam'}</button>
           <label style={{ display:'flex', alignItems:'center', gap:4, fontSize:11, marginLeft:8 }}>
             <input type="checkbox" checked={p.cinematicLabels} onChange={e=> p.setCinematicLabels(e.target.checked)} /> Labels
           </label>
