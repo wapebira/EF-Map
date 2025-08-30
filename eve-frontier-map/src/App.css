@@ -113,6 +113,17 @@ body {
   background: linear-gradient(rgba(0,0,0,0.60), rgba(0,0,0,0.50));
 }
 
+/* Provide equivalent glow when using orange accent (root data-accent='orange') even though we remove cinematic-active class */
+:root[data-accent='orange'] .ef-small-logo {
+  border-color: var(--accent);
+  box-shadow:
+    0 3px 14px rgba(0,0,0,0.75),
+    0 0 0 1px rgba(255,255,255,0.10),
+    0 0 14px rgba(255,255,255,0.12),
+    0 0 26px -4px var(--accent);
+  background: linear-gradient(rgba(0,0,0,0.60), rgba(0,0,0,0.50));
+}
+
 .ef-small-logo:hover {
   box-shadow:
     0 4px 18px rgba(0,0,0,0.75),
