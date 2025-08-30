@@ -2828,6 +2828,12 @@ function App() {
       </button>
       <ReferralBadge />
   </div>
+  {/* Support button moved into top toolbar for consistent sizing */}
+  <button
+    className="ef-support-btn"
+    onClick={()=> setSupportExpandRequestId(id=> id+1)}
+    aria-label="Support this project (opens Help panel to Support section)"
+  >Support</button>
   {/* Help button should remain to the right of referral always */}
   <HelpPanel accentIsBlue={accentIsBlue} supportExpandRequestId={supportExpandRequestId} supportContent={supportContent} />
     </div>
@@ -3074,17 +3080,6 @@ function App() {
       </div>
     <div ref={mountRef} style={{ width: '100vw', height: '100vh' }} />
   {/* Small persistent logo and referral code */}
-  {/* Support button (hides with UI) positioned left of persistent logo */}
-  <div className="ef-support-btn-wrapper" style={hideUI?{display:'none'}:{ transform:`scale(${uiScale})`, transformOrigin:'bottom right' }}>
-    <button
-      className="ef-support-btn"
-      onClick={()=> setSupportExpandRequestId(id=> id+1)}
-      aria-label="Support this project (opens Help panel to Support section)"
-    >
-      <span className="line1">Support</span>
-      <span className="line2">this project</span>
-    </button>
-  </div>
   {/* Persistent logo (always visible even when UI hidden) */}
   <img src={logo} alt="EF Map" className="ef-small-logo" />
     </>
