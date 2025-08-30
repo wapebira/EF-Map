@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
-import QRCode from 'qrcode';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
@@ -19,6 +18,7 @@ import HelpPanel from './components/HelpPanel/HelpPanel';
 import { encodeShare, decodeShare } from './utils/share';
 import { createShortShare, fetchShortShare } from './utils/shortShare';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
+import DonateCryptoModal from './components/DonateCryptoModal';
 
 // Small referral badge component with copy-to-clipboard
 const ReferralBadge: React.FC = () => {
@@ -167,29 +167,7 @@ function App() {
   // External trigger for expanding Support section in Help
   const [supportExpandRequestId, setSupportExpandRequestId] = useState(0);
   const [cryptoModalOpen, setCryptoModalOpen] = useState(false);
-  const cryptoAddresses = [
-    { id: 'eth', label: 'ETH (Ethereum mainnet)', address: '0xC1204805b018ec2Ad06e6119965134AfFa212C10' },
-    { id: 'usdc', label: 'USDC (Ethereum mainnet)', address: '0xC1204805b018ec2Ad06e6119965134AfFa212C10' },
-  ];
-  const [copiedId, setCopiedId] = useState<string | null>(null);
-  const copyAddress = (addr:string, id:string)=>{
-    try { navigator.clipboard.writeText(addr).then(()=>{ setCopiedId(id); setTimeout(()=>{ setCopiedId(prev => prev===id ? null : prev); }, 1600); }); } catch {/* ignore */}
-  };
-  const qrCacheRef = useRef<Record<string,string>>({});
-  const [, forceQrRefresh] = useState(0);
-  useEffect(()=>{
-    if(!cryptoModalOpen) return; let cancelled=false;
-    (async()=>{
-      for(const entry of cryptoAddresses){
-        if(qrCacheRef.current[entry.id]) continue;
-        try {
-          const dataUrl = await QRCode.toDataURL(entry.address, { margin:1, scale:6, errorCorrectionLevel:'M' });
-          if(!cancelled){ qrCacheRef.current[entry.id]=dataUrl; forceQrRefresh(v=>v+1); }
-        } catch { /* ignore */ }
-      }
-    })();
-    return ()=>{ cancelled=true; };
-  }, [cryptoModalOpen]);
+  // (Legacy QR prefetch logic removed; handled inside DonateCryptoModal now)
   // Static support content (user supplied exact text)
   const supportContent = (
     <div className="support-project-content" style={{ display:'flex', flexDirection:'column', gap:'14px', fontSize:'14px', lineHeight:1.45 }}>
@@ -2801,39 +2779,7 @@ function App() {
 
   return (
     <>
-      {cryptoModalOpen && (
-        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:4000 }} onClick={()=> setCryptoModalOpen(false)}>
-          <div onClick={e=> e.stopPropagation()} style={{ width:'min(520px,92%)', maxHeight:'80vh', overflowY:'auto', background:'#111', padding:'20px 22px 26px', border:'1px solid rgba(255,255,255,0.15)', borderRadius:10, boxShadow:'0 8px 28px -4px rgba(0,0,0,0.55)', display:'flex', flexDirection:'column', gap:18 }}>
-            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:4 }}>
-              <h3 style={{ margin:0, fontSize:'20px', fontWeight:600 }}>Donate via Crypto</h3>
-              <button onClick={()=> setCryptoModalOpen(false)} style={{ background:'none', border:'none', color:'#fff', fontSize:'20px', cursor:'pointer', lineHeight:1 }}>×</button>
-            </div>
-            <p style={{ margin:'0 0 4px', fontSize:'13px', opacity:.75 }}>Choose a network and copy the address. QR codes are provided for convenience.</p>
-            <div style={{ display:'flex', flexDirection:'column', gap:20 }}>
-              {cryptoAddresses.map(entry => {
-                const truncated = entry.address.slice(0,10) + '…' + entry.address.slice(-6);
-                const qr = qrCacheRef.current[entry.id];
-                return (
-                  <div key={entry.id} style={{ display:'flex', gap:14, alignItems:'stretch', background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:8, padding:12 }}>
-                    <div style={{ flex:'0 0 140px', display:'flex', alignItems:'center', justifyContent:'center', background:'#fff', borderRadius:6 }}>
-                      <img src={qr} alt={entry.label + ' QR'} style={{ width:120, height:120, objectFit:'contain' }} />
-                    </div>
-                    <div style={{ display:'flex', flexDirection:'column', gap:8, flex:1 }}>
-                      <div style={{ fontWeight:600, fontSize:'14px' }}>{entry.label}</div>
-                      <div style={{ fontFamily:'monospace', fontSize:'13px', wordBreak:'break-all', background:'rgba(255,255,255,0.05)', padding:'6px 8px', borderRadius:4 }}>{truncated}</div>
-                      <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
-                        <button onClick={()=> copyAddress(entry.address, entry.id)} style={{ background:'var(--accent)', color:'#fff', border:'none', padding:'6px 14px', borderRadius:4, cursor:'pointer', fontWeight:600, fontSize:'13px', letterSpacing:'.5px' }}>Copy</button>
-                        {copiedId === entry.id && <span style={{ fontSize:'12px', color:'var(--accent)', alignSelf:'center' }}>Copied!</span>}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-            <p style={{ margin:'10px 0 0', fontSize:'11px', opacity:.6 }}>Verify wallet address independently before sending funds.</p>
-          </div>
-        </div>
-      )}
+  <DonateCryptoModal open={cryptoModalOpen} onClose={()=> setCryptoModalOpen(false)} address="0xC1204805b018ec2Ad06e6119965134AfFa212C10" />
   {/* Referral code copy state */}
   {/* ...existing code... */}
   <div className="ef-top-toolbar" style={hideUI?{display:'none'}:{}}>
