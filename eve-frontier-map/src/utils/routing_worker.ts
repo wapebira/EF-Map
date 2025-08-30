@@ -155,80 +155,65 @@ const getNeighbors = (
 };
 
 // --- A* (basic) ---
-// Compute minimal required ship range (bottleneck distance) to connect start & end via ship jumps + gate network.
-// Approach: Collapse gate-connected systems into components. If start & end in different components, we grow a frontier
-// of components starting from start using Prim-like expansion choosing the smallest inter-component distance each step.
-// The maximum edge length chosen during this expansion until the end component is included is the minimal max jump needed.
-const computeMinRequiredRangePair = (systems: { [k:string]: SolarSystem }, stargates: { [k:string]: Stargate }, from: SolarSystem, to: SolarSystem): number => {
-  // Build gate adjacency
-  const gateAdj = new Map<number, number[]>();
+// Fast existence probe using spatial grid + BFS (gates + ship jumps up to threshold).
+const existsPathWithin = (
+  systems: { [k:string]: SolarSystem },
+  stargates: { [k:string]: Stargate },
+  from: SolarSystem,
+  to: SolarSystem,
+  maxJump: number,
+  systemsById: { [id:number]: SolarSystem }
+): boolean => {
+  if(from.id === to.id) return true;
+  const allSystems = Object.values(systems);
+  const cellSize = Math.max(1, Math.floor(maxJump));
+  // Build or reuse grid (reuse spatialGrids)
+  let grid = spatialGrids.get(cellSize);
+  if(!grid){
+    grid = buildGrid(cellSize, allSystems);
+    spatialGrids.set(cellSize, grid);
+  }
+  const visited = new Set<number>();
+  const q:number[] = [from.id];
+  visited.add(from.id);
+  // Pre-build gate adjacency for fast gate expansion for this scan
+  const gateAdjLocal = new Map<number, number[]>();
   for(const g of Object.values(stargates)){
-    if(!gateAdj.has(g.source_system_id)) gateAdj.set(g.source_system_id, []);
-    if(!gateAdj.has(g.destination_system_id)) gateAdj.set(g.destination_system_id, []);
-    gateAdj.get(g.source_system_id)!.push(g.destination_system_id);
-    gateAdj.get(g.destination_system_id)!.push(g.source_system_id);
+    if(!gateAdjLocal.has(g.source_system_id)) gateAdjLocal.set(g.source_system_id, []);
+    if(!gateAdjLocal.has(g.destination_system_id)) gateAdjLocal.set(g.destination_system_id, []);
+    gateAdjLocal.get(g.source_system_id)!.push(g.destination_system_id);
+    gateAdjLocal.get(g.destination_system_id)!.push(g.source_system_id);
   }
-  // Assign gate components (restricted to all systems for simplicity)
-  const compOf = new Map<number, number>();
-  let compCounter = 0;
-  const all = Object.values(systems);
-  for(const s of all){
-    if(compOf.has(s.id)) continue;
-    const q=[s.id]; compOf.set(s.id, compCounter);
-    while(q.length){
-      const cur=q.shift()!;
-      for(const nxt of gateAdj.get(cur)||[]){ if(!compOf.has(nxt)){ compOf.set(nxt, compCounter); q.push(nxt); } }
+  while(q.length){
+    const curId = q.shift()!;
+    if(curId === to.id) return true;
+    // Gate neighbors
+    for(const ng of gateAdjLocal.get(curId)||[]){
+      if(!visited.has(ng)){ visited.add(ng); q.push(ng); if(ng===to.id) return true; }
     }
-    compCounter++;
-  }
-  const startComp = compOf.get(from.id)!;
-  const endComp = compOf.get(to.id)!;
-  if(startComp === endComp) return 0; // already connected purely by gates (should not normally reach here on failure)
-  // Pre-group system ids per component for quick iteration
-  const compSystems: number[][] = Array.from({length: compCounter}, ()=>[]);
-  for(const s of all){ compSystems[compOf.get(s.id)!].push(s.id); }
-  // Precompute minimal distances between components lazily when needed.
-  // We'll maintain a min-heap (implemented via array linear scan due to moderate size) of candidate edges from visited set.
-  const visited = new Set<number>(); visited.add(startComp);
-  let maxEdge = 0;
-  // Helper to push edges from a component into candidate list
-  const candidates: {a:number; b:number; d:number}[] = [];
-  const pushEdges = (compIdx:number) => {
-    for(let other=0; other<compSystems.length; other++){
-      if(other===compIdx || visited.has(other)) continue;
-      // Compute minimal distance between any system in compIdx and any in other
-      let best=Infinity;
-      for(const idA of compSystems[compIdx]){
-        const A = systems[idA.toString()]; if(!A) continue;
-        for(const idB of compSystems[other]){
-          const B = systems[idB.toString()]; if(!B) continue;
-          const d = heuristic(A,B);
-          if(d < best){ best = d; if(best === 0) break; }
+    // Ship neighbors (spatial grid query)
+    const cur = systemsById[curId]; if(!cur) continue;
+    const ix = Math.floor(cur.position.x / cellSize);
+    const iy = Math.floor(cur.position.y / cellSize);
+    const iz = Math.floor(cur.position.z / cellSize);
+    const r = Math.ceil(maxJump / cellSize);
+    for(let dx=-r; dx<=r; dx++){
+      for(let dy=-r; dy<=r; dy++){
+        for(let dz=-r; dz<=r; dz++){
+          const bucket = grid!.get(`${ix+dx},${iy+dy},${iz+dz}`);
+          if(!bucket) continue;
+          for(const cand of bucket){
+            if(cand.id === curId || visited.has(cand.id)) continue;
+            const d = heuristic(cur, cand);
+            if(d <= maxJump){
+              visited.add(cand.id); q.push(cand.id); if(cand.id===to.id) return true;
+            }
+          }
         }
-        if(best === 0) break;
       }
-      candidates.push({ a: compIdx, b: other, d: best });
     }
-  };
-  pushEdges(startComp);
-  while(candidates.length){
-    // Extract smallest distance edge where exactly one side visited
-    let bestIdx = -1; let bestD = Infinity;
-    for(let i=0;i<candidates.length;i++){
-      const c = candidates[i];
-      const inA = visited.has(c.a); const inB = visited.has(c.b);
-      if(inA === inB) continue; // skip edges internal to visited or entirely outside
-      if(c.d < bestD){ bestD = c.d; bestIdx = i; }
-    }
-    if(bestIdx === -1) break; // no connecting edges (disconnected)
-    const edge = candidates.splice(bestIdx,1)[0];
-    const newComp = visited.has(edge.a) ? edge.b : edge.a;
-    visited.add(newComp);
-    if(edge.d > maxEdge) maxEdge = edge.d;
-    if(newComp === endComp) return maxEdge; // reached target
-    pushEdges(newComp);
   }
-  return Infinity; // no possible connection
+  return false;
 };
 
 const findPathAstar = (request: RoutingRequest): RoutingResponse => {
@@ -280,11 +265,38 @@ const findPathAstar = (request: RoutingRequest): RoutingResponse => {
     }
   }
 
-  // Path not found: compute minimal required ship range to inform user.
+  // Path not found: approximate minimal required ship range by probing existence with increasing jump distance
   let minRequired: number | undefined = undefined;
   try {
-    minRequired = computeMinRequiredRangePair(systems, stargates, startNode, endNode);
-    if(!isFinite(minRequired)) minRequired = undefined;
+    const direct = heuristic(startNode, endNode);
+    if(direct <= request.maxJumpDistance + 1e-6){
+      minRequired = direct; // should have succeeded, fallback to direct
+    } else {
+      let low = request.maxJumpDistance;
+      let high = Math.min(direct, Math.max(low*2, low + 1));
+      const systemsById: { [id:number]: SolarSystem } = {}; Object.values(systems).forEach(s=> systemsById[s.id]=s);
+      // Exponential expansion
+      while(high < direct + 1e-6 && !existsPathWithin(systems, stargates, startNode, endNode, high, systemsById)){
+        low = high;
+        high = Math.min(direct, high * 2);
+        if(high >= direct - 1e-6) break;
+      }
+      let pathExistsAtHigh = existsPathWithin(systems, stargates, startNode, endNode, high, systemsById);
+      if(!pathExistsAtHigh){
+        minRequired = direct; // could not find path even at direct distance threshold
+      } else {
+        // Binary refine
+        for(let i=0;i<7;i++){
+          const mid = (low + high) / 2;
+            if(existsPathWithin(systems, stargates, startNode, endNode, mid, systemsById)){
+              high = mid;
+            } else {
+              low = mid;
+            }
+        }
+        minRequired = high;
+      }
+    }
   } catch { /* ignore */ }
   return { path: null, error: 'No path found.', minRequiredShipRange: minRequired };
 };
@@ -412,11 +424,27 @@ const findPathDijkstra = (request: RoutingRequest): RoutingResponse => {
     }
   }
 
-  // Path not found: compute minimal required ship range similar to A*
+  // Path not found (Dijkstra): reuse A* style probing for minimal required range
   let minRequired: number | undefined = undefined;
   try {
-    minRequired = computeMinRequiredRangePair(systems, stargates, startNode, endNode);
-    if(!isFinite(minRequired)) minRequired = undefined;
+    const direct = heuristic(startNode, endNode);
+    if(direct <= request.maxJumpDistance + 1e-6){
+      minRequired = direct;
+    } else {
+      const systemsById: { [id:number]: SolarSystem } = {}; Object.values(systems).forEach(s=> systemsById[s.id]=s);
+      let low = request.maxJumpDistance; let high = Math.min(direct, Math.max(low*2, low+1));
+      while(high < direct + 1e-6 && !existsPathWithin(systems, stargates, startNode, endNode, high, systemsById)){
+        low = high; high = Math.min(direct, high*2); if(high >= direct - 1e-6) break; }
+      if(!existsPathWithin(systems, stargates, startNode, endNode, high, systemsById)){
+        minRequired = direct;
+      } else {
+        for(let i=0;i<7;i++){
+          const mid = (low + high)/2;
+          if(existsPathWithin(systems, stargates, startNode, endNode, mid, systemsById)) high = mid; else low = mid;
+        }
+        minRequired = high;
+      }
+    }
   } catch { /* ignore */ }
   return { path: null, error: 'No path found.', minRequiredShipRange: minRequired };
 };
