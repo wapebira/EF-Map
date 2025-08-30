@@ -488,6 +488,11 @@ const HelpPanel: React.FC<HelpPanelProps> = ({ accentIsBlue, supportExpandReques
       if(panel){
         document.documentElement.style.setProperty('--help-panel-width', panel.offsetWidth + 'px');
       }
+      // Also record toggle button width so shifting toolbar accounts for it when panel is open
+      const toggle = document.querySelector('.help-toggle-button') as HTMLElement | null;
+      if(toggle){
+        document.documentElement.style.setProperty('--help-toggle-width', toggle.offsetWidth + 'px');
+      }
     };
     setWidth();
     window.addEventListener('resize', setWidth);
