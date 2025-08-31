@@ -78,6 +78,8 @@ const StatsPage: React.FC = () => {
             <StatRow label="Scout baseline time" value={formatDurationAvg(data.sums.scout_baseline_time_ms_sum, data.sums.scout_baseline_time_count)} />
             <StatRow label="Scout session time" value={formatDurationAvg(data.sums.scout_opt_session_time_ms_sum, data.sums.scout_opt_session_time_count)} />
             <StatRow label="Avg collected systems" value={( ()=> { const sum = data.sums.scout_collected_systems_sum; const count = data.sums.scout_collected_systems_count; if(!sum||!count) return '—'; return (sum/count).toFixed(1); })()} />
+            <StatRow label="Scout LY saved (total)" value={( ()=> { const s=data.sums.scout_opt_savings_ly_sum; return s? s.toFixed(2)+' LY':'—'; })()} />
+            <StatRow label="Scout LY saved (avg)" value={( ()=> { const s=data.sums.scout_opt_savings_ly_sum; const c=data.sums.scout_opt_savings_count; if(!s||!c) return '—'; return (s/c).toFixed(2)+' LY'; })()} />
           </section>
           <section style={{ background:'rgba(255,255,255,0.04)', padding:'14px 16px', border:'1px solid rgba(255,255,255,0.12)', borderRadius:8 }}>
             <h2 style={{ margin:'0 0 6px 0', fontSize:'15px', letterSpacing:'.5px', textTransform:'uppercase', opacity:0.85 }}>Features</h2>
@@ -126,6 +128,8 @@ const StatsPage: React.FC = () => {
                   <th style={{ padding:'6px 8px' }}>PgLoads</th>
                   <th style={{ padding:'6px 8px' }}>CinSess</th>
                   <th style={{ padding:'6px 8px' }}>AvgSess ms</th>
+                  <th style={{ padding:'6px 8px' }}>Avg LY Saved</th>
+                  <th style={{ padding:'6px 8px' }}>Avg LY Saved</th>
                 </tr>
               </thead>
               <tbody>
@@ -133,6 +137,7 @@ const StatsPage: React.FC = () => {
           const avgP2P = h.sums.p2p_route_time_count ? (h.sums.p2p_route_time_ms_sum / h.sums.p2p_route_time_count) : undefined;
           const avgBase = h.sums.scout_baseline_time_count ? (h.sums.scout_baseline_time_ms_sum / h.sums.scout_baseline_time_count) : undefined;
           const avgSess = h.sums.session_time_count ? (h.sums.session_time_ms_sum / h.sums.session_time_count) : undefined;
+          const avgSaved = h.sums.scout_opt_savings_count ? (h.sums.scout_opt_savings_ly_sum / h.sums.scout_opt_savings_count) : undefined;
                   return (
                     <tr key={h.date||h.updatedAt} style={{ borderTop:'1px solid rgba(255,255,255,0.07)' }}>
                       <td style={{ padding:'4px 8px', opacity:0.85 }}>{h.date || h.updatedAt.slice(0,10)}</td>
@@ -146,6 +151,7 @@ const StatsPage: React.FC = () => {
                       <td style={{ padding:'4px 8px' }}>{h.counters.page_loads||0}</td>
                       <td style={{ padding:'4px 8px' }}>{h.counters.cinematic_sessions||0}</td>
             <td style={{ padding:'4px 8px' }}>{avgSess!==undefined? formatMs(avgSess): '—'}</td>
+            <td style={{ padding:'4px 8px' }}>{avgSaved!==undefined? avgSaved.toFixed(2): '—'}</td>
                     </tr>
                   );
                 })}

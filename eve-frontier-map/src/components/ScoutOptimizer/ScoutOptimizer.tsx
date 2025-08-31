@@ -97,6 +97,8 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	const lastGlobalImprovementRef = useRef<number>(0);
 	const optimizationStartTimeRef = useRef<number>(0);
 	const baselineStartTimeRef = useRef<number>(0);
+	// Track whether we've already recorded savings for the current baseline (avoid double counting if user stops multiple times)
+	const savingsRecordedRef = useRef<boolean>(false);
 	const globalMonitorRef = useRef<number|undefined>(undefined);
 	const totalMaxTimeSecRef = useRef<number>(0);
 	const systemsForRunRef = useRef<string[]>([]);
@@ -336,6 +338,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	const handleBaselineResult = (path:string[], workerShipJumps?:number, workerShipDistance?:number) => {
 		if(baselineDoneRef.current) return;
 		baselineDoneRef.current=true;
+		savingsRecordedRef.current = false; // reset savings recorded flag for new baseline
 		setChampionPath(path);
 		championPathRef.current = path;
 		const expanded = expandPathToGateSequence(path);
@@ -409,6 +412,17 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	const stop = () => {
 		// Invalidate any in-flight worker work by bumping generation
 		generationRef.current += 1;
+		// Before terminating, if we have a baseline and a current champion different from baseline, record savings + opt session time
+		try {
+			if(!savingsRecordedRef.current && baselineDistanceRef.current!==null && championDistance!==null){
+				const saved = baselineDistanceRef.current - championDistance;
+				if(saved > 0){ track({ type:'scout_opt_savings', saved: parseFloat(saved.toFixed(4)) }); savingsRecordedRef.current = true; }
+			}
+			if(optimizationStartTimeRef.current){
+				const ms = Date.now() - optimizationStartTimeRef.current;
+				if(ms>0) track({ type:'scout_opt_session_time', ms });
+			}
+		} catch {}
 		// Ask workers to stop and then terminate them to guarantee halt
 		workersRef.current.forEach(w=> { try { w.postMessage({ type:'stop' }); } catch(e){} });
 		setTimeout(() => { workersRef.current.forEach(w=> { try { w.terminate(); } catch(e){} }); workersRef.current=[]; }, 50);
