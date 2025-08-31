@@ -19,8 +19,16 @@ async function flush(){
   // send sequentially (functions are cheap) to keep server logic simple
   for(const evt of batch){
     try {
-      await fetch('/.netlify/functions/usage-event', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(evt) });
-    } catch { /* ignore */ }
+      const res = await fetch('/.netlify/functions/usage-event', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(evt) });
+      if(!res.ok && typeof window !== 'undefined'){
+        // Development aid: log unknown event types or errors (non-intrusive)
+        if(res.status === 400){
+          console.warn('[usage] event rejected', evt.type);
+        } else {
+          console.warn('[usage] event failed', evt.type, res.status);
+        }
+      }
+    } catch(e) { /* ignore network errors silently */ }
   }
   if(QUEUE.length) scheduleFlush();
 }
