@@ -38,6 +38,24 @@ export function track(evt: UsageEventBase){
   if(QUEUE.length >= MAX_BATCH) flush(); else scheduleFlush();
 }
 
+// Force immediate flush (used for critical end-of-session metrics)
+export async function flushNow(){
+  try { await flush(); } catch { /* ignore */ }
+}
+
+// Send a single critical event immediately; falls back to queued if network fails
+export async function trackImmediate(evt: UsageEventBase){
+  try {
+    const res = await fetch('/.netlify/functions/usage-event', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(evt) });
+    if(!res.ok){
+      // enqueue fallback to try later
+      track(evt);
+    }
+  } catch {
+    track(evt);
+  }
+}
+
 // Page visibility flush for best-effort delivery
 if(typeof window !== 'undefined'){
   let sessionStart = performance.now();
