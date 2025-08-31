@@ -32,6 +32,20 @@ const EVENT_MAP = {
   } }
 };
 
+// Schema versioning for aggregate snapshots.
+// v2: reset incorrect scout_baseline_time sums produced by earlier bug.
+const SCHEMA_VERSION = 2;
+
+function upgradeSnapshot(snapshot){
+  if(!snapshot.version || snapshot.version < SCHEMA_VERSION){
+    if(snapshot.sums){
+      delete snapshot.sums.scout_baseline_time_ms_sum;
+      delete snapshot.sums.scout_baseline_time_count;
+    }
+    snapshot.version = SCHEMA_VERSION;
+  }
+}
+
 const STORE_NAME = process.env.STATS_STORE || 'app-stats';
 
 async function getStatsStore(){
@@ -77,11 +91,11 @@ export async function handler(event){
     if(!EVENT_MAP[type]) return { statusCode:400, body:'Unknown event type' };
   const store = await getStatsStore(); if(!store) return { statusCode:500, body:'Storage unavailable' };
   // Load global snapshot
-  const snapshot = await loadSnapshot(store, 'current');
+  const snapshot = await loadSnapshot(store, 'current'); upgradeSnapshot(snapshot);
   // Load today's daily snapshot
   const day = new Date().toISOString().slice(0,10);
   const dailyKey = 'daily/' + day + '.json';
-  const daily = await loadSnapshot(store, dailyKey);
+  const daily = await loadSnapshot(store, dailyKey); upgradeSnapshot(daily);
   const applied = applyEvent(snapshot, { type, body });
   if(applied) applyEvent(daily, { type, body });
   if(!applied) return { statusCode:400, body:'Rejected' };

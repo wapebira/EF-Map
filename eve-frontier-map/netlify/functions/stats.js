@@ -38,7 +38,8 @@ export async function handler(event){
       }
       history.reverse(); // chronological
     }
-    return { statusCode:200, headers:{ 'Content-Type':'application/json', 'Cache-Control':'no-store' }, body: JSON.stringify({ current: JSON.parse(raw), history }) };
+  const current = JSON.parse(raw);
+  return { statusCode:200, headers:{ 'Content-Type':'application/json', 'Cache-Control':'no-store' }, body: JSON.stringify({ current, history }) };
   } catch(e){
     console.error('stats error', e);
     return { statusCode:500, body:'Internal Error' };
