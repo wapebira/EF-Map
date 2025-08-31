@@ -129,6 +129,51 @@ const StatsPage: React.FC = () => {
             <StatRow label="Avg cinematic time" value={formatDurationAvg(data.sums.cinematic_time_ms_sum, data.sums.cinematic_time_count)} />
             <StatRow label="Avg cinematic share" value={( ()=>{ const cSum=data.sums.cinematic_time_ms_sum; const sSum=data.sums.session_time_ms_sum; if(!cSum||!sSum) return '—'; return ((cSum/sSum)*100).toFixed(1)+'%'; })()} />
           </section>
+          <section style={{ background:'rgba(255,255,255,0.04)', padding:'14px 16px', border:'1px solid rgba(255,255,255,0.12)', borderRadius:8, display:'flex', flexDirection:'column' }}>
+            <h2 style={{ margin:'0 0 8px 0', fontSize:'15px', letterSpacing:'.5px', textTransform:'uppercase', opacity:0.85 }}>UI Scale Distribution</h2>
+            {(()=>{
+              const allowed = [50,60,70,80,90,100,110,120,130];
+              const rows = allowed.map(s=>({ scale:s, count: data.counters['ui_scale_'+s]||0 }));
+              const total = rows.reduce((a,r)=> a+r.count,0);
+              if(!total) return <div style={{ fontSize:12, opacity:.7 }}>No scale selections recorded yet.</div>;
+              return (
+                <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+                  <thead>
+                    <tr style={{ textAlign:'left', background:'rgba(255,255,255,0.05)' }}>
+                      <th style={{ padding:'4px 6px' }}>Scale</th>
+                      <th style={{ padding:'4px 6px' }}>Count</th>
+                      <th style={{ padding:'4px 6px' }}>%</th>
+                      <th style={{ padding:'4px 6px' }}>Bar</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map(r=>{
+                      const pct = (r.count/total)*100;
+                      return (
+                        <tr key={r.scale} style={{ borderTop:'1px solid rgba(255,255,255,0.07)' }}>
+                          <td style={{ padding:'4px 6px' }}>{r.scale}%</td>
+                          <td style={{ padding:'4px 6px', fontVariantNumeric:'tabular-nums' }}>{r.count}</td>
+                          <td style={{ padding:'4px 6px', fontVariantNumeric:'tabular-nums' }}>{pct.toFixed(1)}%</td>
+                          <td style={{ padding:'4px 6px', width:'55%' }}>
+                            <div style={{ background:'rgba(255,255,255,0.08)', height:6, borderRadius:3, position:'relative' }}>
+                              <div style={{ position:'absolute', left:0, top:0, bottom:0, width:pct+'%', background:'var(--accent)', borderRadius:3 }} />
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    <tr style={{ borderTop:'1px solid rgba(255,255,255,0.12)', fontWeight:600 }}>
+                      <td style={{ padding:'4px 6px' }}>Total</td>
+                      <td style={{ padding:'4px 6px', fontVariantNumeric:'tabular-nums' }}>{total}</td>
+                      <td style={{ padding:'4px 6px' }}>100%</td>
+                      <td />
+                    </tr>
+                  </tbody>
+                </table>
+              );
+            })()}
+            <div style={{ marginTop:6, fontSize:10, opacity:.55, lineHeight:1.3 }}>Only the first UI scale selection per session is recorded (initial load counts as a selection).</div>
+          </section>
         </div>
       )}
       <div style={{ marginTop:22, fontSize:'11px', opacity:0.5 }}>Updated: {data? new Date(data.updatedAt).toLocaleString(): '—'}</div>
