@@ -12,3 +12,9 @@
   [headers.values]
     Cache-Control = "public, max-age=31536000, immutable"
     Access-Control-Allow-Origin = "*"
+
+# SPA catch-all so deep links (/stats, etc.) load index.html
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
