@@ -3,12 +3,25 @@ import React, { useEffect, useState } from 'react';
 interface StatsSnapshot { version: number; updatedAt: string; counters: Record<string, number>; sums: Record<string, number>; date?: string }
 interface StatsResponse { current: StatsSnapshot; history: StatsSnapshot[] }
 
+const formatMs = (ms:number) => {
+  if(ms < 2000) return Math.round(ms)+' ms';
+  if(ms < 60000) return (ms/1000).toFixed(ms<10000?2:1)+' s';
+  const totalSec = Math.round(ms/1000);
+  if(totalSec < 3600){
+    const m = Math.floor(totalSec/60);
+    const s = totalSec % 60;
+    return `${m}m ${s.toString().padStart(2,'0')}s`;
+  }
+  const h = Math.floor(totalSec/3600);
+  const rem = totalSec % 3600;
+  const m = Math.floor(rem/60);
+  const s = rem % 60;
+  return `${h}h ${m}m ${s.toString().padStart(2,'0')}s`;
+};
+
 const formatDurationAvg = (sum:number|undefined, count:number|undefined) => {
   if(!sum || !count || count===0) return '—';
-  const ms = sum / count;
-  if(ms < 1000) return ms.toFixed(0)+' ms';
-  const s = ms/1000; if(s < 60) return s.toFixed(2)+' s';
-  const m = s/60; return m.toFixed(2)+' m';
+  return formatMs(sum / count);
 };
 
 const StatRow: React.FC<{ label:string; value: React.ReactNode }>=({label,value})=> (
@@ -117,9 +130,9 @@ const StatsPage: React.FC = () => {
               </thead>
               <tbody>
                 {history.map(h=>{
-                  const avgP2P = h.sums.p2p_route_time_count ? Math.round(h.sums.p2p_route_time_ms_sum / h.sums.p2p_route_time_count) : 0;
-                  const avgBase = h.sums.scout_baseline_time_count ? Math.round(h.sums.scout_baseline_time_ms_sum / h.sums.scout_baseline_time_count) : 0;
-                  const avgSess = h.sums.session_time_count ? Math.round(h.sums.session_time_ms_sum / h.sums.session_time_count) : 0;
+          const avgP2P = h.sums.p2p_route_time_count ? (h.sums.p2p_route_time_ms_sum / h.sums.p2p_route_time_count) : undefined;
+          const avgBase = h.sums.scout_baseline_time_count ? (h.sums.scout_baseline_time_ms_sum / h.sums.scout_baseline_time_count) : undefined;
+          const avgSess = h.sums.session_time_count ? (h.sums.session_time_ms_sum / h.sums.session_time_count) : undefined;
                   return (
                     <tr key={h.date||h.updatedAt} style={{ borderTop:'1px solid rgba(255,255,255,0.07)' }}>
                       <td style={{ padding:'4px 8px', opacity:0.85 }}>{h.date || h.updatedAt.slice(0,10)}</td>
@@ -128,11 +141,11 @@ const StatsPage: React.FC = () => {
                       <td style={{ padding:'4px 8px' }}>{h.counters.scout_optimizations||0}</td>
                       <td style={{ padding:'4px 8px' }}>{h.counters.routes_shared||0}</td>
                       <td style={{ padding:'4px 8px' }}>{h.counters.shared_resolved||0}</td>
-                      <td style={{ padding:'4px 8px' }}>{avgP2P||'—'}</td>
-                      <td style={{ padding:'4px 8px' }}>{avgBase||'—'}</td>
+            <td style={{ padding:'4px 8px' }}>{avgP2P!==undefined? formatMs(avgP2P): '—'}</td>
+            <td style={{ padding:'4px 8px' }}>{avgBase!==undefined? formatMs(avgBase): '—'}</td>
                       <td style={{ padding:'4px 8px' }}>{h.counters.page_loads||0}</td>
                       <td style={{ padding:'4px 8px' }}>{h.counters.cinematic_sessions||0}</td>
-                      <td style={{ padding:'4px 8px' }}>{avgSess||'—'}</td>
+            <td style={{ padding:'4px 8px' }}>{avgSess!==undefined? formatMs(avgSess): '—'}</td>
                     </tr>
                   );
                 })}

@@ -96,6 +96,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	const workerStatusRef = useRef<{ state:'idle'|'baseline'|'running'|'restarting'|'done'; lastImprovement:number }[]>([]);
 	const lastGlobalImprovementRef = useRef<number>(0);
 	const optimizationStartTimeRef = useRef<number>(0);
+	const baselineStartTimeRef = useRef<number>(0);
 	const globalMonitorRef = useRef<number|undefined>(undefined);
 	const totalMaxTimeSecRef = useRef<number>(0);
 	const systemsForRunRef = useRef<string[]>([]);
@@ -276,6 +277,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		if(!collected.length){ alert('No systems collected (check start system / radius / region).'); return; }
 		setMinRequiredShipRange(null); // reset previous requirement banner
 		try { track({ type:'scout_baseline', collectedSystems: collected.length, planetFilterOn: usePlanetCount }); } catch {}
+		baselineStartTimeRef.current = Date.now();
 		systemsForRunRef.current = collected;
 		const signature = collected.slice().sort().join('|');
 		systemSignatureRef.current = signature;
@@ -356,7 +358,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		// End baseline phase so user can immediately continue or copy
 		setIsCalculating(false);
 		appendActivity('Baseline complete. You can Start Optimization to refine the route.');
-		try { track({ type:'scout_baseline_time', ms: Date.now() - lastGlobalImprovementRef.current }); } catch {}
+		try { track({ type:'scout_baseline_time', ms: Date.now() - baselineStartTimeRef.current }); } catch {}
 	};
 
 	const handleOptimizeResult = (path:string[], workerShipJumps?:number, workerShipDistance?:number, workerIndex?:number) => {
