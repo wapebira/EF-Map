@@ -21,8 +21,8 @@ const baseSections: SectionDef[] = [
     title: 'Overview',
     body: (
       <div>
-        <p>EF-map lets you explore the star map, evaluate regions, analyze gate vs ship traversal, and plan efficient routes. Use the left panel to toggle major visualization features and the routing / optimization modules to compute paths.</p>
-        <p>Headings below expand to reveal detailed help. Each heading and nested subsection can be clicked to toggle visibility. You can leave this panel open while interacting with the map.</p>
+  <p>EF-map lets you explore the star map, evaluate regions, analyze gate vs ship traversal, and plan efficient routes. Use the left panel to toggle major visualization features and the routing / optimization modules to compute paths.</p>
+  <p>Headings below expand to reveal detailed help. Each heading and nested subsection can be clicked to toggle visibility. You can leave this panel open while interacting with the map. Keyboard: Focus a section header (Tab) then press Enter or Space to toggle it (same for subsections).</p>
       </div>
     ),
   },
@@ -71,6 +71,7 @@ const baseSections: SectionDef[] = [
             <li>If the share service is temporarily unreachable you&apos;ll fall back to copying a longer full-data URL instead.</li>
             <li>Old short links may display a warning if a future format (<span className="code-inline">r2|</span>, etc.) introduces incompatible changes; the app will attempt graceful migration.</li>
             <li>If you modify the route after creating a link, generate a new link—existing links are immutable snapshots.</li>
+            <li>Links generated before a schema/feature change may auto-upgrade or fall back to the long fragment representation; data is still preserved when possible.</li>
           </ul>
         ),
       },
@@ -114,7 +115,7 @@ const baseSections: SectionDef[] = [
         id: 'dpc-purpose',
         title: 'Purpose',
         content: (
-          <p>Colors stars by their planet count on a green-scale gradient (low = red/orange toward high = green). Use this to locate planet-rich clusters or sparse areas. A legend with five dynamic planet-count ranges (bins) appears below the panels when active; each bin has a checkbox so you can selectively emphasize only the ranges you care about (e.g., show just high-density systems).</p>
+    <p>Colors stars by planet count using a multi-hue gradient (low = red/orange → high = green). Use this to locate planet-rich clusters or sparse areas. A legend with five dynamic planet-count ranges (bins) appears below the panels when active; each bin has a checkbox so you can selectively emphasize only the ranges you care about (e.g., show just high-density systems).</p>
         ),
       },
       {
@@ -128,6 +129,7 @@ const baseSections: SectionDef[] = [
               <li>Some bins unchecked: only checked ranges retain their gradient color.</li>
               <li>All bins unchecked: every star is white (legend still visible so you can re-enable bins quickly).</li>
               <li>Toggling DPC off and back on resets all bins to checked.</li>
+      <li>Re-enabling a bin instantly restores its colors—no recalculation needed.</li>
             </ul>
             <p style={{ marginTop: '6px' }}><strong>Region Highlight synergy:</strong> When Highlight Region is also ON, the gradient (respecting the enabled bins) is applied only inside the highlighted region; systems outside the region remain white regardless of bin state. Disabled bins stay white everywhere.</p>
           </div>
@@ -137,7 +139,7 @@ const baseSections: SectionDef[] = [
         id: 'dpc-with-region',
         title: 'Interaction with Highlight Region',
         content: (
-          <p>With both enabled, the highlighted region preserves the gradient while non-highlighted regions revert to neutral coloring to reduce noise.</p>
+    <p>When both Region Highlight and Display Planet Counts are ON, the gradient (respecting enabled bins) applies only inside the highlighted region; systems outside appear neutral white.</p>
         ),
       },
     ],
@@ -273,6 +275,15 @@ const baseSections: SectionDef[] = [
               </div>
             )
           },
+          {
+            id: 'p2p-import',
+            title: 'Loading Shared Routes',
+            content: (
+              <div>
+                <p>Opening a short link (or full encoded URL) auto-populates the route fields and draws its path. Waypoints / Avoid sets are restored if present. You can immediately copy notes or adjust parameters and re-run.</p>
+              </div>
+            )
+          },
     ],
   },
   {
@@ -293,11 +304,28 @@ const baseSections: SectionDef[] = [
           <p>Define a start system plus either a radius or entire region. Optionally restrict to gate-reachable systems to avoid isolated outliers requiring long ship jumps.</p>
         ),
       },
+          {
+            id: 'scout-planet-filter',
+            title: 'Planet Count Filter',
+            content: (
+              <div>
+                <p>Optionally restrict the collected system set to only those whose planet counts fall inside the currently enabled planet legend bins. This uses the same five dynamic ranges as Display Planet Counts. Changing bins or toggling the filter invalidates any existing route because the optimization search space changes.</p>
+                <ul style={{paddingLeft:'18px',margin:'6px 0'}}>
+                  <li><strong>Focus:</strong> Target high-value (e.g. high-planet) systems for shorter or richer routes.</li>
+                  <li><strong>Adaptive bins:</strong> If global min/max shifts (different region), ranges recompute automatically.</li>
+                  <li><strong>Tip:</strong> Start unfiltered to gauge density; then enable filter to refine.</li>
+                </ul>
+              </div>
+            )
+          },
       {
         id: 'scout-ship-gate',
         title: 'Ship vs Gate Trade Rule',
         content: (
-          <p>The optimizer prioritizes minimizing ship jumps (count & distance) lexicographically before total distance. Parameters control when a shorter ship jump may replace a long gate chain: maximum ship range capability, a trade distance threshold, and minimum gate hops to save.</p>
+            <div>
+              <p>The optimizer prioritizes minimizing ship jumps (count & distance) lexicographically before total distance. Parameters control when a shorter ship jump may replace a long gate chain: maximum ship range capability, a trade distance threshold, and minimum gate hops to save.</p>
+              <p><strong>UI Mapping:</strong> Max Ship Jump Range sets the absolute allowed ship jump length. Ship LY (trade distance) + Min Gate Hops define when a ship jump can substitute a longer gate chain. After changing these significantly, re-run baseline (or restart optimization) for consistent metrics.</p>
+            </div>
         ),
       },
       {
@@ -307,6 +335,15 @@ const baseSections: SectionDef[] = [
           <p>Each worker iteratively mutates and refines the current champion. A global monitor detects per-worker or global stalls (no improvement within timeout) and triggers diversified restarts to escape local minima.</p>
         ),
       },
+          {
+            id: 'scout-logs',
+            title: 'Activity & Worker Logs',
+            content: (
+              <div>
+                <p>Two tabs surface progress: <strong>Activity</strong> (collection counts, baseline metrics, improvements, invalidations, stalls) and <strong>Workers</strong> (per-thread messages, stall restarts, non-improvement iterations). Auto-scroll pauses if you scroll up; scroll back to the bottom to resume. Use Clear to reset the visible tab.</p>
+              </div>
+            )
+          },
       {
         id: 'scout-output',
         title: 'Route Metrics & Notes',
@@ -321,6 +358,18 @@ const baseSections: SectionDef[] = [
           <p>Start with modest radius/region sizes. Tune ship trade parameters after baseline to adjust gate vs ship balance, then re-run baseline if the system set or return toggle changes. Use more workers for larger sets; diminishing returns may appear after CPU saturation.</p>
         ),
       },
+          {
+            id: 'scout-troubleshooting',
+            title: 'Troubleshooting & Errors',
+            content: (
+              <ul style={{paddingLeft:'18px',margin:'6px 0'}}>
+                <li><strong>Baseline error (min ship range):</strong> If a baseline cannot connect all systems with your ship range, a required minimum is shown—raise range then re-run.</li>
+                <li><strong>Route invalidated:</strong> Changes to start system, radius/region toggle, gate-reachable filter, planet filter toggle, or planet bins trigger an invalidation notice.</li>
+                <li><strong>Stalls:</strong> Workers auto-diversify after timeout; increase stall timeout for large sets to reduce churn.</li>
+                <li><strong>No improvement:</strong> Increase workers, reduce system scope, or apply planet filtering to accelerate refinement.</li>
+              </ul>
+            )
+          },
           {
             id: 'scout-route-notes-export',
             title: 'Route Notes Export',
@@ -360,6 +409,17 @@ const baseSections: SectionDef[] = [
             <p>Tip: Keep haze modest for readability; use pause before composing a screenshot; disable aurora if palette clarity is needed.</p>
           </div>
         ),
+      },
+      {
+        id: 'cinematic-controls',
+        title: 'Quick Controls',
+        content: (
+          <ul style={{paddingLeft:'18px',margin:'6px 0'}}>
+            <li><strong>Pause Cam:</strong> Freezes idle drift (and cluster tour motion) until resumed.</li>
+            <li><strong>Labels:</strong> Toggle star name overlays for orientation or annotated captures.</li>
+            <li><strong>Auto Cluster Tour:</strong> Automatically glides to random stars; idle drift pauses during approach and hold phases.</li>
+          </ul>
+        )
       },
       {
         id: 'cinematic-auto-cluster-tour',
