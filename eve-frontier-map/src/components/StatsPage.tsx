@@ -93,9 +93,31 @@ const StatsPage: React.FC = () => {
             <StatRow label="Gate reachable toggle" value={data.counters.gate_reachable||0} />
           </section>
           <section style={{ background:'rgba(255,255,255,0.04)', padding:'14px 16px', border:'1px solid rgba(255,255,255,0.12)', borderRadius:8 }}>
-            <h2 style={{ margin:'0 0 6px 0', fontSize:'15px', letterSpacing:'.5px', textTransform:'uppercase', opacity:0.85 }}>Theme</h2>
+            <h2 style={{ margin:'0 0 6px 0', fontSize:'15px', letterSpacing:'.5px', textTransform:'uppercase', opacity:0.85 }}>UI</h2>
             <StatRow label="Blue theme" value={data.counters.theme_blue||0} />
             <StatRow label="Orange theme" value={data.counters.theme_orange||0} />
+            <StatRow label="Hide UI used" value={data.counters.ui_hide||0} />
+            <StatRow label="Show Distance used" value={data.counters.show_distance||0} />
+            <StatRow label="Help panel opens" value={data.counters.help_opens||0} />
+            <StatRow label="Route copies (total)" value={data.counters.route_copies||0} />
+            <StatRow label="Route copies (P2P)" value={data.counters.route_copy_p2p||0} />
+            <StatRow label="Route copies (Scout)" value={data.counters.route_copy_scout||0} />
+            {(() => {
+              const scaleKeys = Object.keys(data.counters).filter(k=> k.startsWith('ui_scale_'));
+              if(!scaleKeys.length) return <StatRow label="Most common UI scale" value="—" />;
+              let total=0; let topKey=''; let topVal=0;
+              scaleKeys.forEach(k=>{ const v=data.counters[k]||0; total+=v; if(v>topVal){ topVal=v; topKey=k; } });
+              const pct = total? ((topVal/total)*100).toFixed(1)+'%':'—';
+              const scale = topKey.replace('ui_scale_','');
+              return <StatRow label="Most common UI scale" value={`${scale}% (${pct})`} />;
+            })()}
+            {(()=>{
+              const routes = (data.counters.p2p_routes||0) + (data.counters.scout_optimizations||0);
+              if(!routes) return <StatRow label="Route copy rate" value="—" />;
+              const copies = data.counters.route_copies||0;
+              const rate = routes? ((copies/routes)*100).toFixed(1)+'%':'—';
+              return <StatRow label="Route copy rate" value={rate} />;
+            })()}
           </section>
           <section style={{ background:'rgba(255,255,255,0.04)', padding:'14px 16px', border:'1px solid rgba(255,255,255,0.12)', borderRadius:8 }}>
             <h2 style={{ margin:'0 0 6px 0', fontSize:'15px', letterSpacing:'.5px', textTransform:'uppercase', opacity:0.85 }}>Engagement</h2>

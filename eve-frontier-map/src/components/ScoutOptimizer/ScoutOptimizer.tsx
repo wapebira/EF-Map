@@ -804,7 +804,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 
 	const handleCopyPage = (idx:number) => {
 		if(!notePages[idx]) return;
-		navigator.clipboard.writeText(notePages[idx]).then(()=> { setCopyButtonText('Copied!'); setTimeout(()=> setCopyButtonText('Copy'),1500); });
+		navigator.clipboard.writeText(notePages[idx]).then(()=> { setCopyButtonText('Copied!'); setTimeout(()=> setCopyButtonText('Copy'),1500); try { track({ type:'route_copy', source:'scout' }); } catch {} });
 	};
 
 	const improvementPct = baselineDistanceRef.current && championDistance !== null ? ((baselineDistanceRef.current - championDistance)/baselineDistanceRef.current)*100 : 0;

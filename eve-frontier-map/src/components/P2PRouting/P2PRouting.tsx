@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { track } from '../../utils/usage';
 import './P2PRouting.css';
 import AutoCompleteInput from '../AutoCompleteInput/AutoCompleteInput';
 
@@ -352,6 +353,7 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
       navigator.clipboard.writeText(notePages[pageIndex]).then(() => {
         setCopyButtonText('Copied!');
         setTimeout(() => setCopyButtonText('Copy'), 2000);
+        try { track({ type:'route_copy', source:'p2p' }); } catch {}
       }, (err) => {
         console.error('Could not copy text: ', err);
         alert('Failed to copy route to clipboard.');

@@ -164,6 +164,7 @@ function App() {
   const [layoutResetToken, setLayoutResetToken] = useState(0); // layout-only reset for panel positions
   // UI visibility + scaling
   const [hideUI, setHideUI] = useState(false);
+  const uiScaleTrackedRef = useRef(false); // ensure only first ui_scale per session
   const uiScaleStops = [0.5,0.6,0.7,0.8,0.9,1.0,1.1,1.2,1.3];
   const [uiScale, setUiScale] = useState(1); // active scale (applies only to main panels + toolbar)
   const [highlightedSystem, setHighlightedSystem] = useState<SolarSystem | null>(null);
@@ -179,6 +180,14 @@ function App() {
   // Five legend bins (dynamic ranges) active flags; default all true when DPC enabled
   const [planetBinsActive, setPlanetBinsActive] = useState<boolean[]>([true, true, true, true, true]);
   const [showDistance, setShowDistance] = useState(false);
+  // Track theme selections (already counted once per change)
+  useEffect(()=>{ track({ type: accentIsBlue ? 'theme_blue' : 'theme_orange' }); }, [accentIsBlue]);
+  // First UI scale per session (captures default or first user change only)
+  useEffect(()=>{ if(!uiScaleTrackedRef.current){ uiScaleTrackedRef.current = true; try { track({ type:'ui_scale', scale: Math.round(uiScale*100) }); } catch {} } }, [uiScale]);
+  // Hide UI toggle – count only when enabling
+  useEffect(()=>{ if(hideUI){ try { track({ type:'ui_hide' }); } catch {} } }, [hideUI]);
+  // Show Distance – count only when user turns it on
+  useEffect(()=>{ if(showDistance){ try { track({ type:'show_distance' }); } catch {} } }, [showDistance]);
   const [minPlanets, setMinPlanets] = useState(0);
   const [maxPlanets, setMaxPlanets] = useState(0);
   // Cinematic mode active flag (enables scene post-processing & behavior changes)
