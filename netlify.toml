@@ -22,3 +22,10 @@
     # One year; safe because we'll rename (e.g. map_data.v2.db) when contents change.
     Cache-Control = "public, max-age=31536000, immutable"
     Access-Control-Allow-Origin = "*"
+
+# Single Page App: route all non-file paths (except functions/assets) to index.html
+# Ensures deep links like /stats load the React app instead of a 404.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
