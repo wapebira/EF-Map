@@ -82,6 +82,16 @@ const StatsPage: React.FC = () => {
             <StatRow label="Blue theme" value={data.counters.theme_blue||0} />
             <StatRow label="Orange theme" value={data.counters.theme_orange||0} />
           </section>
+          <section style={{ background:'rgba(255,255,255,0.04)', padding:'14px 16px', border:'1px solid rgba(255,255,255,0.12)', borderRadius:8 }}>
+            <h2 style={{ margin:'0 0 6px 0', fontSize:'15px', letterSpacing:'.5px', textTransform:'uppercase', opacity:0.85 }}>Engagement</h2>
+            <StatRow label="Page loads" value={data.counters.page_loads||0} />
+            <StatRow label="Cinematic sessions" value={data.counters.cinematic_sessions||0} />
+            <StatRow label="Cinematic enters" value={data.counters.cinematic_enters||0} />
+            <StatRow label="Cinematic usage rate" value={( ()=>{ const pl=data.counters.page_loads||0; const cs=data.counters.cinematic_sessions||0; if(!pl) return '—'; return ((cs/pl)*100).toFixed(1)+'%'; })()} />
+            <StatRow label="Avg session length" value={formatDurationAvg(data.sums.session_time_ms_sum, data.sums.session_time_count)} />
+            <StatRow label="Avg cinematic time" value={formatDurationAvg(data.sums.cinematic_time_ms_sum, data.sums.cinematic_time_count)} />
+            <StatRow label="Avg cinematic share" value={( ()=>{ const cSum=data.sums.cinematic_time_ms_sum; const sSum=data.sums.session_time_ms_sum; if(!cSum||!sSum) return '—'; return ((cSum/sSum)*100).toFixed(1)+'%'; })()} />
+          </section>
         </div>
       )}
       <div style={{ marginTop:22, fontSize:'11px', opacity:0.5 }}>Updated: {data? new Date(data.updatedAt).toLocaleString(): '—'}</div>
@@ -100,12 +110,16 @@ const StatsPage: React.FC = () => {
                   <th style={{ padding:'6px 8px' }}>Resolved</th>
                   <th style={{ padding:'6px 8px' }}>Avg P2P ms</th>
                   <th style={{ padding:'6px 8px' }}>Avg Baseline ms</th>
+                  <th style={{ padding:'6px 8px' }}>PgLoads</th>
+                  <th style={{ padding:'6px 8px' }}>CinSess</th>
+                  <th style={{ padding:'6px 8px' }}>AvgSess ms</th>
                 </tr>
               </thead>
               <tbody>
                 {history.map(h=>{
                   const avgP2P = h.sums.p2p_route_time_count ? Math.round(h.sums.p2p_route_time_ms_sum / h.sums.p2p_route_time_count) : 0;
                   const avgBase = h.sums.scout_baseline_time_count ? Math.round(h.sums.scout_baseline_time_ms_sum / h.sums.scout_baseline_time_count) : 0;
+                  const avgSess = h.sums.session_time_count ? Math.round(h.sums.session_time_ms_sum / h.sums.session_time_count) : 0;
                   return (
                     <tr key={h.date||h.updatedAt} style={{ borderTop:'1px solid rgba(255,255,255,0.07)' }}>
                       <td style={{ padding:'4px 8px', opacity:0.85 }}>{h.date || h.updatedAt.slice(0,10)}</td>
@@ -116,6 +130,9 @@ const StatsPage: React.FC = () => {
                       <td style={{ padding:'4px 8px' }}>{h.counters.shared_resolved||0}</td>
                       <td style={{ padding:'4px 8px' }}>{avgP2P||'—'}</td>
                       <td style={{ padding:'4px 8px' }}>{avgBase||'—'}</td>
+                      <td style={{ padding:'4px 8px' }}>{h.counters.page_loads||0}</td>
+                      <td style={{ padding:'4px 8px' }}>{h.counters.cinematic_sessions||0}</td>
+                      <td style={{ padding:'4px 8px' }}>{avgSess||'—'}</td>
                     </tr>
                   );
                 })}

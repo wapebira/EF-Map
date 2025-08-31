@@ -314,6 +314,12 @@ function App() {
   const routeLinesRef = useRef<THREE.Group | null>(null); // New ref for route lines
   const cinematicModeRef = useRef(false);
   useEffect(()=>{ cinematicModeRef.current = cinematicMode; }, [cinematicMode]);
+  // Instrument cinematic mode enter/exit (bridge to usage.ts instrumentation)
+  useEffect(()=>{
+    if(typeof window !== 'undefined' && (window as any).__efSetCinematic){
+      try { (window as any).__efSetCinematic(cinematicMode); } catch {}
+    }
+  }, [cinematicMode]);
   // Track which module produced the currently drawn route ('scout' or 'p2p')
   const routeSourceRef = useRef<'scout'|'p2p'|null>(null);
   const clearCurrentRoute = useCallback(() => {
