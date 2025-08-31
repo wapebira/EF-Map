@@ -10,9 +10,9 @@
   NODE_VERSION = "20"
 
 [functions]
-  # Functions directory path must be relative to repository root (publish is relative to base).
-  # Reverting to full path so Netlify detects functions.
-  directory = "eve-frontier-map/netlify/functions"
+  # With [build].base set to \"eve-frontier-map\", the functions directory path is resolved *relative to that base*.
+  # Previous value incorrectly prefixed the base again (eve-frontier-map/netlify/functions), so functions were not deployed.
+  directory = "netlify/functions"
   node_bundler = "esbuild"
 
 # Cache the large SQLite bundle aggressively (versioned via filename when changed).

@@ -29,7 +29,13 @@ const StatsPage: React.FC = () => {
   const load = async () => {
     try {
       const res = await fetch('/.netlify/functions/stats');
-      if(!res.ok) throw new Error('Failed');
+      if(!res.ok){
+        if(res.status === 404){
+          setError('Stats function 404 (likely not deployed). Check Netlify functions directory config.');
+          return;
+        }
+        throw new Error('Failed');
+      }
       const json = await res.json();
       setData(json);
       setError('');
