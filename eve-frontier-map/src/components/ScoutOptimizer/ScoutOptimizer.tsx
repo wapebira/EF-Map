@@ -788,8 +788,32 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		return ()=> window.removeEventListener('resize', check);
 	},[]);
 
+	// Auto-scroll panel to bottom on status log updates so newest messages always visible.
+	const panelRef = useRef<HTMLDivElement|null>(null);
+	useEffect(()=>{
+		if(panelRef.current){
+			panelRef.current.scrollTop = panelRef.current.scrollHeight;
+		}
+	}, [statusLog]);
+
+	// Log planet filter specifics when bins or toggle change (after initial mount)
+	const lastPlanetSigRef = useRef<string>('');
+	useEffect(()=>{
+		if(!planetBinsActive) return;
+		const sig = (usePlanetCount? '1':'0') + planetBinsActive.map(b=>b?1:0).join('');
+		if(sig === lastPlanetSigRef.current) return;
+		lastPlanetSigRef.current = sig;
+		const collected = collectSystems();
+		if(usePlanetCount){
+			log(`Planet filter updated: ${collected.length} systems (active bins: ${planetBinsActive.map((b,i)=> b?i+1:'' ).filter(Boolean).join(',')||'none'})`);
+		}else{
+			log(`Planet filter off: ${collected.length} systems available.`);
+		}
+	// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [usePlanetCount, planetBinsActive]);
+
 	const panel = (
-		<div className={`scout-optimizer-panel ${effectiveHideInputs? 'hide-inputs':''}`}>
+		<div ref={panelRef} className={`scout-optimizer-panel ${effectiveHideInputs? 'hide-inputs':''}`}>
 					<div style={{display:'flex', gap:'10px', flexWrap:'wrap', alignItems:'center'}}>
 						<label style={{fontSize:'0.7rem', display:'flex', gap:4, alignItems:'center'}}>
 							<input type="checkbox" checked={effectiveHideInputs} onChange={(e)=> setHideInputsPref(e.target.checked)} /> Hide Inputs
