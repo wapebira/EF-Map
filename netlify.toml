@@ -1,5 +1,7 @@
-#[ Netlify root configuration ]
-# Ensures builds run from the front-end app subdirectory and functions are detected.
+#[ Netlify root configuration - NOT ACTIVE ]
+# NOTE: Netlify is currently using the config at eve-frontier-map/netlify.toml (see build logs: "Config file" path).
+# This root file is retained only for reference. Update the inner file for deploy-impacting changes.
+# (If you want to consolidate later, delete the inner file and adapt this one.)
 
 [build]
   base = "eve-frontier-map"
