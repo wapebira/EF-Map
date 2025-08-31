@@ -28,6 +28,58 @@ const baseSections: SectionDef[] = [
     ),
   },
   {
+    id: 'usage-stats',
+    title: 'Usage Stats (Anonymous)',
+    subsections: [
+      {
+        id: 'usage-purpose',
+        title: 'What It Is',
+        content: (
+          <p>The Usage Stats page (/stats) shows anonymous aggregate counters and timing averages gathered since deployment. It helps prioritize roadmap work (e.g. which routing modes or optimizer features are actually used) and track performance over time.</p>
+        )
+      },
+      {
+        id: 'usage-privacy',
+        title: 'Privacy & Data Collected',
+        content: (
+          <div>
+            <p><strong>No personal, account, IP, session, or identifier data</strong> is collected. Events are simple counter or summed-duration increments (e.g. “p2p_route”, milliseconds spent in cinematic mode). There is no per-user profiling or storage of raw event streams—only aggregated totals and sum/count pairs.</p>
+            <ul style={{ paddingLeft: '18px', margin: '6px 0' }}>
+              <li>Counts: routes computed, baselines, optimizations, shares created/resolved, feature toggles (waypoints, avoid, planet filter, return-to-start), theme selections, cinematic usage.</li>
+              <li>Timings (averages derive from sum & count): P2P route duration, baseline generation, optimization session, session length, time spent in cinematic mode.</li>
+              <li>Daily rollups: simple per-day snapshots (last 7 days table) to track trends—still aggregate only.</li>
+            </ul>
+            <p>If a metric is unused it simply stays at 0. No hidden fields exist beyond what is displayed.</p>
+          </div>
+        )
+      },
+      {
+        id: 'usage-key-metrics',
+        title: 'Key Metrics Explained',
+        content: (
+          <div>
+            <ul style={{ paddingLeft: '18px', margin: '6px 0' }}>
+              <li><strong>P2P routes / Scout baselines / Optimizations:</strong> Feature adoption & optimization follow‑through.</li>
+              <li><strong>Shares created vs resolved:</strong> How often generated short links are actually opened.</li>
+              <li><strong>Baseline / P2P times:</strong> Average compute speed (lower is better).</li>
+              <li><strong>Cinematic sessions & usage rate:</strong> Portion of visits engaging the cinematic presentation.</li>
+              <li><strong>Avg session length & cinematic time:</strong> Engagement depth; cinematic share (%) shows how much time users spend in that mode.</li>
+              <li><strong>Feature flag counters (waypoints, avoid, planet filter, etc.):</strong> Which route planning tools see real-world use.</li>
+            </ul>
+            <p>Spikes or regressions (e.g. longer baseline time) can signal performance issues; low adoption may justify UI tweaks or future removal.</p>
+          </div>
+        )
+      },
+      {
+        id: 'usage-history',
+        title: 'Historical Rollups',
+        content: (
+          <p>Daily rollups store one aggregate JSON per day (no user granularity). The stats page shows a 7‑day table for trend scanning. Older days may be pruned or condensed in the future if size becomes a concern.</p>
+        )
+      }
+    ]
+  },
+  {
     id: 'share-route',
     title: 'Share Route (Short Link)',
     subsections: [
