@@ -10,9 +10,10 @@
   NODE_VERSION = "20"
 
 [functions]
-  # With [build].base set to \"eve-frontier-map\", the functions directory path is resolved *relative to that base*.
-  # Previous value incorrectly prefixed the base again (eve-frontier-map/netlify/functions), so functions were not deployed.
-  directory = "netlify/functions"
+  # IMPORTANT: The functions directory path here is relative to the repository root (monorepo pattern).
+  # Because our functions actually live inside the subdirectory specified by [build].base, we must include that prefix.
+  # Reference: https://docs.netlify.com/configure-builds/file-based-configuration/#functions
+  directory = "eve-frontier-map/netlify/functions"
   node_bundler = "esbuild"
 
 # Cache the large SQLite bundle aggressively (versioned via filename when changed).
