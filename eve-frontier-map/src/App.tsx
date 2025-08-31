@@ -3053,6 +3053,9 @@ function App() {
         initialOptimizeFor={persistedOptimize}
         initialAlgorithm={persistedAlgo}
         onRoutingParamChange={(jump,opt,algo)=> { setRoutingPrefs(jump,opt,algo); lastP2PParamsRef.current.jump=jump; lastP2PParamsRef.current.optimize=opt; lastP2PParamsRef.current.algo=algo; setPersistedJump(jump); setPersistedOptimize(opt); setPersistedAlgo(algo); }}
+  planetBinsActive={planetBinsActive}
+  minPlanets={minPlanets}
+  maxPlanets={maxPlanets}
               />
             </PanelDrawer>
           )}

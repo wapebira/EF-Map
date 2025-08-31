@@ -32,6 +32,10 @@ interface RoutingPanelProps {
   initialOptimizeFor?: 'fuel' | 'jumps';
   initialAlgorithm?: 'astar' | 'dijkstra';
   onRoutingParamChange?:(jump:number,opt:'fuel'|'jumps',algo:'astar'|'dijkstra')=>void;
+  // Planet legend filtering props
+  planetBinsActive?: boolean[];
+  minPlanets?: number;
+  maxPlanets?: number;
 }
 
 const RoutingPanel: React.FC<RoutingPanelProps> = (props) => {
@@ -86,6 +90,9 @@ const RoutingPanel: React.FC<RoutingPanelProps> = (props) => {
           onBaselineRoute={props.onBaselineRoute}
           onOptimizedRoute={props.onOptimizedRoute}
           onClearRoute={props.onScoutClearRoute}
+          planetBinsActive={props.planetBinsActive}
+          minPlanets={props.minPlanets}
+          maxPlanets={props.maxPlanets}
         />
       )}
     </div>
