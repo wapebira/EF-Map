@@ -25,6 +25,8 @@ import { encodeShare, decodeShare } from './utils/share';
 import { createShortShare, fetchShortShare } from './utils/shortShare';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import DonateCryptoModal from './components/DonateCryptoModal';
+import StatsPage from './components/StatsPage';
+import { track } from './utils/usage';
 
 // Small referral badge component with copy-to-clipboard
 const ReferralBadge: React.FC = () => {
@@ -33,6 +35,7 @@ const ReferralBadge: React.FC = () => {
   const handleCopy = () => {
     navigator.clipboard.writeText(code).then(()=>{
       setCopied(true);
+      try { track({ type:'referral_click' }); } catch {}
       setTimeout(()=> setCopied(false), 1600);
     }).catch(()=>{/* ignore */});
   };
@@ -46,6 +49,7 @@ const ReferralBadge: React.FC = () => {
         className="ef-referral-code"
         style={{ textDecoration:'underline', cursor:'pointer' }}
         aria-label="Open referral link in new tab"
+        onClick={()=>{ try { track({ type:'referral_click' }); } catch {} }}
       >
         {code}
       </a>
@@ -139,10 +143,16 @@ let SELECTED_STAR_COLOR = new THREE.Color(0xff4c26); // Will track accent (orang
 const REGION_OUTLINE_COLOR = new THREE.Color(0x00aaff); // Shared blue for region outlines
 
 function App() {
+  // Lightweight standalone stats page rendering (no full router). If path is /stats, render stats component only.
+  if (typeof window !== 'undefined' && window.location.pathname === '/stats') {
+    return <StatsPage />;
+  }
   // Synchronous initial prefs load for reliable first render
   const initialPrefsRef = useRef(getPrefs());
   // Accent color (persisted)
   const [accentIsBlue, setAccentIsBlue] = useState(initialPrefsRef.current.accent === 'blue');
+  // Theme usage tracking
+  useEffect(()=>{ track({ type: accentIsBlue ? 'theme_blue' : 'theme_orange' }); }, [accentIsBlue]);
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [loadingStatus, setLoadingStatus] = useState('Initializing...');
   const [isLoaded, setIsLoaded] = useState(false);
@@ -781,7 +791,8 @@ function App() {
         }).catch(()=>{/* ignore */});
       }
     } else {
-      apply(decodeShare(hash));
+  apply(decodeShare(hash));
+  try { track({ type:'share_resolved' }); } catch {}
     }
   }, [isLoaded, mapData, selectSystem]);
 
@@ -902,6 +913,13 @@ function App() {
         setIsCalculatingRoute(false);
         setRouteProgress(null);
         setRouteResult({ path: fullPath });
+        try {
+          const elapsed = routeCalcStartRef.current ? Date.now() - routeCalcStartRef.current : undefined;
+          track({ type:'p2p_route' });
+          if(elapsed!==undefined) track({ type:'p2p_route_time', ms: elapsed });
+          // Feature flags snapshot (matches server dynamic keys logic)
+          track({ type:'feature_flags', waypoints: waypoints.length>0, avoid: avoidSystems.length>0, waypointOpt: waypointOptimize, returnToStart, gateReachable: false });
+        } catch {}
         if(fullPath.length && mapData){
           const sysMap = Object.fromEntries(Object.values(mapData.solar_systems).map(s=> [s.name.toLowerCase(), s]));
           const startSystem = sysMap[fullPath[0].toLowerCase()]; if(startSystem) selectSystem(startSystem);
@@ -925,7 +943,7 @@ function App() {
         } else {
           fullPath.push(...path);
         }
-        segIndex++; runNext();
+  segIndex++; runNext();
       };
       routingWorkerRef.current.postMessage({
         systems: mapData.solar_systems,
@@ -2919,6 +2937,7 @@ function App() {
           try {
             setShareFeedback('Saving...');
             const id = await createShortShare(encoded);
+            try { track({ type:'share_created' }); } catch {}
             const shortUrl = window.location.origin + window.location.pathname + window.location.search + '#s=' + id;
             await navigator.clipboard.writeText(shortUrl);
             setShareFeedback('Copied');

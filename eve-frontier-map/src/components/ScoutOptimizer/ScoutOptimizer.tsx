@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState, useEffect } from 'react';
+import { track } from '../../utils/usage';
 // Persistence of ship max range removed per request (always starts at default)
 import '../P2PRouting/P2PRouting.css';
 import './ScoutOptimizer.css';
@@ -233,6 +234,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 				else if(data.type==='baselineResult') { if(data.generation===undefined || data.generation===generationRef.current) handleBaselineResult(data.path, data.shipJumps, data.shipDistance); }
 				else if(data.type==='baselineError') { if(data.generation===undefined || data.generation===generationRef.current){
 					appendActivity(`Baseline error: ${data.reason}`);
+					try { track({ type:'baseline_error' }); } catch {}
 					setIsCalculating(false);
 					if(data.minRequiredShipRange!==undefined){ setMinRequiredShipRange(data.minRequiredShipRange); }
 				} }
@@ -273,6 +275,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		const collected = collectSystems();
 		if(!collected.length){ alert('No systems collected (check start system / radius / region).'); return; }
 		setMinRequiredShipRange(null); // reset previous requirement banner
+		try { track({ type:'scout_baseline', collectedSystems: collected.length, planetFilterOn: usePlanetCount }); } catch {}
 		systemsForRunRef.current = collected;
 		const signature = collected.slice().sort().join('|');
 		systemSignatureRef.current = signature;
@@ -353,6 +356,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		// End baseline phase so user can immediately continue or copy
 		setIsCalculating(false);
 		appendActivity('Baseline complete. You can Start Optimization to refine the route.');
+		try { track({ type:'scout_baseline_time', ms: Date.now() - lastGlobalImprovementRef.current }); } catch {}
 	};
 
 	const handleOptimizeResult = (path:string[], workerShipJumps?:number, workerShipDistance?:number, workerIndex?:number) => {
@@ -418,6 +422,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		setIsCalculating(true);
 		setHideInputsPref(true); // auto-hide inputs (but allow user to re-show if they uncheck)
 		appendActivity(`Starting optimization: max ${total||'∞'}s, global stall ${stall||'∞'}s on ${workersRef.current.length||1} workers.`);
+		try { track({ type:'scout_opt_start' }); } catch {}
 		optimizationStartTimeRef.current = Date.now();
 		lastGlobalImprovementRef.current = Date.now();
 		totalMaxTimeSecRef.current = total;
@@ -444,7 +449,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 						if(championPathRef.current){
 							const diversified = diversifyPath(championPathRef.current);
 							ws.state='restarting';
-							appendWorker(`Worker ${idx+1} stalled. Diversifying & restarting.`); appendActivity(`Worker ${idx+1} stalled (restart).`);
+							appendWorker(`Worker ${idx+1} stalled. Diversifying & restarting.`); appendActivity(`Worker ${idx+1} stalled (restart).`); try { track({ type:'stall_restart' }); } catch {}
 							workersRef.current[idx].postMessage({ type:'stop' }); // ensure old loop halts if any
 							// Relaunch after short timeout to allow stop to process
 							setTimeout(()=>{
@@ -458,7 +463,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 				// Global stall detection
 				if((now - lastGlobalImprovementRef.current)/1000 >= stall){
 					if(championPathRef.current){
-						appendActivity('Global stall detected. Diversifying all workers.');
+						appendActivity('Global stall detected. Diversifying all workers.'); try { track({ type:'stall_restart' }); } catch {}
 						const diversifiedGlobal = diversifyPath(championPathRef.current);
 						workerStatusRef.current.forEach(ws=>{ ws.state='restarting'; ws.lastImprovement=Date.now(); });
 						workersRef.current.forEach((w,idx)=>{

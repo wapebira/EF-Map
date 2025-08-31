@@ -23,6 +23,7 @@ const baseSections: SectionDef[] = [
       <div>
   <p>EF-map lets you explore the star map, evaluate regions, analyze gate vs ship traversal, and plan efficient routes. Use the left panel to toggle major visualization features and the routing / optimization modules to compute paths.</p>
   <p>Headings below expand to reveal detailed help. Each heading and nested subsection can be clicked to toggle visibility. You can leave this panel open while interacting with the map. Keyboard: Focus a section header (Tab) then press Enter or Space to toggle it (same for subsections).</p>
+    <p style={{ marginTop:'10px', fontSize:'13px' }}>Public aggregate feature usage metrics (anonymous) are available on the <a href="/stats" target="_blank" rel="noopener noreferrer" style={{ textDecoration:'underline' }}>Usage Stats</a> page (opens in a new tab).</p>
       </div>
     ),
   },
