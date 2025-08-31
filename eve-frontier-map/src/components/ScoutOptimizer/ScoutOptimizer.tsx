@@ -50,7 +50,15 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	const [shipTradeDistance, setShipTradeDistance] = useState('0');
 	const [minGateHopsSaved, setMinGateHopsSaved] = useState('999');
 	const [workerCount, setWorkerCount] = useState(()=> Math.max(1,(navigator.hardwareConcurrency||4)-2).toString());
-	const [statusLog, setStatusLog] = useState<string[]>([]);
+	// Logs split: activity (high-level events) & worker (per-thread progress)
+	const [activityLog, setActivityLog] = useState<string[]>([]);
+	const [workerLog, setWorkerLog] = useState<string[]>([]);
+	const appendActivity = useCallback((line:string)=> setActivityLog(l=> [...l.slice(-400), line]),[]);
+	const appendWorker = useCallback((line:string)=> setWorkerLog(l=> [...l.slice(-600), line]),[]);
+	// Active log tab (UI)
+	const [activeLogTab, setActiveLogTab] = useState<'activity'|'workers'>('activity');
+	// Alias used by existing calls (maps to activity log)
+	const log = useCallback((line:string)=> appendActivity(line),[appendActivity]);
 	const [isCalculating, setIsCalculating] = useState(false);
 	// User toggles
 	const [hideInputsPref, setHideInputsPref] = useState(false); // persists after optimization
@@ -112,7 +120,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		setShipTradeDistance('0');
 		setMinGateHopsSaved('999');
 		setWorkerCount(Math.max(1,(navigator.hardwareConcurrency||4)-2).toString());
-		setStatusLog([]);
+		setActivityLog([]); setWorkerLog([]); setActiveLogTab('activity');
 		setIsCalculating(false);
 		setHideInputsPref(false);
 		setChampionPath(null); championPathRef.current=null;
@@ -141,7 +149,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	const stargatesArray = mapData ? Object.values(mapData.stargates) : [];
 	const gatesBySource: {[id:number]: number[]} = {}; stargatesArray.forEach(g=>{ if(!gatesBySource[g.source_system_id]) gatesBySource[g.source_system_id]=[]; gatesBySource[g.source_system_id].push(g.destination_system_id); if(!gatesBySource[g.destination_system_id]) gatesBySource[g.destination_system_id]=[]; gatesBySource[g.destination_system_id].push(g.source_system_id); });
 
-	const log = useCallback((line:string)=> setStatusLog(l=> [...l.slice(-400), line]),[]);
+// (legacy alias replaced above)
 
 	const collectSystems = useCallback(()=>{
 		if(!mapData) return [] as string[];
@@ -214,7 +222,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 				const data = e.data;
 				if(data.type==='ready') { 
 					readyCountRef.current += 1;
-					log(`Worker ${i+1} ready`);
+					appendActivity(`Worker ${i+1} ready`); appendWorker(`Worker ${i+1} ready`);
 					if(pendingBaselineRef.current && readyCountRef.current === parseInt(workerCount,10)) {
 						const pb = pendingBaselineRef.current; pendingBaselineRef.current=null;
 						const baselineParams = { maxShipRange: parseFloat(shipMaxRange)||0, shipTradeDistance: parseFloat(shipTradeDistance)||0, minGateHopsSaved: parseInt(minGateHopsSaved,10)||0 };
@@ -224,19 +232,19 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 				}
 				else if(data.type==='baselineResult') { if(data.generation===undefined || data.generation===generationRef.current) handleBaselineResult(data.path, data.shipJumps, data.shipDistance); }
 				else if(data.type==='baselineError') { if(data.generation===undefined || data.generation===generationRef.current){
-					log(`Baseline error: ${data.reason}`);
+					appendActivity(`Baseline error: ${data.reason}`);
 					setIsCalculating(false);
 					if(data.minRequiredShipRange!==undefined){ setMinRequiredShipRange(data.minRequiredShipRange); }
 				} }
 				else if(data.type==='optimizeResult') { if(data.generation===undefined || data.generation===generationRef.current) handleOptimizeResult(data.path, data.shipJumps, data.shipDistance, i); }
 				else if(data.type==='optimizeDone') { if(data.generation===undefined || data.generation===generationRef.current){ /* per-worker done handled in future enhancement */ } }
-				else if(data.type==='progress') { log(`Worker ${i+1}: ${data.message}`); }
-				else if(data.type==='stopped') { log(`Worker ${i+1} stopped.`); }
+				else if(data.type==='progress') { appendWorker(`Worker ${i+1}: ${data.message}`); }
+				else if(data.type==='stopped') { appendWorker(`Worker ${i+1} stopped.`); }
 			};
 			workersRef.current.push(w);
 			workerStatusRef.current.push({ state:'idle', lastImprovement: Date.now() });
 		}
-	},[workerCount, log, shipMaxRange, shipTradeDistance, minGateHopsSaved]);
+	},[workerCount, appendActivity, appendWorker, shipMaxRange, shipTradeDistance, minGateHopsSaved]);
 
 	const broadcast = (msg:unknown) => { workersRef.current.forEach(w=> w.postMessage(msg as any)); };
 
@@ -273,7 +281,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		ensureWorkers();
 		setIsCalculating(true);
 		baselineDoneRef.current=false;
-		log(`Collected ${collected.length} systems. Gate pref: ship≤${shipTradeDistance}LY replaces ≥${minGateHopsSaved} gate hops (max ship range ${shipMaxRange}LY).`);
+		appendActivity(`Collected ${collected.length} systems. Gate pref: ship≤${shipTradeDistance}LY replaces ≥${minGateHopsSaved} gate hops (max ship range ${shipMaxRange}LY).`);
 		broadcast({ type:'init', systems: mapData.solar_systems, stargates: mapData.stargates });
 		pendingBaselineRef.current = { start: startSystem, systems: collected, returnToStart };
 		// If workers already ready (zero restart scenario) fire immediately
@@ -340,11 +348,11 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 			setChampionShipDistance(shipMetrics.shipDistance);
 		}
 		baselineDistanceRef.current = distVal; // store baseline distance for improvement stats
-		log(`Baseline distance: ${distVal.toFixed(2)} LY over ${path.length} systems`);
+		appendActivity(`Baseline distance: ${distVal.toFixed(2)} LY over ${path.length} systems`);
 		try { onBaselineRoute && onBaselineRoute(expanded); } catch(e) { /* ignore */ }
 		// End baseline phase so user can immediately continue or copy
 		setIsCalculating(false);
-		log('Baseline complete. You can Start Optimization to refine the route.');
+		appendActivity('Baseline complete. You can Start Optimization to refine the route.');
 	};
 
 	const handleOptimizeResult = (path:string[], workerShipJumps?:number, workerShipDistance?:number, workerIndex?:number) => {
@@ -355,14 +363,14 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		setChampionPath(prev=>{
 			const candDist = computeRouteDistance(path);
 			if(!prev){
-				if(workerIndex!==undefined) log(`Worker ${workerIndex+1} produced initial candidate.`);
+				if(workerIndex!==undefined){ appendActivity(`Worker ${workerIndex+1} produced initial candidate.`); appendWorker(`Worker ${workerIndex+1} produced initial candidate.`); }
 				setChampionDistance(candDist);
 				if(workerShipJumps!==undefined && workerShipDistance!==undefined){
 					setChampionShipJumps(workerShipJumps); setChampionShipDistance(workerShipDistance);
 				} else {
 					const m = computeShipMetrics(path); setChampionShipJumps(m.shipJumps); setChampionShipDistance(m.shipDistance);
 				}
-				log(`Initial optimization candidate distance: ${candDist.toFixed(2)} LY (${path.length} systems)`);
+				appendActivity(`Initial optimization candidate distance: ${candDist.toFixed(2)} LY (${path.length} systems)`);
 				championPathRef.current = path;
 				const expanded = expandPathToGateSequence(path); setChampionDisplayPath(expanded); championDisplayPathRef.current = expanded;
 				lastGlobalImprovementRef.current = Date.now();
@@ -376,13 +384,13 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 				} else {
 					const m = computeShipMetrics(path); setChampionShipJumps(m.shipJumps); setChampionShipDistance(m.shipDistance);
 				}
-				log(`Improved champion${workerIndex!==undefined?` (worker ${workerIndex+1})`:''}: ${currentDist.toFixed(2)} -> ${candDist.toFixed(2)} LY`);
+				appendActivity(`Improved champion${workerIndex!==undefined?` (worker ${workerIndex+1})`:''}: ${currentDist.toFixed(2)} -> ${candDist.toFixed(2)} LY`); if(workerIndex!==undefined) appendWorker(`Worker ${workerIndex+1} improved: ${currentDist.toFixed(2)} -> ${candDist.toFixed(2)} LY`);
 				championPathRef.current = path;
 				const expanded = expandPathToGateSequence(path); setChampionDisplayPath(expanded); championDisplayPathRef.current = expanded;
 				lastGlobalImprovementRef.current = Date.now();
 				return path;
 			} else {
-				log(`No improvement (candidate ${candDist.toFixed(2)} LY, champion ${currentDist.toFixed(2)} LY)`);
+				appendWorker(`No improvement (candidate ${candDist.toFixed(2)} LY, champion ${currentDist.toFixed(2)} LY)`);
 				return prev;
 			}
 		});
@@ -401,7 +409,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		workerStatusRef.current.forEach(ws=> ws.state='done');
 		setIsCalculating(false);
 		if(globalMonitorRef.current!==undefined){ clearInterval(globalMonitorRef.current); globalMonitorRef.current=undefined; }
-		log('Stopped.');
+		appendActivity('Stopped.');
 	};
 
 	const startContinuousOptimization = () => {
@@ -409,7 +417,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		const total = parseFloat(maxOptimizeTime)||0; const stall = parseFloat(stallTimeout)||0;
 		setIsCalculating(true);
 		setHideInputsPref(true); // auto-hide inputs (but allow user to re-show if they uncheck)
-		log(`Starting optimization: max ${total||'∞'}s, global stall ${stall||'∞'}s on ${workersRef.current.length||1} workers.`);
+		appendActivity(`Starting optimization: max ${total||'∞'}s, global stall ${stall||'∞'}s on ${workersRef.current.length||1} workers.`);
 		optimizationStartTimeRef.current = Date.now();
 		lastGlobalImprovementRef.current = Date.now();
 		totalMaxTimeSecRef.current = total;
@@ -436,7 +444,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 						if(championPathRef.current){
 							const diversified = diversifyPath(championPathRef.current);
 							ws.state='restarting';
-							log(`Worker ${idx+1} stalled. Diversifying & restarting.`);
+							appendWorker(`Worker ${idx+1} stalled. Diversifying & restarting.`); appendActivity(`Worker ${idx+1} stalled (restart).`);
 							workersRef.current[idx].postMessage({ type:'stop' }); // ensure old loop halts if any
 							// Relaunch after short timeout to allow stop to process
 							setTimeout(()=>{
@@ -450,7 +458,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 				// Global stall detection
 				if((now - lastGlobalImprovementRef.current)/1000 >= stall){
 					if(championPathRef.current){
-						log('Global stall detected. Diversifying all workers.');
+						appendActivity('Global stall detected. Diversifying all workers.');
 						const diversifiedGlobal = diversifyPath(championPathRef.current);
 						workerStatusRef.current.forEach(ws=>{ ws.state='restarting'; ws.lastImprovement=Date.now(); });
 						workersRef.current.forEach((w,idx)=>{
@@ -484,7 +492,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	useEffect(()=>{
 		if(!baselineDoneRef.current) { lastReturnToStartRef.current = returnToStart; return; }
 		if(lastReturnToStartRef.current !== returnToStart && championPath && !isCalculating){
-			log(`Return to Start toggled ${returnToStart ? 'ON' : 'OFF'}; recalculating baseline.`);
+			appendActivity(`Return to Start toggled ${returnToStart ? 'ON' : 'OFF'}; recalculating baseline.`);
 			baselineDoneRef.current = false;
 			setIsCalculating(true);
 			pendingBaselineRef.current = { start: startSystem, systems: systemsForRunRef.current, returnToStart };
@@ -504,9 +512,9 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		if(!effectiveOpen) return;
 		const { all, filtered } = systemStats;
 		if(useRegion){
-			log(`Region selection: ${filtered}${gateReachableOnly?` (gate-filtered from ${all})`:''}`);
+			appendActivity(`Region selection: ${filtered}${gateReachableOnly?` (gate-filtered from ${all})`:''}`);
 		}else{
-			log(`Radius selection: ${filtered}${gateReachableOnly?` (gate-filtered from ${all})`:''}`);
+			appendActivity(`Radius selection: ${filtered}${gateReachableOnly?` (gate-filtered from ${all})`:''}`);
 		}
 	// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [useRegion, gateReachableOnly, startSystem, radius, effectiveOpen, usePlanetCount, planetBinsActive]);
@@ -528,7 +536,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 			if(prev.usePlanetCount !== usePlanetCount) reasons.push('planet filter toggle');
 			const newBinsSig = planetBinsActive ? planetBinsActive.map(b=>b?1:0).join('') : '';
 			if(prev.binsSig && prev.binsSig !== newBinsSig) reasons.push('planet bins');
-			log(`System set changed (${reasons.join(', ')||'parameters changed'}). Previous route invalidated.`);
+			appendActivity(`System set changed (${reasons.join(', ')||'parameters changed'}). Previous route invalidated.`);
 			setChampionPath(null);
 			championPathRef.current = null;
 			setChampionDisplayPath(null);
@@ -770,7 +778,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 			const m = computeShipMetrics(championPath);
 			setChampionShipJumps(m.shipJumps);
 			setChampionShipDistance(m.shipDistance);
-			log(`Ship/gate preference changed. Recomputed ship metrics: ${m.shipJumps} jumps, ${m.shipDistance.toFixed(2)} LY.`);
+			appendActivity(`Ship/gate preference changed. Recomputed ship metrics: ${m.shipJumps} jumps, ${m.shipDistance.toFixed(2)} LY.`);
 		}
 	// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [shipMaxRange, shipTradeDistance, minGateHopsSaved]);
@@ -788,13 +796,19 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		return ()=> window.removeEventListener('resize', check);
 	},[]);
 
-	// Auto-scroll panel to bottom on status log updates so newest messages always visible.
-	const panelRef = useRef<HTMLDivElement|null>(null);
+	// Dual log auto-scroll with user pause detection
+	const activityRef = useRef<HTMLDivElement|null>(null);
+	const workersRefDiv = useRef<HTMLDivElement|null>(null);
+	const [autoScrollActivity, setAutoScrollActivity] = useState(true);
+	const [autoScrollWorkers, setAutoScrollWorkers] = useState(true);
 	useEffect(()=>{
-		if(panelRef.current){
-			panelRef.current.scrollTop = panelRef.current.scrollHeight;
-		}
-	}, [statusLog]);
+		const el = activityRef.current; if(!el) return; const onScroll=()=>{ const atBottom = (el.scrollHeight - el.scrollTop - el.clientHeight) < 20; setAutoScrollActivity(atBottom); }; el.addEventListener('scroll',onScroll); return ()=> el.removeEventListener('scroll',onScroll);
+	},[]);
+	useEffect(()=>{
+		const el = workersRefDiv.current; if(!el) return; const onScroll=()=>{ const atBottom = (el.scrollHeight - el.scrollTop - el.clientHeight) < 20; setAutoScrollWorkers(atBottom); }; el.addEventListener('scroll',onScroll); return ()=> el.removeEventListener('scroll',onScroll);
+	},[]);
+	useEffect(()=>{ if(autoScrollActivity && activityRef.current){ activityRef.current.scrollTop = activityRef.current.scrollHeight; } },[activityLog, autoScrollActivity]);
+	useEffect(()=>{ if(autoScrollWorkers && workersRefDiv.current){ workersRefDiv.current.scrollTop = workersRefDiv.current.scrollHeight; } },[workerLog, autoScrollWorkers]);
 
 	// Log planet filter specifics when bins or toggle change (after initial mount)
 	const lastPlanetSigRef = useRef<string>('');
@@ -804,16 +818,13 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		if(sig === lastPlanetSigRef.current) return;
 		lastPlanetSigRef.current = sig;
 		const collected = collectSystems();
-		if(usePlanetCount){
-			log(`Planet filter updated: ${collected.length} systems (active bins: ${planetBinsActive.map((b,i)=> b?i+1:'' ).filter(Boolean).join(',')||'none'})`);
-		}else{
-			log(`Planet filter off: ${collected.length} systems available.`);
-		}
+		if(usePlanetCount){ appendActivity(`Planet filter updated: ${collected.length} systems (active bins: ${planetBinsActive.map((b,i)=> b?i+1:'' ).filter(Boolean).join(',')||'none'})`); }
+		else { appendActivity(`Planet filter off: ${collected.length} systems available.`); }
 	// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [usePlanetCount, planetBinsActive]);
 
 	const panel = (
-		<div ref={panelRef} className={`scout-optimizer-panel ${effectiveHideInputs? 'hide-inputs':''}`}>
+		<div className={`scout-optimizer-panel ${effectiveHideInputs? 'hide-inputs':''}`}>
 					<div style={{display:'flex', gap:'10px', flexWrap:'wrap', alignItems:'center'}}>
 						<label style={{fontSize:'0.7rem', display:'flex', gap:4, alignItems:'center'}}>
 							<input type="checkbox" checked={effectiveHideInputs} onChange={(e)=> setHideInputsPref(e.target.checked)} /> Hide Inputs
@@ -928,7 +939,20 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 							)}
 						</div>
 					)}
-					<div className="scout-status" aria-live="polite">{statusLog.join('\n')}</div>
+					{/* Logs Section with Tabs */}
+					<div style={{display:'flex', flexDirection:'column', gap:4}}>
+						<div style={{display:'flex', gap:6}}>
+							<button type="button" onClick={()=> setActiveLogTab('activity')} className={`scout-button ${activeLogTab==='activity'?'':'calculating'}`} style={{padding:'4px 8px', fontSize:'0.6rem'}} disabled={activeLogTab==='activity'}>Activity</button>
+							<button type="button" onClick={()=> setActiveLogTab('workers')} className={`scout-button ${activeLogTab==='workers'?'':'calculating'}`} style={{padding:'4px 8px', fontSize:'0.6rem'}} disabled={activeLogTab==='workers'}>Workers</button>
+						</div>
+						<div ref={activeLogTab==='activity'?activityRef:workersRefDiv} className="scout-status" aria-live={activeLogTab==='activity'? 'polite': undefined}>
+							{(activeLogTab==='activity'? activityLog : workerLog).join('\n')}
+						</div>
+						<div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+							<small style={{opacity:0.6, fontSize:'0.55rem'}}>{activeLogTab==='activity'? (autoScrollActivity?'Auto-scroll':'Paused (scroll up)') : (autoScrollWorkers?'Auto-scroll':'Paused (scroll up)')}</small>
+							<button type="button" onClick={()=> { if(activeLogTab==='activity'){ setActivityLog([]); } else { setWorkerLog([]);} }} style={{background:'rgba(0,0,0,0.3)', border:'1px solid #444', color:'#ccc', fontSize:'0.55rem', padding:'2px 6px', cursor:'pointer'}}>Clear</button>
+						</div>
+					</div>
 		</div>
 	);
 
