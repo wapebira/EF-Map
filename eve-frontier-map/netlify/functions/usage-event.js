@@ -40,10 +40,12 @@ async function getStatsStore(){
   return store;
 }
 
-async function loadSnapshot(store){
-  let raw = await store.get('current');
+async function loadSnapshot(store, key){
+  let raw = await store.get(key);
   if(raw===null){
-    return { version:1, updatedAt:new Date().toISOString(), counters:{}, sums:{} };
+    if(key === 'current') return { version:1, updatedAt:new Date().toISOString(), counters:{}, sums:{} };
+    // daily snapshot
+    return { version:1, date: key.startsWith('daily/') ? key.slice(6) : undefined, updatedAt:new Date().toISOString(), counters:{}, sums:{} };
   }
   try { return JSON.parse(raw); } catch { return { version:1, updatedAt:new Date().toISOString(), counters:{}, sums:{} }; }
 }
@@ -67,12 +69,18 @@ export async function handler(event){
     const { type } = body;
     if(typeof type !== 'string'){ return { statusCode:400, body:'Missing type' }; }
     if(!EVENT_MAP[type]) return { statusCode:400, body:'Unknown event type' };
-    const store = await getStatsStore(); if(!store) return { statusCode:500, body:'Storage unavailable' };
-    // Simple optimistic update without ETag (low collision likelihood). If needed, add retry logic later.
-    const snapshot = await loadSnapshot(store);
-    const applied = applyEvent(snapshot, { type, body });
-    if(!applied) return { statusCode:400, body:'Rejected' };
-    await store.set('current', JSON.stringify(snapshot));
+  const store = await getStatsStore(); if(!store) return { statusCode:500, body:'Storage unavailable' };
+  // Load global snapshot
+  const snapshot = await loadSnapshot(store, 'current');
+  // Load today's daily snapshot
+  const day = new Date().toISOString().slice(0,10);
+  const dailyKey = 'daily/' + day + '.json';
+  const daily = await loadSnapshot(store, dailyKey);
+  const applied = applyEvent(snapshot, { type, body });
+  if(applied) applyEvent(daily, { type, body });
+  if(!applied) return { statusCode:400, body:'Rejected' };
+  await store.set('current', JSON.stringify(snapshot));
+  await store.set(dailyKey, JSON.stringify(daily));
     return { statusCode:204 };
   } catch(e){
     console.error('usage-event error', e);

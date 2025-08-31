@@ -1,11 +1,7 @@
 import React, { useEffect, useState } from 'react';
 
-interface StatsSnapshot {
-  version: number;
-  updatedAt: string;
-  counters: Record<string, number>;
-  sums: Record<string, number>;
-}
+interface StatsSnapshot { version: number; updatedAt: string; counters: Record<string, number>; sums: Record<string, number>; date?: string }
+interface StatsResponse { current: StatsSnapshot; history: StatsSnapshot[] }
 
 const formatDurationAvg = (sum:number|undefined, count:number|undefined) => {
   if(!sum || !count || count===0) return '—';
@@ -24,11 +20,12 @@ const StatRow: React.FC<{ label:string; value: React.ReactNode }>=({label,value}
 
 const StatsPage: React.FC = () => {
   const [data, setData] = useState<StatsSnapshot|null>(null);
+  const [history, setHistory] = useState<StatsSnapshot[]>([]);
   const [error, setError] = useState<string>('');
 
   const load = async () => {
     try {
-      const res = await fetch('/.netlify/functions/stats');
+  const res = await fetch('/.netlify/functions/stats?history=7');
       if(!res.ok){
         if(res.status === 404){
           setError('Stats function 404 (likely not deployed). Check Netlify functions directory config.');
@@ -36,8 +33,9 @@ const StatsPage: React.FC = () => {
         }
         throw new Error('Failed');
       }
-      const json = await res.json();
-      setData(json);
+  const json: StatsResponse = await res.json();
+  setData(json.current);
+  setHistory(json.history||[]);
       setError('');
     } catch(e){ setError('Unable to load stats'); }
   };
@@ -50,7 +48,7 @@ const StatsPage: React.FC = () => {
       <p style={{ margin:'0 0 18px 0', fontSize:'14px', lineHeight:1.5, opacity:0.85 }}>Anonymous aggregate counters since deployment. Updates every ~15s. No personal or identifying data is tracked—only feature adoption and performance averages to guide roadmap decisions.</p>
       {error && <div style={{ color:'#f66', marginBottom:12 }}>{error}</div>}
       {!data && !error && <div>Loading...</div>}
-      {data && (
+  {data && (
         <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(260px,1fr))', gap:'18px' }}>
           <section style={{ background:'rgba(255,255,255,0.04)', padding:'14px 16px', border:'1px solid rgba(255,255,255,0.12)', borderRadius:8 }}>
             <h2 style={{ margin:'0 0 6px 0', fontSize:'15px', letterSpacing:'.5px', textTransform:'uppercase', opacity:0.85 }}>Routes</h2>
@@ -87,6 +85,45 @@ const StatsPage: React.FC = () => {
         </div>
       )}
       <div style={{ marginTop:22, fontSize:'11px', opacity:0.5 }}>Updated: {data? new Date(data.updatedAt).toLocaleString(): '—'}</div>
+      {history.length>0 && (
+        <div style={{ marginTop:30 }}>
+          <h2 style={{ fontSize:'16px', margin:'0 0 8px 0' }}>Last 7 Days</h2>
+          <div style={{ overflowX:'auto' }}>
+            <table style={{ borderCollapse:'collapse', width:'100%', fontSize:'12px' }}>
+              <thead>
+                <tr style={{ textAlign:'left', background:'rgba(255,255,255,0.05)' }}>
+                  <th style={{ padding:'6px 8px' }}>Date</th>
+                  <th style={{ padding:'6px 8px' }}>P2P</th>
+                  <th style={{ padding:'6px 8px' }}>Baselines</th>
+                  <th style={{ padding:'6px 8px' }}>Opt Starts</th>
+                  <th style={{ padding:'6px 8px' }}>Shares</th>
+                  <th style={{ padding:'6px 8px' }}>Resolved</th>
+                  <th style={{ padding:'6px 8px' }}>Avg P2P ms</th>
+                  <th style={{ padding:'6px 8px' }}>Avg Baseline ms</th>
+                </tr>
+              </thead>
+              <tbody>
+                {history.map(h=>{
+                  const avgP2P = h.sums.p2p_route_time_count ? Math.round(h.sums.p2p_route_time_ms_sum / h.sums.p2p_route_time_count) : 0;
+                  const avgBase = h.sums.scout_baseline_time_count ? Math.round(h.sums.scout_baseline_time_ms_sum / h.sums.scout_baseline_time_count) : 0;
+                  return (
+                    <tr key={h.date||h.updatedAt} style={{ borderTop:'1px solid rgba(255,255,255,0.07)' }}>
+                      <td style={{ padding:'4px 8px', opacity:0.85 }}>{h.date || h.updatedAt.slice(0,10)}</td>
+                      <td style={{ padding:'4px 8px' }}>{h.counters.p2p_routes||0}</td>
+                      <td style={{ padding:'4px 8px' }}>{h.counters.scout_baselines||0}</td>
+                      <td style={{ padding:'4px 8px' }}>{h.counters.scout_optimizations||0}</td>
+                      <td style={{ padding:'4px 8px' }}>{h.counters.routes_shared||0}</td>
+                      <td style={{ padding:'4px 8px' }}>{h.counters.shared_resolved||0}</td>
+                      <td style={{ padding:'4px 8px' }}>{avgP2P||'—'}</td>
+                      <td style={{ padding:'4px 8px' }}>{avgBase||'—'}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
