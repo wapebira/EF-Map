@@ -23,15 +23,21 @@ interface ScoutOptimizerProps {
 	resetToken?: number; // external reset for clearing all inputs
 	selectedSystemName?: string; // externally selected system (map click / global search)
 	embedded?: boolean; // omit toggle wrapper and always show content
+	// Planet count legend filtering inputs
+	planetBinsActive?: boolean[]; // length 5, all true by default in parent
+	minPlanets?: number; // global min planet count (for bin calc)
+	maxPlanets?: number; // global max planet count
 }
 
 const MAX_SYSTEMS_WARNING = 300;
 
-const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, onReturnToStartChange, onBaselineRoute, onOptimizedRoute, onClearRoute, invalidateToken, importedRoutePath, resetToken, selectedSystemName, embedded = false }: ScoutOptimizerProps) => {
+const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, onReturnToStartChange, onBaselineRoute, onOptimizedRoute, onClearRoute, invalidateToken, importedRoutePath, resetToken, selectedSystemName, embedded = false, planetBinsActive, minPlanets, maxPlanets }: ScoutOptimizerProps) => {
 	const [startSystem, setStartSystem] = useState('');
 	const [radius, setRadius] = useState('50');
 	const [useRegion, setUseRegion] = useState(false);
 	const [gateReachableOnly, setGateReachableOnly] = useState(false);
+	// Apply planet count legend filter (user toggle). When active, collected systems restricted to active legend bins.
+	const [usePlanetCount, setUsePlanetCount] = useState(false);
 	// Continuous optimization controls
 	const [maxOptimizeTime, setMaxOptimizeTime] = useState('60');
 	const [stallTimeout, setStallTimeout] = useState('10');
@@ -70,7 +76,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	// Track last system selection signature
 	const systemSignatureRef = useRef<string>('');
 	// Track previous selection parameter values for reason logging
-	const prevParamsRef = useRef({ startSystem:'', radius:'', useRegion:false, gateReachableOnly:false });
+	const prevParamsRef = useRef({ startSystem:'', radius:'', useRegion:false, gateReachableOnly:false, usePlanetCount:false, binsSig:'' });
 	const [copyButtonText, setCopyButtonText] = useState('Copy');
 	// Note export (paged like P2P)
 	const [notePages, setNotePages] = useState<string[]>([]);
@@ -98,6 +104,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		setRadius('50');
 		setUseRegion(false);
 		setGateReachableOnly(false);
+		setUsePlanetCount(false);
 		setMaxOptimizeTime('60');
 		setStallTimeout('10');
 		setMinRequiredShipRange(null);
@@ -154,8 +161,19 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 			while(q.length){ const cur=q.shift()!; for(const nxt of gatesBySource[cur]||[]){ if(!reachable.has(nxt)){ reachable.add(nxt); q.push(nxt);} } }
 			candidates = candidates.filter(c=> reachable.has(c.id));
 		}
+		// Planet count bin filtering (if enabled and bins provided)
+		if(usePlanetCount && planetBinsActive && planetBinsActive.length===5 && minPlanets!==undefined && maxPlanets!==undefined && maxPlanets>=minPlanets){
+			const range = maxPlanets - minPlanets;
+			const steps = 5;
+			candidates = candidates.filter(c=>{
+				if(range===0){ return planetBinsActive[0]; }
+				const ratio = (c.planets - minPlanets)/ (range||1);
+				let bin = Math.floor(ratio*steps); if(bin>=steps) bin=steps-1; if(bin<0) bin=0;
+				return !!planetBinsActive[bin];
+			});
+		}
 		return candidates.map(c=>c.name);
-	},[mapData, startSystem, radius, useRegion, gateReachableOnly, gatesBySource]);
+	},[mapData, startSystem, radius, useRegion, gateReachableOnly, gatesBySource, usePlanetCount, planetBinsActive, minPlanets, maxPlanets]);
 
 	const effectiveOpen = open || embedded;
 	const systemsWarning = effectiveOpen ? (collectSystems().length > MAX_SYSTEMS_WARNING) : false;
@@ -172,8 +190,15 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 			while(q.length){ const cur=q.shift()!; for(const nxt of gatesBySource[cur]||[]){ if(!reachable.has(nxt)){ reachable.add(nxt); q.push(nxt);} } }
 			candidates = candidates.filter(c=> reachable.has(c.id));
 		}
+		if(usePlanetCount && planetBinsActive && planetBinsActive.length===5 && minPlanets!==undefined && maxPlanets!==undefined && maxPlanets>=minPlanets){
+			const range = maxPlanets - minPlanets; const steps=5;
+			candidates = candidates.filter(c=>{
+				if(range===0) return planetBinsActive[0];
+				const ratio=(c.planets-minPlanets)/(range||1); let bin=Math.floor(ratio*steps); if(bin>=steps) bin=steps-1; if(bin<0) bin=0; return !!planetBinsActive[bin];
+			});
+		}
 		return { all, filtered: candidates.length };
-	},[mapData, startSystem, radius, useRegion, gateReachableOnly, gatesBySource]);
+	},[mapData, startSystem, radius, useRegion, gateReachableOnly, gatesBySource, usePlanetCount, planetBinsActive, minPlanets, maxPlanets]);
 
 	const systemStats = effectiveOpen ? collectSystemsStats() : { all:0, filtered:0 };
 
@@ -484,7 +509,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 			log(`Radius selection: ${filtered}${gateReachableOnly?` (gate-filtered from ${all})`:''}`);
 		}
 	// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [useRegion, gateReachableOnly, startSystem, radius, effectiveOpen]);
+	}, [useRegion, gateReachableOnly, startSystem, radius, effectiveOpen, usePlanetCount, planetBinsActive]);
 
 	// Detect dataset changes after a baseline/optimization has been produced
 	useEffect(()=>{
@@ -500,6 +525,9 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 			if(prev.radius !== radius) reasons.push('radius');
 			if(prev.useRegion !== useRegion) reasons.push('region/radius mode');
 			if(prev.gateReachableOnly !== gateReachableOnly) reasons.push('gate-reachable filter');
+			if(prev.usePlanetCount !== usePlanetCount) reasons.push('planet filter toggle');
+			const newBinsSig = planetBinsActive ? planetBinsActive.map(b=>b?1:0).join('') : '';
+			if(prev.binsSig && prev.binsSig !== newBinsSig) reasons.push('planet bins');
 			log(`System set changed (${reasons.join(', ')||'parameters changed'}). Previous route invalidated.`);
 			setChampionPath(null);
 			championPathRef.current = null;
@@ -509,9 +537,9 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 			baselineDoneRef.current=false;
 			setDatasetChanged(true);
 			try { onClearRoute && onClearRoute(); } catch(e){/* ignore */}
-		}
-		prevParamsRef.current = { startSystem, radius, useRegion, gateReachableOnly };
-	}, [startSystem, radius, useRegion, gateReachableOnly, collectSystems, championPath, isCalculating, log]);
+			}
+			prevParamsRef.current = { startSystem, radius, useRegion, gateReachableOnly, usePlanetCount, binsSig: planetBinsActive ? planetBinsActive.map(b=>b?1:0).join('') : '' };
+		}, [startSystem, radius, useRegion, gateReachableOnly, collectSystems, championPath, isCalculating, log, usePlanetCount, planetBinsActive]);
 
 	// ---- Distance utilities (gate-aware) ----
 	const systemCacheByName = useRef<{[n:string]:SolarSystem}>({});
@@ -781,6 +809,9 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 					{(!effectiveHideInputs) && <div className="scout-input-row">
 							<label><input type="checkbox" checked={gateReachableOnly} onChange={e=> setGateReachableOnly(e.target.checked)} /> Only Gate-Reachable From Start</label>
 						</div>}
+							{(!effectiveHideInputs) && <div className="scout-input-row">
+									<label><input type="checkbox" checked={usePlanetCount} onChange={e=> setUsePlanetCount(e.target.checked)} /> Apply Planet Count Filter</label>
+								</div>}
 					{(!effectiveHideInputs) && <div className="scout-input-row">
 						<label>Optimize Time / Stall Timeout (s)</label>
 						<div style={{ display:'flex', gap:'6px' }}>
@@ -807,7 +838,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 						<label><input type="checkbox" checked={returnToStart} onChange={e=> onReturnToStartChange(e.target.checked)} /> Return to Start</label>
 						</div>}
 					{systemsWarning && <div className="scout-warning">Warning: Large system set may impact performance ({collectSystems().length}).</div>}
-					<div className="scout-systems-count">Systems collected: {systemStats.filtered}{gateReachableOnly && systemStats.filtered!==systemStats.all ? ` (filtered from ${systemStats.all})` : ''}</div>
+					<div className="scout-systems-count">Systems collected: {systemStats.filtered}{(gateReachableOnly || usePlanetCount) && systemStats.filtered!==systemStats.all ? ` (filtered from ${systemStats.all})` : ''}</div>
 					{minRequiredShipRange!==null && (
 						<div className="scout-warning">Minimum ship range required to connect all systems: {minRequiredShipRange.toFixed(2)} LY</div>
 					)}
