@@ -20,7 +20,7 @@ import PlanetLegendPanel from './components/Planets/PlanetLegendPanel';
 import './components/layout/panelLayout.css';
 import AutoCompleteInput from './components/AutoCompleteInput/AutoCompleteInput';
 import HelpPanel from './components/HelpPanel/HelpPanel';
-import { loadPrefs, setAccent, setOpenPanels as persistOpenPanels, setRoutingPrefs, fullReset, getPrefs, softReset } from './utils/prefs';
+import { loadPrefs, setAccent, setOpenPanels as persistOpenPanels, setRoutingPrefs, fullReset, getPrefs, softReset, setUiScale as persistUiScale } from './utils/prefs';
 import { encodeShare, decodeShare } from './utils/share';
 import { createShortShare, fetchShortShare } from './utils/shortShare';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
@@ -164,8 +164,10 @@ function App() {
   const [layoutResetToken, setLayoutResetToken] = useState(0); // layout-only reset for panel positions
   // UI visibility + scaling
   const [hideUI, setHideUI] = useState(false);
+  const uiScaleTrackedRef = useRef(false); // ensure only first ui_scale per session
   const uiScaleStops = [0.5,0.6,0.7,0.8,0.9,1.0,1.1,1.2,1.3];
-  const [uiScale, setUiScale] = useState(1); // active scale (applies only to main panels + toolbar)
+  const initialScale = (():number=>{ const p=getPrefs(); return (p as any).uiScale && typeof (p as any).uiScale==='number'? (p as any).uiScale : 1; })();
+  const [uiScale, setUiScale] = useState(initialScale); // active scale (applies only to main panels + toolbar)
   const [highlightedSystem, setHighlightedSystem] = useState<SolarSystem | null>(null);
   const [lastSelectedSystemName, setLastSelectedSystemName] = useState<string>(''); // propagate to modules
   const [lastDestinationSystemName, setLastDestinationSystemName] = useState<string>(''); // right-click destination propagation
@@ -179,6 +181,17 @@ function App() {
   // Five legend bins (dynamic ranges) active flags; default all true when DPC enabled
   const [planetBinsActive, setPlanetBinsActive] = useState<boolean[]>([true, true, true, true, true]);
   const [showDistance, setShowDistance] = useState(false);
+  // Track theme selections (already counted once per change)
+  useEffect(()=>{ track({ type: accentIsBlue ? 'theme_blue' : 'theme_orange' }); }, [accentIsBlue]);
+  // First UI scale per session (captures default or first user change only) & persist changes
+  useEffect(()=>{
+    persistUiScale(uiScale);
+    if(!uiScaleTrackedRef.current){ uiScaleTrackedRef.current = true; try { track({ type:'ui_scale', scale: Math.round(uiScale*100) }); } catch {} }
+  }, [uiScale]);
+  // Hide UI toggle – count only when enabling
+  useEffect(()=>{ if(hideUI){ try { track({ type:'ui_hide' }); } catch {} } }, [hideUI]);
+  // Show Distance – count only when user turns it on
+  useEffect(()=>{ if(showDistance){ try { track({ type:'show_distance' }); } catch {} } }, [showDistance]);
   const [minPlanets, setMinPlanets] = useState(0);
   const [maxPlanets, setMaxPlanets] = useState(0);
   // Cinematic mode active flag (enables scene post-processing & behavior changes)

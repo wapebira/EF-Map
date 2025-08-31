@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import { track } from '../../utils/usage';
 import './HelpPanel.css';
 
 interface HelpPanelProps {
@@ -496,6 +497,7 @@ const baseSections: SectionDef[] = [
 
 const HelpPanel: React.FC<HelpPanelProps> = ({ accentIsBlue, supportExpandRequestId = 0, supportContent }) => {
   const [open, setOpen] = useState(false);
+  const openedTrackedRef = useRef(false);
   // Start with all sections collapsed by default (no auto-open Overview)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [expandedSub, setExpandedSub] = useState<Record<string, boolean>>({});
@@ -654,7 +656,10 @@ const HelpPanel: React.FC<HelpPanelProps> = ({ accentIsBlue, supportExpandReques
         className="help-toggle-button"
         aria-expanded={open}
         aria-controls="help-panel"
-        onClick={() => setOpen(o => !o)}
+        onClick={() => setOpen(o => {
+          const next = !o; if(next && !openedTrackedRef.current){ openedTrackedRef.current = true; try { track({ type:'help_open' }); } catch {} }
+          return next;
+        })}
       >
         {open ? 'Close Help' : 'Help'}
       </button>

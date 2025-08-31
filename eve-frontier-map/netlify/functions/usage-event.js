@@ -15,6 +15,20 @@ const EVENT_MAP = {
   p2p_route_time: { sum: { key: 'p2p_route_time_ms_sum', countKey: 'p2p_route_time_count', valueField: 'ms' } },
   scout_baseline_time: { sum: { key: 'scout_baseline_time_ms_sum', countKey: 'scout_baseline_time_count', valueField: 'ms' } },
   scout_opt_session_time: { sum: { key: 'scout_opt_session_time_ms_sum', countKey: 'scout_opt_session_time_count', valueField: 'ms' } },
+  // Scout optimization lightyears saved (baseline distance - optimized distance)
+  scout_opt_savings: { sum: { key: 'scout_opt_savings_ly_sum', countKey: 'scout_opt_savings_count', valueField: 'saved' } },
+  // UI / interaction metrics
+  ui_hide: { counters: ['ui_hide'] },
+  show_distance: { counters: ['show_distance'] },
+  help_open: { counters: ['help_opens'] },
+  route_copy: { counters: ['route_copies'], extraCounters: (b)=> {
+    const arr=[]; if(b.source==='p2p') arr.push('route_copy_p2p'); else if(b.source==='scout') arr.push('route_copy_scout'); return arr; } },
+  ui_scale: { countersDynamic: (b)=> {
+    const allowed=[50,60,70,80,90,100,110,120,130];
+    const s = Number(b.scale);
+    if(!allowed.includes(s)) return [];
+    return ['ui_scale_'+s];
+  } },
   // New engagement / cinematic events
   page_load: { counters: ['page_loads'] },
   session_time: { sum: { key: 'session_time_ms_sum', countKey: 'session_time_count', valueField: 'ms' } },
