@@ -99,6 +99,23 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	const baselineStartTimeRef = useRef<number>(0);
 	// Track whether we've already recorded savings for the current baseline (avoid double counting if user stops multiple times)
 	const savingsRecordedRef = useRef<boolean>(false);
+	// Helper to record optimization savings + session time once (used on Stop, unmount, visibility hidden, or time budget)
+	const recordOptimizationMetrics = useCallback(()=>{
+		try {
+			// Savings (only if we actually improved beyond baseline and not yet recorded)
+			if(!savingsRecordedRef.current && baselineDistanceRef.current!==null && championDistance!==null){
+				const saved = baselineDistanceRef.current - championDistance;
+				if(saved > 0){ track({ type:'scout_opt_savings', saved: parseFloat(saved.toFixed(4)) }); savingsRecordedRef.current = true; }
+			}
+			// Session time (optimization phase) partial or full
+			if(optimizationStartTimeRef.current){
+				const ms = Date.now() - optimizationStartTimeRef.current;
+				if(ms>0) track({ type:'scout_opt_session_time', ms });
+				// Zero out so we don't double count if called again without restart
+				optimizationStartTimeRef.current = 0;
+			}
+		} catch {}
+	}, [championDistance]);
 	const globalMonitorRef = useRef<number|undefined>(undefined);
 	const totalMaxTimeSecRef = useRef<number>(0);
 	const systemsForRunRef = useRef<string[]>([]);
@@ -413,16 +430,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		// Invalidate any in-flight worker work by bumping generation
 		generationRef.current += 1;
 		// Before terminating, if we have a baseline and a current champion different from baseline, record savings + opt session time
-		try {
-			if(!savingsRecordedRef.current && baselineDistanceRef.current!==null && championDistance!==null){
-				const saved = baselineDistanceRef.current - championDistance;
-				if(saved > 0){ track({ type:'scout_opt_savings', saved: parseFloat(saved.toFixed(4)) }); savingsRecordedRef.current = true; }
-			}
-			if(optimizationStartTimeRef.current){
-				const ms = Date.now() - optimizationStartTimeRef.current;
-				if(ms>0) track({ type:'scout_opt_session_time', ms });
-			}
-		} catch {}
+		recordOptimizationMetrics();
 		// Ask workers to stop and then terminate them to guarantee halt
 		workersRef.current.forEach(w=> { try { w.postMessage({ type:'stop' }); } catch(e){} });
 		setTimeout(() => { workersRef.current.forEach(w=> { try { w.terminate(); } catch(e){} }); workersRef.current=[]; }, 50);
@@ -804,10 +812,26 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [shipMaxRange, shipTradeDistance, minGateHopsSaved]);
 
-	// Cleanup on unmount
+	// Cleanup on unmount (record any outstanding metrics if user navigates away mid-optimization)
 	useEffect(()=>{
-		return ()=>{ if(globalMonitorRef.current!==undefined){ clearInterval(globalMonitorRef.current); globalMonitorRef.current=undefined; } };
+		return ()=>{ 
+			if(globalMonitorRef.current!==undefined){ clearInterval(globalMonitorRef.current); globalMonitorRef.current=undefined; }
+			// If optimization was running, capture partial savings/session
+			if(isCalculating || optimizationStartTimeRef.current){ recordOptimizationMetrics(); }
+		};
+	// eslint-disable-next-line react-hooks/exhaustive-deps
 	},[]);
+
+	// Page/tab hide handler (best-effort capture without requiring explicit Stop)
+	useEffect(()=>{
+		const visHandler = ()=>{
+			if(document.visibilityState === 'hidden'){
+				if(isCalculating || optimizationStartTimeRef.current){ recordOptimizationMetrics(); }
+			}
+		};
+		document.addEventListener('visibilitychange', visHandler);
+		return ()=> document.removeEventListener('visibilitychange', visHandler);
+	}, [isCalculating, recordOptimizationMetrics]);
 
 	// Detect small viewport height (might influence future layout adjustments)
 	useEffect(()=>{
