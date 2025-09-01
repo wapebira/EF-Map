@@ -5,11 +5,13 @@ const EVENT_MAP = {
   p2p_route: { counters: ['p2p_routes'] },
   scout_baseline: { counters: ['scout_baselines'], sum: { key: 'scout_collected_systems_sum', countKey: 'scout_collected_systems_count', valueField: 'collectedSystems' }, extraCounters: (b)=> b.planetFilterOn ? ['planet_filter_baselines'] : [] },
   scout_opt_start: { counters: ['scout_optimizations'] },
+  scout_abandoned: { counters: ['scout_abandoned'] },
   share_created: { counters: ['routes_shared'] },
   share_resolved: { counters: ['shared_resolved'] },
   referral_click: { counters: ['referral_clicks'] },
   theme_blue: { counters: ['theme_blue'] },
   theme_orange: { counters: ['theme_orange'] },
+  theme_switch: { counters: ['theme_switches'] },
   baseline_error: { counters: ['baseline_errors'] },
   stall_restart: { counters: ['stall_restarts'] },
   p2p_route_time: { sum: { key: 'p2p_route_time_ms_sum', countKey: 'p2p_route_time_count', valueField: 'ms' } },
@@ -17,6 +19,8 @@ const EVENT_MAP = {
   scout_opt_session_time: { sum: { key: 'scout_opt_session_time_ms_sum', countKey: 'scout_opt_session_time_count', valueField: 'ms' } },
   // Scout optimization lightyears saved (baseline distance - optimized distance)
   scout_opt_savings: { sum: { key: 'scout_opt_savings_ly_sum', countKey: 'scout_opt_savings_count', valueField: 'saved' } },
+  // Bucketed savings distribution
+  scout_opt_savings_bucket: { countersDynamic: (b)=> { const v=b.bucket; const allowed=['save_lt_5','save_5_20','save_20_50','save_gt_50']; return allowed.includes(v)? [v]:[]; } },
   // UI / interaction metrics
   ui_hide: { counters: ['ui_hide'] },
   show_distance: { counters: ['show_distance'] },
@@ -31,6 +35,9 @@ const EVENT_MAP = {
   } },
   // New engagement / cinematic events
   page_load: { counters: ['page_loads'] },
+  db_load_time: { sum: { key: 'db_load_time_ms_sum', countKey: 'db_load_time_count', valueField: 'ms' } },
+  first_route_delay: { sum: { key: 'first_route_delay_ms_sum', countKey: 'first_route_delay_count', valueField: 'ms' } },
+  first_action: { counters: ['first_actions'] },
   session_time: { sum: { key: 'session_time_ms_sum', countKey: 'session_time_count', valueField: 'ms' } },
   active_session_time: { sum: { key: 'active_session_time_ms_sum', countKey: 'active_session_time_count', valueField: 'ms' } },
   cinematic_enter: { counters: ['cinematic_enters'] },
@@ -43,6 +50,21 @@ const EVENT_MAP = {
     if(valid.includes(v)) return [v];
     return [];
   } },
+  // P2P route metadata + buckets (dynamic counters)
+  p2p_algo: { countersDynamic: (b)=> { const a=b.algo; return (a==='astar'||a==='dijkstra')? ['p2p_algo_'+a]: []; } },
+  p2p_opt_mode: { countersDynamic: (b)=> { const m=b.mode; return (m==='fuel'||m==='jumps')? ['p2p_mode_'+m]: []; } },
+  p2p_hops_bucket: { countersDynamic: (b)=> { const v=b.bucket; const allowed=['hops_lt_10','hops_10_30','hops_30_60','hops_gt_60']; return allowed.includes(v)? [v]: []; } },
+  waypoint_count_bucket: { countersDynamic: (b)=> { const v=b.bucket; const allowed=['wp_0','wp_1_2','wp_3_5','wp_6_plus']; return allowed.includes(v)? [v]: []; } },
+  // Scout optimizer baseline hops distribution (separate to compare with P2P usage)
+  scout_hops_bucket: { countersDynamic: (b)=> { const v=b.bucket; const allowed=['scout_hops_lt_10','scout_hops_10_30','scout_hops_30_60','scout_hops_gt_60']; return allowed.includes(v)? [v]: []; } },
+  p2p_cancelled: { counters: ['p2p_cancelled'] },
+  // Scout / planet filter buckets
+  planet_bins_active_bucket: { countersDynamic: (b)=> { const v=b.bucket; const allowed=['bins_5','bins_3_4','bins_1_2','bins_0']; return allowed.includes(v)? [v]: []; } },
+  opt_workers_used: { countersDynamic: (b)=> { const n = Number(b.count); if(!isFinite(n)) return []; if(n<1||n>16) return []; return ['opt_workers_used_'+n]; } },
+  // Donations
+  donate_modal_open: { counters: ['donate_modal_open'] },
+  donate_stripe_click: { counters: ['donate_stripe_clicks'] },
+  donate_crypto_click: { counters: ['donate_crypto_clicks'] },
   feature_flags: { countersDynamic: (b)=> {
     const arr = [];
     if(b.waypoints) arr.push('waypoints_used');

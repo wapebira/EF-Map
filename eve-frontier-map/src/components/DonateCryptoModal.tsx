@@ -19,6 +19,7 @@ export const DonateCryptoModal: React.FC<DonateCryptoModalProps> = ({ open, onCl
 
   useEffect(()=>{
     if(!open) return;
+    try { (window as any).__efTrackDonateModalOpen && (window as any).__efTrackDonateModalOpen(); } catch {}
     let cancelled = false;
     (async()=>{
       try {
@@ -78,10 +79,10 @@ export const DonateCryptoModal: React.FC<DonateCryptoModalProps> = ({ open, onCl
             </div>
             <div style={{ display:'flex', gap:8, flexWrap:'wrap', alignItems:'center' }}>
               <code style={{ flex:'1 1 240px', minWidth:160, fontFamily:'monospace', fontSize:12, padding:'9px 11px', borderRadius:12, background:'rgba(0,0,0,0.35)', border:'1px solid rgba(255,255,255,0.13)', color:'#fff', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{address}</code>
-              <button onClick={doCopy} style={{ display:'inline-flex', alignItems:'center', gap:6, background:'var(--accent)', border:'none', padding:'10px 16px', borderRadius:12, color:'#fff', fontSize:12, fontWeight:600, cursor:'pointer', letterSpacing:'.4px', boxShadow:'0 2px 6px rgba(0,0,0,0.4)' }}>
+              <button onClick={()=>{ doCopy(); try { (window as any).__efTrackDonateClick && (window as any).__efTrackDonateClick('crypto'); } catch {} }} style={{ display:'inline-flex', alignItems:'center', gap:6, background:'var(--accent)', border:'none', padding:'10px 16px', borderRadius:12, color:'#fff', fontSize:12, fontWeight:600, cursor:'pointer', letterSpacing:'.4px', boxShadow:'0 2px 6px rgba(0,0,0,0.4)' }}>
                 {copied ? (<><Check size={16}/>Copied</>) : (<><Copy size={16}/>Copy</>)}
               </button>
-              <a href={`https://etherscan.io/address/${address}`} target="_blank" rel="noreferrer" style={{ textDecoration:'none', display:'inline-flex', alignItems:'center', gap:6, background:'var(--accent)', padding:'10px 16px', borderRadius:12, color:'#fff', fontSize:12, fontWeight:600, letterSpacing:'.4px', boxShadow:'0 2px 6px rgba(0,0,0,0.4)' }}>
+              <a href={`https://etherscan.io/address/${address}`} onClick={()=>{ try { (window as any).__efTrackDonateClick && (window as any).__efTrackDonateClick('crypto'); } catch {} }} target="_blank" rel="noreferrer" style={{ textDecoration:'none', display:'inline-flex', alignItems:'center', gap:6, background:'var(--accent)', padding:'10px 16px', borderRadius:12, color:'#fff', fontSize:12, fontWeight:600, letterSpacing:'.4px', boxShadow:'0 2px 6px rgba(0,0,0,0.4)' }}>
                 <ExternalLink size={16}/>Etherscan
               </a>
             </div>

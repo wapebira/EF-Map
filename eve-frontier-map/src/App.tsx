@@ -152,7 +152,7 @@ function App() {
   // Accent color (persisted)
   const [accentIsBlue, setAccentIsBlue] = useState(initialPrefsRef.current.accent === 'blue');
   // Theme usage tracking
-  useEffect(()=>{ track({ type: accentIsBlue ? 'theme_blue' : 'theme_orange' }); }, [accentIsBlue]);
+  useEffect(()=>{ try { (window as any).__efSetThemeAccent && (window as any).__efSetThemeAccent(accentIsBlue ? 'blue':'orange'); } catch { /* ignore */ } }, [accentIsBlue]);
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [loadingStatus, setLoadingStatus] = useState('Initializing...');
   const [isLoaded, setIsLoaded] = useState(false);
@@ -182,7 +182,7 @@ function App() {
   const [planetBinsActive, setPlanetBinsActive] = useState<boolean[]>([true, true, true, true, true]);
   const [showDistance, setShowDistance] = useState(false);
   // Track theme selections (already counted once per change)
-  useEffect(()=>{ track({ type: accentIsBlue ? 'theme_blue' : 'theme_orange' }); }, [accentIsBlue]);
+  useEffect(()=>{ try { (window as any).__efSetThemeAccent && (window as any).__efSetThemeAccent(accentIsBlue ? 'blue':'orange'); } catch {} }, [accentIsBlue]);
   // First UI scale per session (captures default or first user change only) & persist changes
   useEffect(()=>{
     persistUiScale(uiScale);
@@ -215,7 +215,7 @@ function App() {
         <button type="button" onClick={()=> setCryptoModalOpen(true)} style={{ cursor:'pointer', display:'inline-block', background:'var(--accent)', color:'#fff', padding:'10px 18px', border:'none', borderRadius:6, fontWeight:700, textDecoration:'none', boxShadow:'0 2px 6px rgba(0,0,0,0.45)', letterSpacing:'.5px' }}>Donate via Crypto</button>
       </p>
       <p style={{ margin:'0 0 2px 0' }}>
-        <a href="https://donate.stripe.com/8x200j3krbO9aVtdLS4gg00" target="_blank" rel="noopener noreferrer" style={{ display:'inline-block', background:'var(--accent)', color:'#fff', padding:'10px 18px', borderRadius:6, fontWeight:700, textDecoration:'none', boxShadow:'0 2px 6px rgba(0,0,0,0.45)', letterSpacing:'.5px' }}>Donate via Stripe</a>
+  <a href="https://donate.stripe.com/8x200j3krbO9aVtdLS4gg00" onClick={()=>{ try { (window as any).__efTrackDonateClick && (window as any).__efTrackDonateClick('stripe'); } catch {} }} target="_blank" rel="noopener noreferrer" style={{ display:'inline-block', background:'var(--accent)', color:'#fff', padding:'10px 18px', borderRadius:6, fontWeight:700, textDecoration:'none', boxShadow:'0 2px 6px rgba(0,0,0,0.45)', letterSpacing:'.5px' }}>Donate via Stripe</a>
       </p>
       <p style={{ margin:0, fontSize:'12px', opacity:.65 }}>Stripe opens in a new secure tab.</p>
     </div>
@@ -645,7 +645,14 @@ function App() {
           setRouteResult({ path: null, error, minRequiredShipRange });
           return;
         }
-  setRouteResult({ path, error: undefined });
+        setRouteResult({ path, error: undefined });
+        try {
+          const hops = path ? Math.max(0, path.length-1) : 0;
+          const algoUsed = (lastP2PParamsRef.current?.algo) || 'astar';
+          const optMode = (lastP2PParamsRef.current?.optimize) || 'fuel';
+          (window as any).__efTrackP2PRouteMeta && (window as any).__efTrackP2PRouteMeta(algoUsed, optMode, hops, waypoints.length);
+          (window as any).__efMarkFirstAction && (window as any).__efMarkFirstAction('p2p');
+        } catch {}
   // Clear any existing share hash now that user has generated a fresh route locally
   if(window.location.hash){ try { history.replaceState(null,'', window.location.pathname + window.location.search); } catch { /* ignore */ } }
 
@@ -822,6 +829,12 @@ function App() {
       const ref = (calculateRoute as any)._cancelRef;
       if (ref) ref.value = true;
     } catch { /* ignore */ }
+    // If a calculation was actively running (routeCalcStartRef set and isCalculatingRoute true), record cancellation metric
+    try {
+      if(routeCalcStartRef.current !== null || isCalculatingRoute){
+        (window as any).__efTrackP2PCancelled && (window as any).__efTrackP2PCancelled();
+      }
+    } catch { /* ignore */ }
     if (routingWorkerRef.current) {
       try {
         routingWorkerRef.current.terminate();
@@ -862,7 +875,14 @@ function App() {
         setRouteResult({ path: null, error, minRequiredShipRange });
         return;
       }
-  setRouteResult({ path, error: undefined });
+        setRouteResult({ path, error: undefined });
+        try {
+          const hops = path ? Math.max(0, path.length-1) : 0;
+          const algoUsed = (lastP2PParamsRef.current?.algo) || 'astar';
+          const optMode = (lastP2PParamsRef.current?.optimize) || 'fuel';
+          (window as any).__efTrackP2PRouteMeta && (window as any).__efTrackP2PRouteMeta(algoUsed, optMode, hops, waypoints.length);
+          (window as any).__efMarkFirstAction && (window as any).__efMarkFirstAction('p2p');
+        } catch {}
   if(window.location.hash){ try { history.replaceState(null,'', window.location.pathname + window.location.search); } catch { /* ignore */ } }
 
       if (path && path.length > 0 && mapData) {
@@ -876,6 +896,7 @@ function App() {
   }, [mapData, selectSystem]);
 
   const calculateRoute = useCallback((fromSystemName: string, toSystemName: string, maxJumpDistance: number, optimizeFor: 'fuel' | 'jumps', algorithm: 'astar' | 'dijkstra') => {
+  try { (window as any).__efMarkFirstRouteStarted && (window as any).__efMarkFirstRouteStarted(); } catch {}
     try { (lastP2PParamsRef as any).current = { jump:maxJumpDistance, optimize:optimizeFor, algo:algorithm, from:fromSystemName, to:toSystemName }; } catch(e) { /* ignore */ }
     if (!mapData) { alert('Map data is not loaded yet.'); return; }
     if(!fromSystemName || !toSystemName){ alert('Both From and To are required.'); return; }
@@ -937,8 +958,15 @@ function App() {
           track({ type:'p2p_route' });
           if(elapsed!==undefined) track({ type:'p2p_route_time', ms: elapsed });
           // Feature flags snapshot (matches server dynamic keys logic)
-          // Feature flags snapshot. gateReachable currently only applies to Scout Optimizer, so always false here.
           track({ type:'feature_flags', waypoints: waypoints.length>0, avoid: avoidSystems.length>0, waypointOpt: waypointOptimize, returnToStart, gateReachable: false });
+          // Ensure algo/mode + hops + waypoint buckets recorded (segmented path fallback)
+          try {
+            const hops = fullPath ? Math.max(0, fullPath.length-1) : 0;
+            const algoUsed = (lastP2PParamsRef.current?.algo) || 'astar';
+            const optMode = (lastP2PParamsRef.current?.optimize) || 'fuel';
+            (window as any).__efTrackP2PRouteMeta && (window as any).__efTrackP2PRouteMeta(algoUsed, optMode, hops, waypoints.length);
+            (window as any).__efMarkFirstAction && (window as any).__efMarkFirstAction('p2p');
+          } catch {}
         } catch {}
         if(fullPath.length && mapData){
           const sysMap = Object.fromEntries(Object.values(mapData.solar_systems).map(s=> [s.name.toLowerCase(), s]));
@@ -976,7 +1004,7 @@ function App() {
         avoidSystemNames: avoidSystems.filter(a=> a!==segFrom && a!==segTo && !orderedWaypoints.includes(a)),
       });
     };
-    runNext();
+  runNext();
   }, [mapData, scoutRouteResult, clearCurrentRoute, waypoints, avoidSystems, waypointOptimize, selectSystem]);
 
   // Helper to get planet count color
@@ -1175,7 +1203,8 @@ function App() {
         setMinPlanets(initialMinPlanets);
         setMaxPlanets(initialMaxPlanets);
         
-        setIsLoaded(true);
+  setIsLoaded(true);
+  try { (window as any).__efMarkDbLoaded && (window as any).__efMarkDbLoaded(); } catch {}
 
       } catch (error) {
         console.error('Error loading map data:', error);
