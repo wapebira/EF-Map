@@ -21,3 +21,11 @@
 - Risk: low (adds client-only tracking call; server already whitelists dynamic `feature_flags`).
 - Gates: typecheck ✅ | build ✅ (expected) | smoke: toggle gate filter -> run Calculate Route -> stats should show increment next aggregation.
 - Follow-ups: Consider capturing gateReachable usage on optimization start as well (currently only baseline start).
+
+## 2025-09-01 – Expand analytics Tier 1–3 metrics
+- Goal: Add comprehensive anonymous usage metrics (activation, performance, distribution buckets, donations, algorithm usage) to guide future UX/perf work.
+- Files: `usage-event.js`, `usage.ts`, `App.tsx`, `ScoutOptimizer.tsx`, `DonateCryptoModal.tsx`.
+- Added Events: db_load_time, first_action, first_route_delay, p2p_algo_*, p2p_mode_*, p2p_hops buckets, waypoint_count buckets, p2p_cancelled, scout_abandoned, opt_workers_used_#, scout_opt_savings_bucket, planet_bins_active_bucket, theme_switches, donate_* clicks, savings bucket, planet bins bucket, workers count, abandoned baselines.
+- Risk: medium (broad client edits, but additive only; no existing logic altered besides theme tracking hook). Server accepts new event types via EVENT_MAP extension.
+- Gates: typecheck ✅ | build ✅ (post-change) | smoke pending (manually verify route calc, optimization start, theme switch, donate modal, baseline cancel).
+- Follow-ups: Update StatsPage layout to surface new metrics; possibly group donation stats separately; add pruning if counter set grows large over months.

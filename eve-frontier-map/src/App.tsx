@@ -152,7 +152,7 @@ function App() {
   // Accent color (persisted)
   const [accentIsBlue, setAccentIsBlue] = useState(initialPrefsRef.current.accent === 'blue');
   // Theme usage tracking
-  useEffect(()=>{ track({ type: accentIsBlue ? 'theme_blue' : 'theme_orange' }); }, [accentIsBlue]);
+  useEffect(()=>{ try { (window as any).__efSetThemeAccent && (window as any).__efSetThemeAccent(accentIsBlue ? 'blue':'orange'); } catch { /* ignore */ } }, [accentIsBlue]);
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [loadingStatus, setLoadingStatus] = useState('Initializing...');
   const [isLoaded, setIsLoaded] = useState(false);
@@ -182,7 +182,7 @@ function App() {
   const [planetBinsActive, setPlanetBinsActive] = useState<boolean[]>([true, true, true, true, true]);
   const [showDistance, setShowDistance] = useState(false);
   // Track theme selections (already counted once per change)
-  useEffect(()=>{ track({ type: accentIsBlue ? 'theme_blue' : 'theme_orange' }); }, [accentIsBlue]);
+  useEffect(()=>{ try { (window as any).__efSetThemeAccent && (window as any).__efSetThemeAccent(accentIsBlue ? 'blue':'orange'); } catch {} }, [accentIsBlue]);
   // First UI scale per session (captures default or first user change only) & persist changes
   useEffect(()=>{
     persistUiScale(uiScale);
@@ -215,7 +215,7 @@ function App() {
         <button type="button" onClick={()=> setCryptoModalOpen(true)} style={{ cursor:'pointer', display:'inline-block', background:'var(--accent)', color:'#fff', padding:'10px 18px', border:'none', borderRadius:6, fontWeight:700, textDecoration:'none', boxShadow:'0 2px 6px rgba(0,0,0,0.45)', letterSpacing:'.5px' }}>Donate via Crypto</button>
       </p>
       <p style={{ margin:'0 0 2px 0' }}>
-        <a href="https://donate.stripe.com/8x200j3krbO9aVtdLS4gg00" target="_blank" rel="noopener noreferrer" style={{ display:'inline-block', background:'var(--accent)', color:'#fff', padding:'10px 18px', borderRadius:6, fontWeight:700, textDecoration:'none', boxShadow:'0 2px 6px rgba(0,0,0,0.45)', letterSpacing:'.5px' }}>Donate via Stripe</a>
+  <a href="https://donate.stripe.com/8x200j3krbO9aVtdLS4gg00" onClick={()=>{ try { (window as any).__efTrackDonateClick && (window as any).__efTrackDonateClick('stripe'); } catch {} }} target="_blank" rel="noopener noreferrer" style={{ display:'inline-block', background:'var(--accent)', color:'#fff', padding:'10px 18px', borderRadius:6, fontWeight:700, textDecoration:'none', boxShadow:'0 2px 6px rgba(0,0,0,0.45)', letterSpacing:'.5px' }}>Donate via Stripe</a>
       </p>
       <p style={{ margin:0, fontSize:'12px', opacity:.65 }}>Stripe opens in a new secure tab.</p>
     </div>
@@ -645,7 +645,14 @@ function App() {
           setRouteResult({ path: null, error, minRequiredShipRange });
           return;
         }
-  setRouteResult({ path, error: undefined });
+        setRouteResult({ path, error: undefined });
+        try {
+          const hops = path ? Math.max(0, path.length-1) : 0;
+          const algoUsed = (lastP2PParamsRef.current?.algo) || 'astar';
+          const optMode = (lastP2PParamsRef.current?.optimize) || 'fuel';
+          (window as any).__efTrackP2PRouteMeta && (window as any).__efTrackP2PRouteMeta(algoUsed, optMode, hops, waypoints.length);
+          (window as any).__efMarkFirstAction && (window as any).__efMarkFirstAction('p2p');
+        } catch {}
   // Clear any existing share hash now that user has generated a fresh route locally
   if(window.location.hash){ try { history.replaceState(null,'', window.location.pathname + window.location.search); } catch { /* ignore */ } }
 
@@ -862,7 +869,14 @@ function App() {
         setRouteResult({ path: null, error, minRequiredShipRange });
         return;
       }
-  setRouteResult({ path, error: undefined });
+        setRouteResult({ path, error: undefined });
+        try {
+          const hops = path ? Math.max(0, path.length-1) : 0;
+          const algoUsed = (lastP2PParamsRef.current?.algo) || 'astar';
+          const optMode = (lastP2PParamsRef.current?.optimize) || 'fuel';
+          (window as any).__efTrackP2PRouteMeta && (window as any).__efTrackP2PRouteMeta(algoUsed, optMode, hops, waypoints.length);
+          (window as any).__efMarkFirstAction && (window as any).__efMarkFirstAction('p2p');
+        } catch {}
   if(window.location.hash){ try { history.replaceState(null,'', window.location.pathname + window.location.search); } catch { /* ignore */ } }
 
       if (path && path.length > 0 && mapData) {
@@ -1175,7 +1189,8 @@ function App() {
         setMinPlanets(initialMinPlanets);
         setMaxPlanets(initialMaxPlanets);
         
-        setIsLoaded(true);
+  setIsLoaded(true);
+  try { (window as any).__efMarkDbLoaded && (window as any).__efMarkDbLoaded(); } catch {}
 
       } catch (error) {
         console.error('Error loading map data:', error);

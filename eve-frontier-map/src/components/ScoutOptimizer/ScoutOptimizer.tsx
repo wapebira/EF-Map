@@ -114,6 +114,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 				if(saved > 0){
 					console.debug('[ScoutOpt] recording savings', { saved: saved.toFixed(4), baseline, champion: champ, label });
 					await trackImmediate({ type:'scout_opt_savings', saved: parseFloat(saved.toFixed(4)) });
+					try { (window as any).__efTrackSavingsBucket && (window as any).__efTrackSavingsBucket(saved); } catch {}
 					savingsRecordedRef.current = true; sent=true;
 				}
 			}
@@ -312,6 +313,13 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 			track({ type:'scout_baseline', collectedSystems: collected.length, planetFilterOn: usePlanetCount });
 			// Feature flag snapshot (captures gateReachable filter usage for Stats counters)
 			track({ type:'feature_flags', waypoints:false, avoid:false, waypointOpt:false, returnToStart, gateReachable: gateReachableOnly });
+			// First action marker (baseline counts as core action)
+			try { (window as any).__efMarkFirstAction && (window as any).__efMarkFirstAction('scout'); } catch {}
+			// Planet bins bucket if filter active
+			if(usePlanetCount && planetBinsActive){
+				const activeBins = planetBinsActive.filter(b=>b).length;
+				try { (window as any).__efTrackPlanetBins && (window as any).__efTrackPlanetBins(activeBins); } catch {}
+			}
 		} catch {}
 		baselineStartTimeRef.current = Date.now();
 		systemsForRunRef.current = collected;
@@ -464,6 +472,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		setHideInputsPref(true); // auto-hide inputs (but allow user to re-show if they uncheck)
 		appendActivity(`Starting optimization: max ${total||'∞'}s, global stall ${stall||'∞'}s on ${workersRef.current.length||1} workers.`);
 		try { track({ type:'scout_opt_start' }); } catch {}
+		try { (window as any).__efTrackScoutWorkers && (window as any).__efTrackScoutWorkers(workersRef.current.length||1); } catch {}
 		optimizationStartTimeRef.current = Date.now();
 		lastGlobalImprovementRef.current = Date.now();
 		totalMaxTimeSecRef.current = total;
@@ -842,7 +851,8 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	const prevOpenRef = useRef(open);
 	useEffect(()=>{
 		if(prevOpenRef.current && !open){
-			// Panel just closed
+			// Panel just closed; if baseline not finished and was calculating baseline -> abandoned
+			if(isCalculating && !baselineDoneRef.current){ try { track({ type:'scout_abandoned' }); } catch {} }
 			if(isCalculating || optimizationStartTimeRef.current || (!savingsRecordedRef.current && baselineDistanceRef.current!==null && championDistance!==null && championDistance < baselineDistanceRef.current)){
 				recordOptimizationMetrics('panel-close');
 			}

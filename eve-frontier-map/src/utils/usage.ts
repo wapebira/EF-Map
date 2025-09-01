@@ -89,6 +89,9 @@ if(typeof window !== 'undefined'){
   let cinematicActive = false;
   let cinematicAccum = 0; // ms
   let cinematicLastStart = 0;
+  let dbLoadMarked = false; // set by App when map ready
+  let firstActionSent = false; // first core action (p2p route or scout baseline)
+  let firstRouteStart: number|undefined; // time from page load to first route/baseline
 
   // Mark page load
   try { track({ type:'page_load' }); } catch {}
@@ -96,6 +99,43 @@ if(typeof window !== 'undefined'){
   (window as any).___efLastAct = sessionStart;
   // Initialize segmented active timing state
   (window as any).___efActLastEvt = sessionStart; (window as any).___efActAccum = 0;
+
+  // Expose helpers for new metrics
+  (window as any).__efMarkDbLoaded = ()=>{
+    if(dbLoadMarked) return; dbLoadMarked = true;
+    const ms = performance.now() - sessionStart;
+    try { track({ type:'db_load_time', ms }); } catch {}
+  };
+  (window as any).__efMarkFirstAction = (source:'p2p'|'scout')=>{
+    if(firstActionSent) return; firstActionSent = true;
+    try { track({ type:'first_action', source }); } catch {}
+    if(firstRouteStart!==undefined){
+      const ms = firstRouteStart - sessionStart; if(ms>=0) try { track({ type:'first_route_delay', ms }); } catch {}
+    }
+  };
+  (window as any).__efSetThemeAccent = (newTheme:'blue'|'orange')=>{
+    try { track({ type: newTheme==='blue' ? 'theme_blue':'theme_orange' }); } catch {}
+    // switching after first theme event counts as a theme_switch
+    const w:any = window as any;
+    if(!w.___efInitialTheme){ w.___efInitialTheme = newTheme; }
+    else if(w.___efInitialTheme !== newTheme){ try { track({ type:'theme_switch' }); } catch {} w.___efInitialTheme = newTheme; }
+  };
+  (window as any).__efTrackP2PRouteMeta = (algo:'astar'|'dijkstra', mode:'fuel'|'jumps', hops:number, waypoints:number)=>{
+    try { track({ type:'p2p_algo', algo }); } catch {}
+    try { track({ type:'p2p_opt_mode', mode }); } catch {}
+    // hops bucket
+    let hb = hops<10? 'hops_lt_10' : hops<30? 'hops_10_30' : hops<60? 'hops_30_60' : 'hops_gt_60';
+    try { track({ type:'p2p_hops_bucket', bucket: hb }); } catch {}
+    let wb = waypoints===0? 'wp_0' : waypoints<=2? 'wp_1_2' : waypoints<=5? 'wp_3_5' : 'wp_6_plus';
+    try { track({ type:'waypoint_count_bucket', bucket: wb }); } catch {}
+    if(!firstActionSent){ firstRouteStart = performance.now(); }
+  };
+  (window as any).__efTrackP2PCancelled = ()=>{ try { track({ type:'p2p_cancelled' }); } catch {}; };
+  (window as any).__efTrackScoutWorkers = (count:number)=>{ try { track({ type:'opt_workers_used', count }); } catch {}; };
+  (window as any).__efTrackSavingsBucket = (saved:number)=>{ let b = saved<5? 'save_lt_5' : saved<20? 'save_5_20' : saved<50? 'save_20_50' : 'save_gt_50'; try { track({ type:'scout_opt_savings_bucket', bucket:b }); } catch {}; };
+  (window as any).__efTrackPlanetBins = (activeBins:number)=>{ let b = activeBins===5? 'bins_5' : activeBins>=3? 'bins_3_4' : activeBins>=1? 'bins_1_2' : 'bins_0'; try { track({ type:'planet_bins_active_bucket', bucket:b }); } catch {}; };
+  (window as any).__efTrackDonateModalOpen = ()=>{ try { track({ type:'donate_modal_open' }); } catch {} };
+  (window as any).__efTrackDonateClick = (kind:'stripe'|'crypto')=>{ try { track({ type: kind==='stripe' ? 'donate_stripe_click':'donate_crypto_click' }); } catch {} };
 
   function endCinematicIfActive(){
     if(cinematicActive){
@@ -141,7 +181,7 @@ if(typeof window !== 'undefined'){
   else if(sessionMs < 60*60_000) bucket='sess_15_60m';
   else bucket='sess_gt_60m';
   track({ type:'session_bucket', bucket });
-      if(cinematicAccum>0) track({ type:'cinematic_time', ms: Math.round(cinematicAccum) });
+  if(cinematicAccum>0) track({ type:'cinematic_time', ms: Math.round(cinematicAccum) });
       await flush();
     } catch {}
   }
