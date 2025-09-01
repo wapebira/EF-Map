@@ -426,25 +426,26 @@ function App() {
   }, [circleTexture]);
 
   const stargateMaterial = useMemo(() => {
-    // Distance-based brightness (no pulse): near very bright, far still clearly visible.
+    // Distance-based brightness with optional debug gradient. Additive blending for perceived brightness.
     const mat = new THREE.ShaderMaterial({
       transparent: true,
       depthWrite: false,
       vertexColors: true,
+      blending: THREE.AdditiveBlending,
       uniforms: {
         uCamPos: { value: new THREE.Vector3() },
-        uNear: { value: 2500 },     // distance at which lines are at max brightness
-        uFar: { value: 90000 },     // distance at which lines reach min brightness
-        // Brightness range NOTE: keep <=1 to avoid HDR clamp -> ensures relative differences visible.
-        // We'll use white vertex colors so multiplying stays in gamut.
-        uMinBright: { value: 0.22 }, // far brightness (dim but visible)
-        uMaxBright: { value: 1.0 },  // near brightness (no clipping)
-        uOpacityNear: { value: 0.85 },
-        uOpacityFar: { value: 0.25 },
-        uGamma: { value: 1.35 }      // shaping (>1 slows early fade)
+        uNear: { value: 0 },        // treat absolute distance from camera start
+        uFar: { value: 120000 },    // tuned after inspecting typical map scale
+        uMinBright: { value: 0.18 }, // far brightness (dim but still drawn)
+        uMaxBright: { value: 1.0 },  // near brightness
+        uBoost: { value: 1.25 },     // global multiplier (allows quick tuning)
+        uOpacityNear: { value: 1.0 },
+        uOpacityFar: { value: 0.15 },
+        uGamma: { value: 1.2 },      // shaping (>1 slows early fade)
+        uDebug: { value: 0.0 }       // 1 => show distance gradient instead of brightness
       },
       vertexShader: `uniform vec3 uCamPos; varying float vDist; varying vec3 vColor;\nvoid main(){ vColor = color; vec3 worldPos = (modelMatrix * vec4(position,1.0)).xyz; vDist = distance(uCamPos, worldPos); gl_Position = projectionMatrix * viewMatrix * vec4(worldPos,1.0); }`,
-      fragmentShader: `uniform float uNear; uniform float uFar; uniform float uMinBright; uniform float uMaxBright; uniform float uOpacityNear; uniform float uOpacityFar; uniform float uGamma; varying float vDist; varying vec3 vColor;\nvoid main(){\n  float t = clamp((vDist - uNear)/(uFar - uNear), 0.0, 1.0); // linear 0..1\n  float tg = pow(t, uGamma); // shaped 0..1\n  float bright = mix(uMaxBright, uMinBright, tg);\n  float op = mix(uOpacityNear, uOpacityFar, tg);\n  vec3 col = vColor * bright;\n  col = clamp(col, 0.0, 1.0);\n  gl_FragColor = vec4(col, op);\n}`
+      fragmentShader: `uniform float uNear; uniform float uFar; uniform float uMinBright; uniform float uMaxBright; uniform float uBoost; uniform float uOpacityNear; uniform float uOpacityFar; uniform float uGamma; uniform float uDebug; varying float vDist; varying vec3 vColor;\nvoid main(){\n  float t = clamp((vDist - uNear)/(uFar - uNear), 0.0, 1.0);\n  float tg = pow(t, uGamma);\n  if(uDebug > 0.5){\n    // Debug: color encode distance (near=cyan, mid=yellow, far=magenta)\n    vec3 c1 = vec3(0.2,1.0,1.0);\n    vec3 c2 = vec3(1.0,1.0,0.2);\n    vec3 c3 = vec3(1.0,0.2,1.0);\n    vec3 col = mix(mix(c1,c2,tg), c3, smoothstep(0.5,1.0,tg));\n    float op = mix(uOpacityNear, uOpacityFar, tg);\n    gl_FragColor = vec4(col, op);\n    return;\n  }\n  float bright = mix(uMaxBright, uMinBright, tg) * uBoost;\n  float op = mix(uOpacityNear, uOpacityFar, tg);\n  vec3 col = vColor * bright;\n  col = clamp(col, 0.0, 1.0);\n  gl_FragColor = vec4(col, op);\n}`
     });
     return mat;
   }, []);
@@ -1321,6 +1322,8 @@ function App() {
          // Star field now static: guard in case legacy uniform lingers
          if(starFieldRef.current){ const mat:any = starFieldRef.current.material; const sh = mat.userData?.shader; if(sh && sh.uniforms.uTime){ sh.uniforms.uTime.value = tNow; } }
          if(stargateLinesRef.current && cameraRef.current){ const m:any = stargateLinesRef.current.material; if(m.uniforms?.uCamPos){ m.uniforms.uCamPos.value.copy(cameraRef.current.position); } }
+        // Allow enabling debug gradient in console: window.__efGateDebug = true
+        try { if((window as any).__efGateDebug !== undefined && stargateLinesRef.current){ const m:any = stargateLinesRef.current.material; if(m.uniforms?.uDebug){ m.uniforms.uDebug.value = (window as any).__efGateDebug ? 1.0 : 0.0; } } } catch {}
        }
   controls.update();
   if (cinematicModeRef.current || cinematicMode) {
