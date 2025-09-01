@@ -1222,7 +1222,8 @@ function App() {
 
   sceneRef.current = new THREE.Scene();
   // Soft fog (baseline depth cue)
-  sceneRef.current.fog = new THREE.FogExp2(0x0b0f15, 0.000015);
+  // Amplified fog density slightly for clearer depth perception
+  sceneRef.current.fog = new THREE.FogExp2(0x0b0f15, 0.00004);
     cameraRef.current = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 10000000);
   rendererRef.current = new THREE.WebGLRenderer({ antialias: true });
   // Cap DPR for performance while keeping crisp rendering
@@ -1259,7 +1260,8 @@ function App() {
         const skyGeo = new THREE.SphereGeometry(radius,48,32);
         const skyMat = new THREE.ShaderMaterial({
           side: THREE.BackSide, transparent:true, depthWrite:false,
-          uniforms:{ uTop:{value:new THREE.Color(0x0d1722)}, uMid:{value:new THREE.Color(0x0b1018)}, uBot:{value:new THREE.Color(0x07090c)}, uCenterBoost:{value:0.05}, uNoiseAmp:{value:0.04}, uTime:{value:0} },
+          // Tuned colors: slightly brighter top/mid + stronger center boost & noise for clearer differentiation
+          uniforms:{ uTop:{value:new THREE.Color(0x123447)}, uMid:{value:new THREE.Color(0x0e1d2b)}, uBot:{value:new THREE.Color(0x06080d)}, uCenterBoost:{value:0.12}, uNoiseAmp:{value:0.07}, uTime:{value:0} },
           vertexShader:'varying vec3 vPos; void main(){ vPos=position; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }',
           fragmentShader:'varying vec3 vPos; uniform vec3 uTop; uniform vec3 uMid; uniform vec3 uBot; uniform float uCenterBoost; uniform float uNoiseAmp; uniform float uTime; float hash(vec3 p){ p=fract(p*0.3183+vec3(0.1,0.2,0.3)); p*=17.0; return fract(p.x*p.y*p.z*(p.x+p.y+p.z)); } void main(){ vec3 n=normalize(vPos); float h = n.y*0.5+0.5; vec3 col = mix(uMid,uBot,smoothstep(0.0,0.35,1.0-h)); col = mix(uTop,col,smoothstep(0.55,1.0,h)); float r=length(n.xz); col += uCenterBoost*(1.0 - smoothstep(0.0,0.9,r)); float nn = hash(vPos*0.002 + uTime*0.01); col += (nn-0.5)*uNoiseAmp; col=clamp(col,0.0,1.0); gl_FragColor=vec4(col,0.85); }'
         });
@@ -1267,10 +1269,10 @@ function App() {
       } catch {/* ignore */}
       // Parallax distant sparse layer
       try {
-        const COUNT=150; const pPos=new Float32Array(COUNT*3); const pCol=new Float32Array(COUNT*3);
+        const COUNT=400; const pPos=new Float32Array(COUNT*3); const pCol=new Float32Array(COUNT*3);
         for(let i=0;i<COUNT;i++){ const r=90000*Math.cbrt(Math.random()); const th=Math.random()*Math.PI*2; const ph=Math.acos(2*Math.random()-1); pPos[i*3]=r*Math.sin(ph)*Math.cos(th); pPos[i*3+1]=r*Math.sin(ph)*Math.sin(th); pPos[i*3+2]=r*Math.cos(ph); const tint=new THREE.Color().setHSL(0.60+Math.random()*0.04,0.20,0.60+Math.random()*0.15); pCol[i*3]=tint.r; pCol[i*3+1]=tint.g; pCol[i*3+2]=tint.b; }
         const pGeom=new THREE.BufferGeometry(); pGeom.setAttribute('position', new THREE.BufferAttribute(pPos,3)); pGeom.setAttribute('color', new THREE.BufferAttribute(pCol,3));
-        const pMat=new THREE.PointsMaterial({ size:4.0,sizeAttenuation:true,transparent:true,opacity:0.18,depthWrite:false,vertexColors:true,blending:THREE.AdditiveBlending,map:circleTexture,alphaTest:0.5 });
+        const pMat=new THREE.PointsMaterial({ size:5.0,sizeAttenuation:true,transparent:true,opacity:0.25,depthWrite:false,vertexColors:true,blending:THREE.AdditiveBlending,map:circleTexture,alphaTest:0.5 });
         baseParallaxRef.current=new THREE.Points(pGeom,pMat); baseParallaxRef.current.renderOrder=-900; sceneRef.current.add(baseParallaxRef.current);
       } catch {/* ignore */}
     }
