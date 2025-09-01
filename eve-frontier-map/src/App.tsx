@@ -260,6 +260,9 @@ function App() {
   const rippleGroupRef = useRef<THREE.Group|null>(null);
   const cometGroupRef = useRef<THREE.Group|null>(null);
   const parallaxStarsRef = useRef<THREE.Points|null>(null);
+  // Baseline (non-cinematic) ambient enhancements
+  const skyDomeRef = useRef<THREE.Mesh|null>(null); // dark gradient dome
+  const baseParallaxRef = useRef<THREE.Points|null>(null); // faint distant parallax layer
   // Simple object pools for reuse
   const supernovaPoolRef = useRef<(THREE.Sprite|THREE.Mesh)[]>([]);
   const lensPoolRef = useRef<(THREE.Sprite|THREE.Mesh)[]>([]);
@@ -404,25 +407,15 @@ function App() {
       alphaTest: 0.5,
       vertexColors: true,
     });
-
     material.onBeforeCompile = (shader) => {
-      // Add a uniform for the maximum point size in pixels
       shader.uniforms.maxPointSize = { value: 10.0 };
-
-      // Inject the uniform declaration into the shader
-      shader.vertexShader = `
-            uniform float maxPointSize;
-            ${shader.vertexShader}
-        `;
-
-      // Replace the line where gl_PointSize is set to cap it
+      shader.uniforms.uTime = { value: 0 };
+      shader.vertexShader = `uniform float maxPointSize;\nuniform float uTime;\nattribute float aSize;\n${shader.vertexShader}`;
       shader.vertexShader = shader.vertexShader.replace(
         '#include <logdepthbuf_vertex>',
-        `
-            gl_PointSize = min(gl_PointSize, maxPointSize); // Cap to max pixel size
-            #include <logdepthbuf_vertex>
-            `
+        `float tw = 1.0 + 0.02 * sin(uTime*0.9 + position.x*0.001 + position.y*0.001);\n gl_PointSize = min(gl_PointSize * aSize * tw, maxPointSize);\n#include <logdepthbuf_vertex>`
       );
+      (material as any).userData.shader = shader;
     };
     return material;
   }, [circleTexture]);
@@ -598,19 +591,11 @@ function App() {
     }
     selectedLabelObj.current.visible = true;
 
-    // Selection halo (pulsing sprite) setup
-    try {
-      if(sceneRef.current){
-        if(!selectedStarHaloRef.current){
-          const haloGeo = new THREE.BufferGeometry();
-          haloGeo.setAttribute('position', new THREE.Float32BufferAttribute([0,0,0],3));
-          const haloMat = new THREE.PointsMaterial({ size: 60, sizeAttenuation:false, transparent:true, opacity:0.8, color: accentIsBlue? 0x00aaff : 0xff4c26, depthWrite:false, map: ringTexture, alphaTest:0.3 });
-          selectedStarHaloRef.current = new THREE.Points(haloGeo, haloMat);
-        }
-        newSelectedLabelParent.add(selectedStarHaloRef.current!);
-        selectedStarHaloRef.current!.visible = true;
-      }
-    } catch {/* ignore */}
+    // Removed selection halo (persistent orange ring) per request; rely solely on small hover ring for targeting feedback.
+    if(selectedStarHaloRef.current){
+      // Hide any legacy halo that might still exist from earlier sessions.
+      selectedStarHaloRef.current.visible = false;
+    }
 
     // Fast local recolor so user sees feedback before layout effect re-runs.
     try {
@@ -1235,7 +1220,9 @@ function App() {
     const currentMount = mountRef.current;
     if (!currentMount) return;
 
-    sceneRef.current = new THREE.Scene();
+  sceneRef.current = new THREE.Scene();
+  // Soft fog (baseline depth cue)
+  sceneRef.current.fog = new THREE.FogExp2(0x0b0f15, 0.000015);
     cameraRef.current = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 10000000);
   rendererRef.current = new THREE.WebGLRenderer({ antialias: true });
   // Cap DPR for performance while keeping crisp rendering
@@ -1265,6 +1252,28 @@ function App() {
     const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
     directionalLight.position.set(0, 1, 0);
     sceneRef.current.add(directionalLight);
+    // Baseline sky dome (if not in cinematic)
+    if(!cinematicMode){
+      try {
+        const radius = 120000;
+        const skyGeo = new THREE.SphereGeometry(radius,48,32);
+        const skyMat = new THREE.ShaderMaterial({
+          side: THREE.BackSide, transparent:true, depthWrite:false,
+          uniforms:{ uTop:{value:new THREE.Color(0x0d1722)}, uMid:{value:new THREE.Color(0x0b1018)}, uBot:{value:new THREE.Color(0x07090c)}, uCenterBoost:{value:0.05}, uNoiseAmp:{value:0.04}, uTime:{value:0} },
+          vertexShader:'varying vec3 vPos; void main(){ vPos=position; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }',
+          fragmentShader:'varying vec3 vPos; uniform vec3 uTop; uniform vec3 uMid; uniform vec3 uBot; uniform float uCenterBoost; uniform float uNoiseAmp; uniform float uTime; float hash(vec3 p){ p=fract(p*0.3183+vec3(0.1,0.2,0.3)); p*=17.0; return fract(p.x*p.y*p.z*(p.x+p.y+p.z)); } void main(){ vec3 n=normalize(vPos); float h = n.y*0.5+0.5; vec3 col = mix(uMid,uBot,smoothstep(0.0,0.35,1.0-h)); col = mix(uTop,col,smoothstep(0.55,1.0,h)); float r=length(n.xz); col += uCenterBoost*(1.0 - smoothstep(0.0,0.9,r)); float nn = hash(vPos*0.002 + uTime*0.01); col += (nn-0.5)*uNoiseAmp; col=clamp(col,0.0,1.0); gl_FragColor=vec4(col,0.85); }'
+        });
+        const sky = new THREE.Mesh(skyGeo, skyMat); sky.renderOrder = -1000; skyDomeRef.current = sky; sceneRef.current.add(sky);
+      } catch {/* ignore */}
+      // Parallax distant sparse layer
+      try {
+        const COUNT=150; const pPos=new Float32Array(COUNT*3); const pCol=new Float32Array(COUNT*3);
+        for(let i=0;i<COUNT;i++){ const r=90000*Math.cbrt(Math.random()); const th=Math.random()*Math.PI*2; const ph=Math.acos(2*Math.random()-1); pPos[i*3]=r*Math.sin(ph)*Math.cos(th); pPos[i*3+1]=r*Math.sin(ph)*Math.sin(th); pPos[i*3+2]=r*Math.cos(ph); const tint=new THREE.Color().setHSL(0.60+Math.random()*0.04,0.20,0.60+Math.random()*0.15); pCol[i*3]=tint.r; pCol[i*3+1]=tint.g; pCol[i*3+2]=tint.b; }
+        const pGeom=new THREE.BufferGeometry(); pGeom.setAttribute('position', new THREE.BufferAttribute(pPos,3)); pGeom.setAttribute('color', new THREE.BufferAttribute(pCol,3));
+        const pMat=new THREE.PointsMaterial({ size:4.0,sizeAttenuation:true,transparent:true,opacity:0.18,depthWrite:false,vertexColors:true,blending:THREE.AdditiveBlending,map:circleTexture,alphaTest:0.5 });
+        baseParallaxRef.current=new THREE.Points(pGeom,pMat); baseParallaxRef.current.renderOrder=-900; sceneRef.current.add(baseParallaxRef.current);
+      } catch {/* ignore */}
+    }
 
     // Hover Point
     const hoverGeometry = new THREE.BufferGeometry();
@@ -1282,7 +1291,7 @@ function App() {
     sceneRef.current.add(hoverPointRef.current);
 
   let running = true; let rafId = 0;
-  const pulseState = { t:0 }; // for selected star halo pulsing
+  // Removed pulseState (selection halo pulsing disabled)
     const animate = () => {
       if(!running) return;
       rafId = requestAnimationFrame(animate);
@@ -1301,13 +1310,12 @@ function App() {
          const updaters = routeAnimUpdatersRef.current;
          for (let i = 0; i < updaters.length; i++) updaters[i]();
        } catch (e) { /* ignore */ }
-       // Selection halo pulse
-       if(selectedStarHaloRef.current){
-         pulseState.t += 0.016; // approx frame delta
-         const scale = 1 + Math.sin(pulseState.t*2.2)*0.18;
-         selectedStarHaloRef.current.scale.setScalar(scale);
-         const mat = selectedStarHaloRef.current.material as THREE.PointsMaterial;
-         mat.opacity = 0.55 + Math.sin(pulseState.t*2.2 + Math.PI/2)*0.25;
+  // (Selection halo pulse removed – only hover ring retained)
+       // Baseline micro‑twinkle and parallax rotation (non-cinematic)
+       if(!cinematicModeRef.current){
+         if(starFieldRef.current){ const mat:any = starFieldRef.current.material; if(mat.userData?.shader){ mat.userData.shader.uniforms.uTime.value = performance.now()/1000; } }
+         if(baseParallaxRef.current){ baseParallaxRef.current.rotation.y += 0.00003; }
+         if(skyDomeRef.current){ const sm:any = skyDomeRef.current.material; if(sm.uniforms?.uTime){ sm.uniforms.uTime.value = performance.now()/1000; } }
        }
   controls.update();
   if (cinematicModeRef.current || cinematicMode) {
@@ -1583,19 +1591,32 @@ function App() {
 
     visibleSystemsRef.current = Object.values(mapData.solar_systems).filter(s => s && s.position && !s.hidden);
 
-    const vertices = [];
-    const colors = [];
-    const white = new THREE.Color(0xffffff);
-
+    const vertices: number[] = [];
+    const colors: number[] = [];
+    const sizes: number[] = [];
     for (const system of visibleSystemsRef.current) {
       const pos = getTransformedPosition(system.position);
       vertices.push(pos.x, pos.y, pos.z);
-      colors.push(white.r, white.g, white.b);
+      // Distance brightness falloff (gentle)
+      const dist = Math.sqrt(pos.x*pos.x + pos.y*pos.y + pos.z*pos.z);
+      const falloff = Math.max(0.55, 1.0 - dist * 0.0000025);
+      // Deterministic jitter for tiny temperature-like tint
+      const seed = (Math.sin(system.id * 12.9898) * 43758.5453);
+      const hSel = seed - Math.floor(seed);
+      const tint = new THREE.Color();
+      if(hSel < 0.33) tint.setHSL(0.58, 0.08, 0.90); // cool
+      else if(hSel < 0.66) tint.setHSL(0.10, 0.08, 0.92); // warm
+      else tint.setHSL(0.0, 0.00, 0.92); // neutral
+      tint.r *= falloff; tint.g *= falloff; tint.b *= falloff;
+      colors.push(tint.r, tint.g, tint.b);
+      // Anchor star size variance (~3%)
+      sizes.push((seed % 37) < 1 ? 1.6 : 1.0);
     }
 
     const pointsGeometry = new THREE.BufferGeometry();
     pointsGeometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-    pointsGeometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  pointsGeometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  pointsGeometry.setAttribute('aSize', new THREE.Float32BufferAttribute(sizes, 1));
 
     starFieldRef.current = new THREE.Points(pointsGeometry, pointsMaterial);
     sceneRef.current.add(starFieldRef.current);
