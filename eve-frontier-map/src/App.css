@@ -11,6 +11,31 @@ body[data-ef-stats='true'] {
   overscroll-behavior-y: contain;
 }
 
+/* Subtle full-screen vignette for map (hidden on stats page) */
+body:not([data-ef-stats='true']) .ef-vignette {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(circle at 50% 55%, rgba(0,0,0,0) 58%, rgba(0,0,0,0.45) 100%);
+  z-index: 900; /* below panels (1450) but above WebGL canvas (default 0) */
+}
+
+/* Accessible focus rings (override neutral removals elsewhere) */
+button:focus-visible,
+.ef-rail-btn:focus-visible,
+.ef-drawer-close:focus-visible,
+.ef-tab-btn:focus-visible,
+.share-route-btn:focus-visible,
+.ef-referral-copy-btn:focus-visible,
+.ef-support-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 2px rgba(var(--accent-rgb),0.25);
+}
+
+/* Remove default outline suppression that may exist */
+.ef-rail-btn:focus, .ef-drawer-close:focus, .ef-tab-btn:focus { outline: none; }
+
  :root {
   --selection-blue: #00aaff;
   --selection-orange: #ff4c26;
@@ -160,6 +185,14 @@ body[data-ef-stats='true'] {
   align-items: stretch;
   gap: 8px;
   z-index: 3200;
+  padding: 10px 12px 12px;
+  border:1px solid rgba(255,255,255,0.22);
+  border-radius:14px;
+  background:linear-gradient(180deg, rgba(30,30,32,0.78) 0%, rgba(18,18,20,0.78) 55%, rgba(12,12,14,0.78) 100%);
+  backdrop-filter:blur(9px) saturate(140%);
+  box-shadow:0 6px 24px -6px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.05) inset;
+  /* Smoothly expand leftward when help panel opens so shifted buttons stay enclosed */
+  transition: padding-left 0.45s cubic-bezier(.25,.8,.25,1);
 }
 
 /* Standardized checkbox label spacing */
@@ -180,6 +213,9 @@ body[data-ef-stats='true'] {
 /* Panel widths: default 33vw (max 520px min 340px) with breakpoints. We approximate with same vw then override in media queries. */
 /* When help is open shift only by (panel width - toggle button width - desired gap) to keep consistent spacing */
 :root.help-open .ef-toolbar-shifting { transform: translateX(calc(-1 * ((var(--help-panel-width, 33vw) - var(--help-toggle-width, 0px)) + 8px))); }
+/* When help is open, also expand the container's left padding by the shift distance so
+  the translated group remains inside the rounded border/background box. */
+:root.help-open .ef-top-toolbar { padding-left: calc(12px + (var(--help-panel-width, 33vw) - var(--help-toggle-width, 0px)) + 8px); }
 
 .ef-referral {
   position: relative;
@@ -249,10 +285,13 @@ body[data-ef-stats='true'] {
 .share-feedback { font-size:11px; position:absolute; bottom:-16px; left:0; right:0; text-align:center; color:#fff; opacity:.85; pointer-events:none; }
 
 @media (max-width: 1200px){ :root.help-open .ef-toolbar-shifting { transform: translateX(calc(-1 * ((var(--help-panel-width, 40vw) - var(--help-toggle-width, 0px)) + 8px))); } }
+@media (max-width: 1200px){ :root.help-open .ef-top-toolbar { padding-left: calc(12px + (var(--help-panel-width, 40vw) - var(--help-toggle-width, 0px)) + 8px); } }
 @media (max-width: 900px){ :root.help-open .ef-toolbar-shifting { transform: translateX(calc(-1 * ((var(--help-panel-width, 50vw) - var(--help-toggle-width, 0px)) + 8px))); } }
+@media (max-width: 900px){ :root.help-open .ef-top-toolbar { padding-left: calc(12px + (var(--help-panel-width, 50vw) - var(--help-toggle-width, 0px)) + 8px); } }
 @media (max-width: 700px){
   .ef-top-toolbar { right:50%; transform:translateX(50%); }
   .ef-toolbar-shifting { flex-wrap:wrap; justify-content:center; }
   :root.help-open .ef-toolbar-shifting { transform: translate(calc(-1 * ((var(--help-panel-width, 100vw) - var(--help-toggle-width, 0px)) - 8px)),0); }
 }
+@media (max-width: 700px){ :root.help-open .ef-top-toolbar { padding-left: calc(12px + (var(--help-panel-width, 100vw) - var(--help-toggle-width, 0px)) - 8px); } }
 /* .system-label--selected intentionally left unstyled - uses same styles as .system-label */
