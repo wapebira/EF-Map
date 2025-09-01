@@ -1262,27 +1262,28 @@ function App() {
           side: THREE.BackSide, transparent:true, depthWrite:false, fog:false,
           // Isotropic faint stellar haze with equatorial band (reads from any angle)
           uniforms:{
-            uColorA:{value:new THREE.Color(0x0b141c)},
-            uColorB:{value:new THREE.Color(0x162630)},
-            uBandColor:{value:new THREE.Color(0x274a62)},
-            uBandIntensity:{value:0.28},
-            uBandWidth:{value:0.45},
-            uNoiseAmp:{value:0.055},
-            uNoiseScale:{value:0.0022},
-            uBrightness:{value:0.70},
+            // Lightened palette for clearer visibility
+            uColorA:{value:new THREE.Color(0x101c28)},
+            uColorB:{value:new THREE.Color(0x213a4d)},
+            uBandColor:{value:new THREE.Color(0x3a6685)},
+            uBandIntensity:{value:0.35},
+            uBandWidth:{value:0.50},
+            uNoiseAmp:{value:0.06},
+            uNoiseScale:{value:0.0024},
+            uBrightness:{value:0.90},
             uTime:{value:0}
           },
           vertexShader:'varying vec3 vPos; void main(){ vPos=position; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }',
-          fragmentShader:`varying vec3 vPos; uniform vec3 uColorA; uniform vec3 uColorB; uniform vec3 uBandColor; uniform float uBandIntensity; uniform float uBandWidth; uniform float uNoiseAmp; uniform float uNoiseScale; uniform float uBrightness; uniform float uTime;\nfloat hash(vec3 p){ p=fract(p*0.3183099+vec3(0.11,0.17,0.23)); p*=17.0; return fract(p.x*p.y*(p.x+p.y)+p.z*(p.x+p.z)); }\nfloat smoothNoise(vec3 p){ vec3 i=floor(p); vec3 f=fract(p); float n=0.0; for(int xo=0; xo<2; xo++){ for(int yo=0; yo<2; yo++){ for(int zo=0; zo<2; zo++){ vec3 of=vec3(float(xo),float(yo),float(zo)); float h=hash(i+of); vec3 w=abs(f-of); w=1.0-w; float wght = w.x*w.y*w.z; n += h*wght; } } } return n; }\nvoid main(){ vec3 n = normalize(vPos); float basis = n.x*n.x - n.y*n.y + n.z*0.35; basis = 0.5 + 0.5*sin(basis*2.2); vec3 col = mix(uColorA, uColorB, basis*0.35); float band = exp(-pow(abs(n.y)/uBandWidth,2.0)); col += uBandColor * (uBandIntensity * band); float nn = smoothNoise(n / uNoiseScale + vec3(uTime*0.02, uTime*0.015, -uTime*0.025)); col += (nn-0.5) * uNoiseAmp; col *= uBrightness; col = clamp(col,0.0,1.0); gl_FragColor = vec4(col, 0.72); }`
+          fragmentShader:`varying vec3 vPos; uniform vec3 uColorA; uniform vec3 uColorB; uniform vec3 uBandColor; uniform float uBandIntensity; uniform float uBandWidth; uniform float uNoiseAmp; uniform float uNoiseScale; uniform float uBrightness; uniform float uTime;\nfloat hash(vec3 p){ p=fract(p*0.3183099+vec3(0.11,0.17,0.23)); p*=17.0; return fract(p.x*p.y*(p.x+p.y)+p.z*(p.x+p.z)); }\nfloat smoothNoise(vec3 p){ vec3 i=floor(p); vec3 f=fract(p); float n=0.0; for(int xo=0; xo<2; xo++){ for(int yo=0; yo<2; yo++){ for(int zo=0; zo<2; zo++){ vec3 of=vec3(float(xo),float(yo),float(zo)); float h=hash(i+of); vec3 w=abs(f-of); w=1.0-w; float wght = w.x*w.y*w.z; n += h*wght; } } } return n; }\nvoid main(){ vec3 n = normalize(vPos); float basis = n.x*n.x - n.y*n.y + n.z*0.35; basis = 0.5 + 0.5*sin(basis*2.2); vec3 col = mix(uColorA, uColorB, basis*0.38); float band = exp(-pow(abs(n.y)/uBandWidth,2.0)); col += uBandColor * (uBandIntensity * band); float nn = smoothNoise(n / uNoiseScale + vec3(uTime*0.025, uTime*0.02, -uTime*0.03)); col += (nn-0.5) * uNoiseAmp; col *= uBrightness; col = clamp(col,0.0,1.0); gl_FragColor = vec4(col, 0.85); }`
         });
         const sky = new THREE.Mesh(skyGeo, skyMat); sky.renderOrder = -1000; sky.frustumCulled=false; skyDomeRef.current = sky; sceneRef.current.add(sky);
       } catch {/* ignore */}
       // Parallax distant sparse layer
       try {
-        const COUNT=380; const pPos=new Float32Array(COUNT*3); const pCol=new Float32Array(COUNT*3);
+  const COUNT=900; const pPos=new Float32Array(COUNT*3); const pCol=new Float32Array(COUNT*3);
         for(let i=0;i<COUNT;i++){ const r=90000*Math.cbrt(Math.random()); const th=Math.random()*Math.PI*2; const ph=Math.acos(2*Math.random()-1); pPos[i*3]=r*Math.sin(ph)*Math.cos(th); pPos[i*3+1]=r*Math.sin(ph)*Math.sin(th); pPos[i*3+2]=r*Math.cos(ph); const tint=new THREE.Color().setHSL(0.60+Math.random()*0.04,0.20,0.60+Math.random()*0.15); pCol[i*3]=tint.r; pCol[i*3+1]=tint.g; pCol[i*3+2]=tint.b; }
         const pGeom=new THREE.BufferGeometry(); pGeom.setAttribute('position', new THREE.BufferAttribute(pPos,3)); pGeom.setAttribute('color', new THREE.BufferAttribute(pCol,3));
-        const pMat=new THREE.PointsMaterial({ size:5.0,sizeAttenuation:true,transparent:true,opacity:0.22,depthWrite:false,vertexColors:true,blending:THREE.AdditiveBlending,map:circleTexture,alphaTest:0.5 });
+  const pMat=new THREE.PointsMaterial({ size:4.5,sizeAttenuation:true,transparent:true,opacity:0.30,depthWrite:false,vertexColors:true,blending:THREE.AdditiveBlending,map:circleTexture,alphaTest:0.5 });
         baseParallaxRef.current=new THREE.Points(pGeom,pMat); baseParallaxRef.current.renderOrder=-900; sceneRef.current.add(baseParallaxRef.current);
       } catch {/* ignore */}
     }
@@ -1609,9 +1610,12 @@ function App() {
     for (const system of visibleSystemsRef.current) {
       const pos = getTransformedPosition(system.position);
       vertices.push(pos.x, pos.y, pos.z);
-      // Distance brightness falloff (gentle)
-      const dist = Math.sqrt(pos.x*pos.x + pos.y*pos.y + pos.z*pos.z);
-      const falloff = Math.max(0.55, 1.0 - dist * 0.0000025);
+  // Distance brightness falloff (stronger depth cue)
+  const dist = Math.sqrt(pos.x*pos.x + pos.y*pos.y + pos.z*pos.z);
+  // Normalize distance relative to a soft horizon (scale tuned empirically)
+  const norm = dist * 0.0000022; // smaller factor => farther stars dim sooner
+  // Curve: near stars ~1.0, mid fade, far approach min
+  const falloff = Math.max(0.38, 1.0 - Math.pow(norm, 1.12));
       // Deterministic jitter for tiny temperature-like tint
       const seed = (Math.sin(system.id * 12.9898) * 43758.5453);
       const hSel = seed - Math.floor(seed);
