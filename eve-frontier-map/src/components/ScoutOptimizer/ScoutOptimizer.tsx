@@ -70,6 +70,9 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	// Display path = macro path expanded into individual gate hops (BFS) so gate segments are shown instead of ship jumps when possible
 	const [championDisplayPath, setChampionDisplayPath] = useState<string[]|null>(null);
 	const [championDistance, setChampionDistance] = useState<number|null>(null);
+	// Mirror of championDistance in a ref so metric capture isn't subject to render timing
+	const championDistanceRefVal = useRef<number|null>(null);
+	useEffect(()=>{ championDistanceRefVal.current = championDistance; }, [championDistance]);
 	// Ship jump metrics for current champion (lexicographic primary criteria)
 	const [championShipJumps, setChampionShipJumps] = useState<number|null>(null);
 	const [championShipDistance, setChampionShipDistance] = useState<number|null>(null);
@@ -103,24 +106,26 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	const recordOptimizationMetrics = useCallback(async (label?:string)=>{
 		try {
 			let sent=false;
+			const baseline = baselineDistanceRef.current;
+			const champ = championDistanceRefVal.current;
 			console.debug('[ScoutOpt][diag] metrics attempt', {
 				label,
-				baseline: baselineDistanceRef.current,
-				champion: championDistance,
+				baseline,
+				champion: champ,
 				savingsRecorded: savingsRecordedRef.current
 			});
 			// Savings
-			if(!savingsRecordedRef.current && baselineDistanceRef.current!==null && championDistance!==null){
-				const saved = baselineDistanceRef.current - championDistance;
+			if(!savingsRecordedRef.current && baseline!==null && champ!==null){
+				const saved = baseline - champ;
 				if(saved > 0){
-					console.debug('[ScoutOpt] recording savings', { saved: saved.toFixed(4), baseline: baselineDistanceRef.current, champion: championDistance, label });
+					console.debug('[ScoutOpt] recording savings', { saved: saved.toFixed(4), baseline, champion: champ, label });
 					await trackImmediate({ type:'scout_opt_savings', saved: parseFloat(saved.toFixed(4)) });
 					savingsRecordedRef.current = true; sent=true;
 				} else {
-					console.debug('[ScoutOpt][diag] no positive savings', { saved, baseline: baselineDistanceRef.current, champion: championDistance, label });
+					console.debug('[ScoutOpt][diag] no positive savings', { saved, baseline, champion: champ, label });
 				}
 			} else if(!savingsRecordedRef.current){
-				console.debug('[ScoutOpt][diag] savings condition unmet', { baselinePresent: baselineDistanceRef.current!==null, championPresent: championDistance!==null });
+				console.debug('[ScoutOpt][diag] savings condition unmet', { baselinePresent: baseline!==null, championPresent: champ!==null });
 			}
 			// Session time
 			if(optimizationStartTimeRef.current){
