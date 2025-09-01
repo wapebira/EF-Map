@@ -15,15 +15,78 @@ const formatMs = (ms:number | undefined) => {
 };
 const formatDurationAvg = (sum?:number, count?:number) => (!sum || !count)? '—' : formatMs(sum/count);
 
-const StatRow: React.FC<{ label:string; value:React.ReactNode }> = ({ label, value }) => (
-  <div style={{ display:'flex', justifyContent:'space-between', gap:12, padding:'2px 0' }}>
-    <span style={{ fontSize:12, opacity:.72 }}>{label}</span>
-    <span style={{ fontSize:12, fontVariantNumeric:'tabular-nums' }}>{value}</span>
-  </div>
-);
+// Tooltip descriptions (concise) keyed by label text
+const DESCRIPTIONS: Record<string,string> = {
+  'Page loads':'Distinct page initializations (reloads/new visits).',
+  'First actions':'Sessions where at least one route or baseline was started.',
+  'Activation rate':'First actions / Page loads.',
+  'Avg DB load time':'Average time to download + open the map database in-browser.',
+  'Avg time to first action':'Average delay from page load to first routing/optimizer action.',
+  'P2P routes':'Number of point-to-point route computations completed.',
+  'Avg route time':'Average wall time to compute a P2P route (includes multi‑segment).',
+  'Cancelled':'User-cancelled route calculations before completion.',
+  'Cancellation rate':'Cancelled / (Cancelled + Completed).',
+  'Algo (A*/Dij)':'Relative share of A* vs Dijkstra usage for P2P routing.',
+  'Mode (Fuel/Jumps)':'Share of optimization modes chosen: minimize fuel (distance) vs hops.',
+  'Baselines':'Scout baseline routes generated (starting solution).',
+  'Optimizations':'Optimization sessions started after a baseline.',
+  'Abandoned baselines':'Baseline generated but optimization not started (session ended).',
+  'Avg baseline time':'Average time to compute baseline route.',
+  'Avg opt session time':'Average measured optimization session duration until user left.',
+  'Avg collected systems':'Average unique systems in collected set per baseline.',
+  'LY saved total':'Total lightyears saved by optimizations vs baselines.',
+  'LY saved avg':'Average LY saved per optimization session reporting savings.',
+  'Waypoints used':'Routes including at least one waypoint.',
+  'Avoid used':'Routes where avoid list was non-empty.',
+  'Waypoint optimize':'Routes using waypoint order heuristic.',
+  'Return to start':'Routes or baselines with return-to-start enabled.',
+  'Gate reachable':'Scout collections restricted to gate-reachable systems.',
+  'Planet-filter baselines':'Baselines built with planet-count filter active.',
+  'Blue theme':'Sessions choosing blue accent.',
+  'Orange theme':'Sessions choosing orange accent.',
+  'Theme switches':'Accent switches after initial load.',
+  'Hide UI':'Times UI was hidden (toggle on).',
+  'Show Distance':'Times distance overlay was enabled.',
+  'Help opens':'Help panel opens (debounced to first open per panel lifetime).',
+  'Top UI scale':'Most common chosen UI scale & share.',
+  'Shares created':'Short share links generated.',
+  'Shares resolved':'Short links opened and decoded.',
+  'Resolution rate':'Shares resolved / Shares created.',
+  'Route copies total':'Total route note copy actions (P2P + optimized).',
+  'Copy rate':'Route copies / (P2P routes + Optimizations).',
+  'Modal opens':'Donation modal opened.',
+  'Stripe clicks':'Outbound Stripe donation link clicks.',
+  'Crypto clicks':'Crypto donation expand / address view clicks.',
+  'Stripe CTR':'Stripe clicks / Modal opens.',
+  'Cinematic sessions':'Unique sessions that entered cinematic at least once.',
+  'Cinematic enters':'Total toggles into cinematic mode (multiple per session).',
+  'Cinematic usage':'Cinematic sessions / Page loads.',
+  'Avg open duration':'Average total page session length.',
+  'Avg active duration':'Average active interaction time (idle gaps >5m capped).',
+  'Median open (est)':'Median session length estimated from duration buckets.',
+  'Avg cinematic time':'Average time spent in cinematic mode (sessions with time).',
+  'Cinematic time share':'Cinematic time / Total session time.',
+  'P2P Route Hops':'Distribution of hop counts across completed P2P routes.',
+  'Scout Baseline Hops':'Hop count distribution for initial Scout baselines.',
+  'Savings (LY)':'Distribution buckets of LY saved (baseline minus optimized).',
+  'Planet Bins Active':'How many planet legend bins were enabled during baseline creation.',
+  'Workers Used':'Parallel optimization workers selected.',
+  'UI Scale':'Chosen interface scale percentages distribution.',
+  'Last 7 Days (Newest First)':'Daily aggregate snapshot: one JSON per day.'
+};
+
+const StatRow: React.FC<{ label:string; value:React.ReactNode }> = ({ label, value }) => {
+  const desc = DESCRIPTIONS[label];
+  return (
+    <div style={{ display:'flex', justifyContent:'space-between', gap:12, padding:'2px 0' }} title={desc||undefined} aria-label={desc? `${label}: ${desc}`: label}>
+      <span style={{ fontSize:12, opacity:.72 }}>{label}</span>
+      <span style={{ fontSize:12, fontVariantNumeric:'tabular-nums' }}>{value}</span>
+    </div>
+  );
+};
 
 const DistTable: React.FC<{ title:string; rows:{k:string;c:number;label:string}[]; total:number }> = ({ title, rows, total }) => (
-  <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+  <div style={{ display:'flex', flexDirection:'column', gap:6 }} title={DESCRIPTIONS[title]||undefined} aria-label={DESCRIPTIONS[title]? `${title}: ${DESCRIPTIONS[title]}`: title}>
     <h3 style={{ margin:'0 0 4px 0', fontSize:12, letterSpacing:'.5px', textTransform:'uppercase', opacity:.75 }}>{title}</h3>
     <table style={{ width:'100%', borderCollapse:'collapse', fontSize:11 }}>
       <tbody>
