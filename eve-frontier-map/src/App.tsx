@@ -261,8 +261,7 @@ function App() {
   const cometGroupRef = useRef<THREE.Group|null>(null);
   const parallaxStarsRef = useRef<THREE.Points|null>(null);
   // Baseline (non-cinematic) ambient enhancements
-  const skyDomeRef = useRef<THREE.Mesh|null>(null); // dark gradient dome
-  const baseParallaxRef = useRef<THREE.Points|null>(null); // faint distant parallax layer
+  // Background sky & parallax removed: refs omitted
   // Simple object pools for reuse
   const supernovaPoolRef = useRef<(THREE.Sprite|THREE.Mesh)[]>([]);
   const lensPoolRef = useRef<(THREE.Sprite|THREE.Mesh)[]>([]);
@@ -1220,10 +1219,7 @@ function App() {
     const currentMount = mountRef.current;
     if (!currentMount) return;
 
-  sceneRef.current = new THREE.Scene();
-  // Soft fog (baseline depth cue)
-  // Softer fog (reduced from earlier tuning) for subtle depth only
-  sceneRef.current.fog = new THREE.FogExp2(0x0b0f15, 0.000022);
+  sceneRef.current = new THREE.Scene(); // Flat black background (fog removed)
     cameraRef.current = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 10000000);
   rendererRef.current = new THREE.WebGLRenderer({ antialias: true });
   // Cap DPR for performance while keeping crisp rendering
@@ -1253,46 +1249,7 @@ function App() {
     const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
     directionalLight.position.set(0, 1, 0);
     sceneRef.current.add(directionalLight);
-    // Baseline sky dome (if not in cinematic)
-    if(!cinematicMode){
-      try {
-        const radius = 200000; // enlarged for distant feel
-        const skyGeo = new THREE.SphereGeometry(radius,64,40);
-        const skyMat = new THREE.ShaderMaterial({
-          side: THREE.BackSide, transparent:true, depthWrite:false, fog:false,
-          // Layered low-frequency haze with subtle parallax (camera-based) and very soft band
-          uniforms:{
-            uColorA:{value:new THREE.Color(0x0e1822)},
-            uColorB:{value:new THREE.Color(0x1e3242)},
-            uBandColor:{value:new THREE.Color(0x335a76)},
-            uBandIntensity:{value:0.32},
-            uBandWidth:{value:0.55},
-            uLowFreqScale:{value:0.00020},
-            uMidFreqScale:{value:0.00055},
-            uHiFreqScale:{value:0.0012},
-            uLowAmp:{value:0.55},
-            uMidAmp:{value:0.25},
-            uHiAmp:{value:0.10},
-            uParallax:{value:0.12},
-            uBrightness:{value:0.95},
-            uSoften:{value:0.85},
-            uTime:{value:0},
-            uCamPos:{value:new THREE.Vector3()}
-          },
-          vertexShader:'varying vec3 vWorld; void main(){ vWorld=(modelMatrix*vec4(position,1.0)).xyz; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }',
-          fragmentShader:`varying vec3 vWorld; uniform vec3 uColorA; uniform vec3 uColorB; uniform vec3 uBandColor; uniform float uBandIntensity; uniform float uBandWidth; uniform float uLowFreqScale; uniform float uMidFreqScale; uniform float uHiFreqScale; uniform float uLowAmp; uniform float uMidAmp; uniform float uHiAmp; uniform float uParallax; uniform float uBrightness; uniform float uSoften; uniform float uTime; uniform vec3 uCamPos;\nfloat hash(vec3 p){ p=fract(p*0.3183099+vec3(0.11,0.17,0.23)); p*=17.0; return fract(p.x*p.y*(p.x+p.y)+p.z*(p.x+p.z)); }\nfloat smoothNoise(vec3 p){ vec3 i=floor(p); vec3 f=fract(p); float n=0.0; for(int xo=0; xo<2; xo++){ for(int yo=0; yo<2; yo++){ for(int zo=0; zo<2; zo++){ vec3 of=vec3(float(xo),float(yo),float(zo)); float h=hash(i+of); vec3 w=abs(f-of); w=1.0-w; float wght = w.x*w.y*w.z; n += h*wght; } } } return n; }\nfloat octave(vec3 p,float sc,float amp){ return (smoothNoise(p*sc)-0.5)*2.0*amp; }\nvoid main(){ vec3 n=normalize(vWorld); float band=exp(-pow(abs(n.y)/uBandWidth,2.0)); vec3 parPos=vWorld + uCamPos*uParallax; float low=octave(parPos,uLowFreqScale,uLowAmp); float mid=octave(parPos+vec3(37.1,12.3,-51.7),uMidFreqScale,uMidAmp); float hi=octave(parPos+vec3(-19.7,44.2,7.5),uHiFreqScale,uHiAmp); float nComb=(low+mid+hi); float softened=0.5+0.5*tanh(nComb*uSoften); vec3 base=mix(uColorA,uColorB,0.45+0.25*n.x+0.15*n.z); base+=uBandColor*(uBandIntensity*band); base+=(softened-0.5)*0.55; base*=uBrightness; base=clamp(base,0.0,1.0); float rim=smoothstep(0.0,0.85,abs(n.y)); base*=(0.92+0.08*(1.0-rim)); gl_FragColor=vec4(base,0.80); }`
-        });
-        const sky = new THREE.Mesh(skyGeo, skyMat); sky.renderOrder = -1000; sky.frustumCulled=false; skyDomeRef.current = sky; sceneRef.current.add(sky);
-      } catch {/* ignore */}
-      // Parallax distant sparse layer
-      try {
-  const COUNT=900; const pPos=new Float32Array(COUNT*3); const pCol=new Float32Array(COUNT*3);
-        for(let i=0;i<COUNT;i++){ const r=90000*Math.cbrt(Math.random()); const th=Math.random()*Math.PI*2; const ph=Math.acos(2*Math.random()-1); pPos[i*3]=r*Math.sin(ph)*Math.cos(th); pPos[i*3+1]=r*Math.sin(ph)*Math.sin(th); pPos[i*3+2]=r*Math.cos(ph); const tint=new THREE.Color().setHSL(0.60+Math.random()*0.04,0.20,0.60+Math.random()*0.15); pCol[i*3]=tint.r; pCol[i*3+1]=tint.g; pCol[i*3+2]=tint.b; }
-        const pGeom=new THREE.BufferGeometry(); pGeom.setAttribute('position', new THREE.BufferAttribute(pPos,3)); pGeom.setAttribute('color', new THREE.BufferAttribute(pCol,3));
-  const pMat=new THREE.PointsMaterial({ size:4.5,sizeAttenuation:true,transparent:true,opacity:0.30,depthWrite:false,vertexColors:true,blending:THREE.AdditiveBlending,map:circleTexture,alphaTest:0.5 });
-        baseParallaxRef.current=new THREE.Points(pGeom,pMat); baseParallaxRef.current.renderOrder=-900; sceneRef.current.add(baseParallaxRef.current);
-      } catch {/* ignore */}
-    }
+  // Background sky & parallax removed: flat black
 
     // Hover Point
     const hoverGeometry = new THREE.BufferGeometry();
@@ -1333,8 +1290,6 @@ function App() {
        // Baseline micro‑twinkle and parallax rotation (non-cinematic)
        if(!cinematicModeRef.current){
          if(starFieldRef.current){ const mat:any = starFieldRef.current.material; if(mat.userData?.shader){ mat.userData.shader.uniforms.uTime.value = performance.now()/1000; } }
-         if(baseParallaxRef.current){ baseParallaxRef.current.rotation.y += 0.00003; }
-         if(skyDomeRef.current){ const sm:any = skyDomeRef.current.material; if(sm.uniforms?.uTime){ sm.uniforms.uTime.value = performance.now()/1000; } if(sm.uniforms?.uCamPos && cameraRef.current){ sm.uniforms.uCamPos.value.copy(cameraRef.current.position); } }
        }
   controls.update();
   if (cinematicModeRef.current || cinematicMode) {
