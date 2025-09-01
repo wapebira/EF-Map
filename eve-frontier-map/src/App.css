@@ -191,6 +191,8 @@ button:focus-visible,
   background:linear-gradient(180deg, rgba(30,30,32,0.78) 0%, rgba(18,18,20,0.78) 55%, rgba(12,12,14,0.78) 100%);
   backdrop-filter:blur(9px) saturate(140%);
   box-shadow:0 6px 24px -6px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.05) inset;
+  /* Smoothly expand leftward when help panel opens so shifted buttons stay enclosed */
+  transition: padding-left 0.45s cubic-bezier(.25,.8,.25,1);
 }
 
 /* Standardized checkbox label spacing */
@@ -211,6 +213,9 @@ button:focus-visible,
 /* Panel widths: default 33vw (max 520px min 340px) with breakpoints. We approximate with same vw then override in media queries. */
 /* When help is open shift only by (panel width - toggle button width - desired gap) to keep consistent spacing */
 :root.help-open .ef-toolbar-shifting { transform: translateX(calc(-1 * ((var(--help-panel-width, 33vw) - var(--help-toggle-width, 0px)) + 8px))); }
+/* When help is open, also expand the container's left padding by the shift distance so
+  the translated group remains inside the rounded border/background box. */
+:root.help-open .ef-top-toolbar { padding-left: calc(12px + (var(--help-panel-width, 33vw) - var(--help-toggle-width, 0px)) + 8px); }
 
 .ef-referral {
   position: relative;
@@ -280,10 +285,13 @@ button:focus-visible,
 .share-feedback { font-size:11px; position:absolute; bottom:-16px; left:0; right:0; text-align:center; color:#fff; opacity:.85; pointer-events:none; }
 
 @media (max-width: 1200px){ :root.help-open .ef-toolbar-shifting { transform: translateX(calc(-1 * ((var(--help-panel-width, 40vw) - var(--help-toggle-width, 0px)) + 8px))); } }
+@media (max-width: 1200px){ :root.help-open .ef-top-toolbar { padding-left: calc(12px + (var(--help-panel-width, 40vw) - var(--help-toggle-width, 0px)) + 8px); } }
 @media (max-width: 900px){ :root.help-open .ef-toolbar-shifting { transform: translateX(calc(-1 * ((var(--help-panel-width, 50vw) - var(--help-toggle-width, 0px)) + 8px))); } }
+@media (max-width: 900px){ :root.help-open .ef-top-toolbar { padding-left: calc(12px + (var(--help-panel-width, 50vw) - var(--help-toggle-width, 0px)) + 8px); } }
 @media (max-width: 700px){
   .ef-top-toolbar { right:50%; transform:translateX(50%); }
   .ef-toolbar-shifting { flex-wrap:wrap; justify-content:center; }
   :root.help-open .ef-toolbar-shifting { transform: translate(calc(-1 * ((var(--help-panel-width, 100vw) - var(--help-toggle-width, 0px)) - 8px)),0); }
 }
+@media (max-width: 700px){ :root.help-open .ef-top-toolbar { padding-left: calc(12px + (var(--help-panel-width, 100vw) - var(--help-toggle-width, 0px)) - 8px); } }
 /* .system-label--selected intentionally left unstyled - uses same styles as .system-label */
