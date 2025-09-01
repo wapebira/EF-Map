@@ -185,6 +185,12 @@ button:focus-visible,
   align-items: stretch;
   gap: 8px;
   z-index: 3200;
+  padding: 10px 12px 12px;
+  border:1px solid rgba(255,255,255,0.22);
+  border-radius:14px;
+  background:linear-gradient(180deg, rgba(30,30,32,0.78) 0%, rgba(18,18,20,0.78) 55%, rgba(12,12,14,0.78) 100%);
+  backdrop-filter:blur(9px) saturate(140%);
+  box-shadow:0 6px 24px -6px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.05) inset;
 }
 
 /* Standardized checkbox label spacing */
