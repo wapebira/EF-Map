@@ -35,7 +35,7 @@ async function flush(){
 
 export function track(evt: UsageEventBase){
   QUEUE.push(evt);
-  try { if(typeof performance !== 'undefined') { /* update last activity */ (window as any).___efLastAct = performance.now(); } } catch {}
+  try { if(typeof performance !== 'undefined') { const now=performance.now(); (window as any).___efLastAct = now; } } catch {}
   if(QUEUE.length >= MAX_BATCH) flush(); else scheduleFlush();
 }
 
@@ -52,6 +52,7 @@ export async function trackImmediate(evt: UsageEventBase){
       // enqueue fallback to try later
       track(evt);
     }
+  try { if(typeof performance !== 'undefined') { const now=performance.now(); (window as any).___efLastAct = now; } } catch {}
   } catch {
     track(evt);
   }
@@ -66,7 +67,8 @@ if(typeof window !== 'undefined'){
 
   // Mark page load
   try { track({ type:'page_load' }); } catch {}
-  let lastActivity = sessionStart; // Initialize last activity timestamp
+  // We'll store last activity on window to share with track()/trackImmediate
+  (window as any).___efLastAct = sessionStart;
 
   function endCinematicIfActive(){
     if(cinematicActive){
@@ -91,14 +93,15 @@ if(typeof window !== 'undefined'){
   };
 
   // Update last activity timestamp for active session duration approximation
-  try { if(typeof performance !== 'undefined') lastActivity = performance.now(); } catch {}
+  try { if(typeof performance !== 'undefined') (window as any).___efLastAct = performance.now(); } catch {}
   async function finalizeSession(){
     try {
       endCinematicIfActive();
       const sessionMs = Math.max(0, performance.now() - sessionStart);
       if(sessionMs>0) track({ type:'session_time', ms: Math.round(sessionMs) });
-  // Active time = time between start and last tracked user event; bounded by total session
-  const activeMsRaw = Math.max(0, Math.min(lastActivity - sessionStart, sessionMs));
+  // Active time = time between start and last tracked user event
+  const lastAct = (window as any).___efLastAct || sessionStart;
+  const activeMsRaw = Math.max(0, Math.min(lastAct - sessionStart, sessionMs));
   if(activeMsRaw>0) track({ type:'active_session_time', ms: Math.round(activeMsRaw) });
   // Bucket event (based on total session length)
   let bucket='';

@@ -127,20 +127,23 @@ const StatsPage: React.FC = () => {
             <StatRow label="Cinematic usage rate" value={( ()=>{ const pl=data.counters.page_loads||0; const cs=data.counters.cinematic_sessions||0; if(!pl) return '—'; return ((cs/pl)*100).toFixed(1)+'%'; })()} />
             <StatRow label="Avg open tab duration" value={formatDurationAvg(data.sums.session_time_ms_sum, data.sums.session_time_count)} />
             <StatRow label="Avg active duration" value={formatDurationAvg(data.sums.active_session_time_ms_sum, data.sums.active_session_time_count)} />
-            {(()=>{ // median approximations not stored yet -> show placeholder if insufficient data
-              // We don't have raw distribution; approximate median via buckets if available
-              const counts = [
-                data.counters.sess_lt_1m||0,
-                data.counters.sess_1_5m||0,
-                data.counters.sess_5_15m||0,
-                data.counters.sess_15_60m||0,
-                data.counters.sess_gt_60m||0
+            {(()=>{ // median approximation using bucket midpoints
+              const buckets=[
+                { c:data.counters.sess_lt_1m||0, min:0, max:60_000 },
+                { c:data.counters.sess_1_5m||0, min:60_000, max:5*60_000 },
+                { c:data.counters.sess_5_15m||0, min:5*60_000, max:15*60_000 },
+                { c:data.counters.sess_15_60m||0, min:15*60_000, max:60*60_000 },
+                { c:data.counters.sess_gt_60m||0, min:60*60_000, max:120*60_000 } // assume 60–120m span midpoint
               ];
-              const total = counts.reduce((a,b)=>a+b,0);
-              if(!total) return <StatRow label="Median open duration" value="—" />;
-              const thresholds=[60_000,5*60_000,15*60_000,60*60_000,120*60_000]; // assume 2h midpoint for >60m bucket for median estimate
-              let cum=0; let medianMs=0;
-              for(let i=0;i<counts.length;i++){ cum+=counts[i]; if(cum >= total/2){ medianMs = thresholds[i]/2 + (i>0?thresholds[i-1]:0)/2; break; } }
+              const total = buckets.reduce((a,b)=>a+b.c,0);
+              if(!total) return <StatRow label="Median open duration (est)" value="—" />;
+              let cum=0; let medianMs=0; const target = total/2;
+              for(const b of buckets){
+                if(cum + b.c >= target){
+                  medianMs = (b.min + b.max)/2; break;
+                }
+                cum += b.c;
+              }
               return <StatRow label="Median open duration (est)" value={formatMs(medianMs)} />;
             })()}
             <StatRow label="Avg cinematic time" value={formatDurationAvg(data.sums.cinematic_time_ms_sum, data.sums.cinematic_time_count)} />
