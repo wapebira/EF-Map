@@ -3036,8 +3036,8 @@ function App() {
   <HelpPanel accentIsBlue={accentIsBlue} supportExpandRequestId={supportExpandRequestId} supportContent={supportContent} />
     </div>
   </div>
-  <div style={hideUI?{display:'none'}:{ position: 'absolute', top: 10, left: 10, zIndex: 1, color: 'white', backgroundColor: 'rgba(0,0,0,0.5)', padding: '10px', borderRadius: '5px', ...scaleStyle }}>
-        <div style={{ display:'flex', alignItems:'stretch', gap:'6px' }}>
+  <div style={hideUI?{display:'none'}:{ position: 'absolute', top: 10, left: 10, zIndex: 1405, color: 'white', padding: '10px 12px 12px', borderRadius: '14px', border:'1px solid rgba(255,255,255,0.22)', background: 'linear-gradient(180deg, rgba(30,30,32,0.78) 0%, rgba(18,18,20,0.78) 55%, rgba(12,12,14,0.78) 100%)', backdropFilter:'blur(9px) saturate(140%)', boxShadow:'0 6px 24px -6px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.05) inset', ...scaleStyle }}>
+        <div style={{ display:'flex', alignItems:'stretch', gap:'6px', minWidth:340 }}>
           <div style={{ flex:1 }}>
             <AutoCompleteInput
               placeholder="Search for a system..."
@@ -3055,15 +3055,16 @@ function App() {
               background: 'var(--accent)',
               color: '#fff',
               border: 'none',
-              padding: '6px 12px', // match input vertical padding
-              fontSize: '13px', // align with .p2p-input font-size
+              padding: '6px 12px',
+              fontSize: '13px',
               lineHeight: '1.3',
               fontWeight: 600,
               cursor: 'pointer',
-              borderRadius: '3px',
-              alignSelf:'stretch', // match input height automatically
+              borderRadius: '6px',
+              alignSelf:'stretch',
               display:'flex',
-              alignItems:'center'
+              alignItems:'center',
+              boxShadow:'0 2px 6px rgba(0,0,0,0.45)'
             }}
             onClick={()=>{
               // Soft reset: clear inputs & routes but KEEP panel positions
