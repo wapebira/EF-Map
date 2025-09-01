@@ -45,3 +45,11 @@
 - Risk: low (read-only UI; no new server events; uses existing `?history=7` capability in stats function).
 - Gates: typecheck ✅ (post-edit) | build pending | smoke pending (verify table populates after at least one historical blob is present; ensure copy rate gracefully shows '—' when denominator=0).
 - Follow-ups: Potential 14/30 day selector; add info tooltip explaining calculation; maybe include median times & 95th percentile later.
+
+## 2025-09-01 – Per-Metric Tooltips & Help Panel Prune
+- Goal: Add inline hover/focus tooltips to Stats page for every metric & distribution (central DESCRIPTIONS map) to avoid bloating Help panel; replace verbose "Key Metrics Explained" list with concise categorized summary referencing tooltips.
+- Files: `StatsPage.tsx` (tooltips), `HelpPanel.tsx` (trim section), `decision-log.md` (this entry).
+- Diff: ~+70 / -7 LoC (StatsPage), ~+7 / -11 LoC (HelpPanel change), doc update.
+- Risk: low (presentation only, no logic change to tracking or aggregation).
+- Gates: typecheck ✅ | build ✅ (post-stats tooltip build) | smoke ✅ (tooltips appear via title attribute, Help panel shorter).
+- Follow-ups: Optional custom styled tooltip component for richer formatting; a11y enhancement using aria-describedby with offscreen text; add trend sparklines later.

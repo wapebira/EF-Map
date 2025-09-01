@@ -59,15 +59,15 @@ const baseSections: SectionDef[] = [
         title: 'Key Metrics Explained',
         content: (
           <div>
+            <p>The stats page now provides per‑metric hover tooltips (desktop: hover, mobile: long‑press/focus) so this panel keeps only a concise overview:</p>
             <ul style={{ paddingLeft: '18px', margin: '6px 0' }}>
-              <li><strong>P2P routes / Scout baselines / Optimizations:</strong> Feature adoption & optimization follow‑through.</li>
-              <li><strong>Shares created vs resolved:</strong> How often generated short links are actually opened.</li>
-              <li><strong>Baseline / P2P times:</strong> Average compute speed (lower is better).</li>
-              <li><strong>Cinematic sessions & usage rate:</strong> Portion of visits engaging the cinematic presentation.</li>
-              <li><strong>Avg session length & cinematic time:</strong> Engagement depth; cinematic share (%) shows how much time users spend in that mode.</li>
-              <li><strong>Feature flag counters (waypoints, avoid, planet filter, etc.):</strong> Which route planning tools see real-world use.</li>
+              <li><strong>Volume & Adoption:</strong> Route, baseline, optimization, share, copy, donation counts.</li>
+              <li><strong>Performance:</strong> Aggregated ms for P2P routing, baseline build, optimization time.</li>
+              <li><strong>Engagement:</strong> Session length, cinematic enters/time & share (% of session in cinematic).</li>
+              <li><strong>Feature Usage:</strong> Waypoints, avoid, return‑to‑start, planet legend bins, workers used, UI scale buckets.</li>
+              <li><strong>Distributions:</strong> Hops, savings (LY), planet bins active, workers, UI scale — used for shape, not identity.</li>
             </ul>
-            <p>Spikes or regressions (e.g. longer baseline time) can signal performance issues; low adoption may justify UI tweaks or future removal.</p>
+            <p>Use the tooltips for exact definitions & formulas (e.g. copy rate, savings buckets). All remain anonymous aggregate counters or sum/count pairs only.</p>
           </div>
         )
       },
