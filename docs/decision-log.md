@@ -37,3 +37,11 @@
 - Risk: low (isolated UI component).
 - Gates: typecheck ✅ | build ✅ | smoke pending (visual grouping & value sanity).
 - Follow-ups: Add tooltips & trend charts; consider dynamic import to reduce main bundle size; maybe expose error counters behind toggle if needed later.
+
+## 2025-09-01 – Reintroduce 7‑Day Roll-Up & Copy Rate Metric
+- Goal: Restore daily historical roll-up table (7 days) removed during redesign; add derived Copy Rate % (route copies / (p2p_routes + scout_optimizations)) to gauge share intent via clipboard usage relative to produced routes/optimizations.
+- Files: `StatsPage.tsx` (add new table, styling improvements), `decision-log.md` (this entry).
+- Diff: ~140 LoC modified in StatsPage (table replacement & polish) + doc update.
+- Risk: low (read-only UI; no new server events; uses existing `?history=7` capability in stats function).
+- Gates: typecheck ✅ (post-edit) | build pending | smoke pending (verify table populates after at least one historical blob is present; ensure copy rate gracefully shows '—' when denominator=0).
+- Follow-ups: Potential 14/30 day selector; add info tooltip explaining calculation; maybe include median times & 95th percentile later.

@@ -175,7 +175,7 @@ const StatsPage: React.FC = () => {
               {(()=>{ const keys=['hops_lt_10','hops_10_30','hops_30_60','hops_gt_60']; const labelMap:{[k:string]:string}={hops_lt_10:'<10',hops_10_30:'10–30',hops_30_60:'30–60',hops_gt_60:'>60'}; const rows=keys.map(k=>({k,c:data.counters[k]||0,label:labelMap[k]})); const tot=rows.reduce((a,b)=>a+b.c,0); return <DistTable title="P2P Route Hops" rows={rows} total={tot} />; })()}
               {(()=>{ const keys=['scout_hops_lt_10','scout_hops_10_30','scout_hops_30_60','scout_hops_gt_60']; const labelMap:{[k:string]:string}={scout_hops_lt_10:'<10',scout_hops_10_30:'10–30',scout_hops_30_60:'30–60',scout_hops_gt_60:'>60'}; const rows=keys.map(k=>({k,c:data.counters[k]||0,label:labelMap[k]})); const tot=rows.reduce((a,b)=>a+b.c,0); return <DistTable title="Scout Baseline Hops" rows={rows} total={tot} />; })()}
               {(()=>{ const keys=['save_lt_5','save_5_20','save_20_50','save_gt_50']; const labelMap:{[k:string]:string}={save_lt_5:'<5',save_5_20:'5–20',save_20_50:'20–50',save_gt_50:'>50'}; const rows=keys.map(k=>({k,c:data.counters[k]||0,label:labelMap[k]})); const tot=rows.reduce((a,b)=>a+b.c,0); return <DistTable title="Savings (LY)" rows={rows} total={tot} />; })()}
-              {(()=>{ const keys=['bins_5','bins_3_4','bins_1_2','bins_0']; const labelMap:{[k:string]:string}={bins_5:'5 bins',bins_3_4:'3–4 bins',bins_1_2:'1–2 bins',bins_0:'0'}; const rows=keys.map(k=>({k,c:data.counters[k]||0,label:labelMap[k]})); const tot=rows.reduce((a,b)=>a+b.c,0); return <DistTable title="Planet Bins Active" rows={rows} total={tot} />; })()}
+              {(()=>{ const keys=['bins_5','bins_3_4','bins_1_2','bins_0']; const labelMap:{[k:string]:string}={bins_5:'5',bins_3_4:'3–4',bins_1_2:'1–2',bins_0:'0'}; const rows=keys.map(k=>({k,c:data.counters[k]||0,label:labelMap[k]})); const tot=rows.reduce((a,b)=>a+b.c,0); return <DistTable title="Planet Bins Active" rows={rows} total={tot} />; })()}
               {(()=>{ const workerKeys=Object.keys(data.counters).filter(k=> k.startsWith('opt_workers_used_')); const rows=workerKeys.sort((a,b)=> parseInt(a.split('_').pop()||'0')-parseInt(b.split('_').pop()||'0')).map(k=>({k,c:data.counters[k]||0,label:k.replace('opt_workers_used_','')})); const tot=rows.reduce((a,b)=>a+b.c,0); return <DistTable title="Workers Used" rows={rows} total={tot} />; })()}
               {(()=>{ const scaleKeys=Object.keys(data.counters).filter(k=> k.startsWith('ui_scale_')); const rows=scaleKeys.sort((a,b)=> parseInt(a.replace('ui_scale_',''))-parseInt(b.replace('ui_scale_',''))).map(k=>({k,c:data.counters[k]||0,label:k.replace('ui_scale_','')+'%'})); const tot=rows.reduce((a,b)=>a+b.c,0); return <DistTable title="UI Scale" rows={rows} total={tot} />; })()}
             </div>
@@ -185,40 +185,26 @@ const StatsPage: React.FC = () => {
       <div style={{ marginTop:22, fontSize:'11px', opacity:0.5 }}>Updated: {data? new Date(data.updatedAt).toLocaleString(): '—'}</div>
       {history.length>0 && (
         <div style={{ marginTop:30 }}>
-          <h2 style={{ fontSize:'16px', margin:'0 0 8px 0' }}>Last 7 Days</h2>
-          <div style={{ overflowX:'auto' }}>
+          <h2 style={{ fontSize:'16px', margin:'0 0 10px 0' }}>Last 7 Days (Newest First)</h2>
+          <div style={{ overflowX:'auto', border:'1px solid rgba(255,255,255,0.12)', borderRadius:10, background:'rgba(255,255,255,0.04)' }}>
             <table style={{ borderCollapse:'collapse', width:'100%', fontSize:'12px' }}>
               <thead>
-                <tr style={{ textAlign:'left', background:'rgba(255,255,255,0.05)' }}>
-                  <th style={{ padding:'6px 8px' }}>Date</th>
-                  <th style={{ padding:'6px 8px' }}>P2P</th>
-                  <th style={{ padding:'6px 8px' }}>Baselines</th>
-                  <th style={{ padding:'6px 8px' }}>Opt starts</th>
-                  <th style={{ padding:'6px 8px' }}>Shares</th>
-                  <th style={{ padding:'6px 8px' }}>Resolved</th>
-                  <th style={{ padding:'6px 8px' }}>Avg P2P</th>
-                  <th style={{ padding:'6px 8px' }}>Avg baseline</th>
-                  <th style={{ padding:'6px 8px' }}>Page loads</th>
-                  <th style={{ padding:'6px 8px' }}>Cinematic sessions</th>
-                  <th style={{ padding:'6px 8px' }}>Avg active session</th>
-                  <th style={{ padding:'6px 8px' }}>Avg LY saved</th>
-                  <th style={{ padding:'6px 8px' }}>Total LY saved</th>
+                <tr style={{ textAlign:'left', background:'rgba(255,255,255,0.06)' }}>
+                  {['Date','Page loads','P2P','Baselines','Opt starts','Shares','Resolved','Avg P2P','Avg baseline','Avg active session','Avg LY saved','Total LY saved','Cinematic sessions','Copy rate %'].map(h=> <th key={h} style={{ padding:'6px 8px', fontWeight:600 }}>{h}</th>)}
                 </tr>
               </thead>
               <tbody>
-                {[...history].sort((a,b)=>{
-                  const da = (a.date? a.date.replace(/\.json$/,'') : a.updatedAt.slice(0,10));
-                  const db = (b.date? b.date.replace(/\.json$/,'') : b.updatedAt.slice(0,10));
-                  return db.localeCompare(da); // newest first
-                }).map(h=>{
+                {[...history].sort((a,b)=>{ const da=(a.date? a.date.replace(/\.json$/,''):a.updatedAt.slice(0,10)); const db=(b.date? b.date.replace(/\.json$/,''):b.updatedAt.slice(0,10)); return db.localeCompare(da); }).map(h=>{
                   const avgP2P = h.sums.p2p_route_time_count ? (h.sums.p2p_route_time_ms_sum / h.sums.p2p_route_time_count) : undefined;
                   const avgBase = h.sums.scout_baseline_time_count ? (h.sums.scout_baseline_time_ms_sum / h.sums.scout_baseline_time_count) : undefined;
                   const avgActive = h.sums.active_session_time_count ? (h.sums.active_session_time_ms_sum / h.sums.active_session_time_count) : undefined;
                   const avgSaved = h.sums.scout_opt_savings_count ? (h.sums.scout_opt_savings_ly_sum / h.sums.scout_opt_savings_count) : undefined;
                   const totalSaved = h.sums.scout_opt_savings_ly_sum;
+                  const copyRate = (()=>{ const total=(h.counters.p2p_routes||0)+(h.counters.scout_optimizations||0); if(!total) return '—'; const copies=h.counters.route_copies||0; return ((copies/total)*100).toFixed(1); })();
                   return (
-                    <tr key={h.date||h.updatedAt} style={{ borderTop:'1px solid rgba(255,255,255,0.07)' }}>
-                      <td style={{ padding:'4px 8px', opacity:0.85 }}>{(h.date? h.date.replace(/\.json$/,'') : h.updatedAt.slice(0,10))}</td>
+                    <tr key={h.date||h.updatedAt} style={{ borderTop:'1px solid rgba(255,255,255,0.08)' }}>
+                      <td style={{ padding:'4px 8px', opacity:0.85 }}>{(h.date? h.date.replace(/\.json$/,''):h.updatedAt.slice(0,10))}</td>
+                      <td style={{ padding:'4px 8px' }}>{h.counters.page_loads||0}</td>
                       <td style={{ padding:'4px 8px' }}>{h.counters.p2p_routes||0}</td>
                       <td style={{ padding:'4px 8px' }}>{h.counters.scout_baselines||0}</td>
                       <td style={{ padding:'4px 8px' }}>{h.counters.scout_optimizations||0}</td>
@@ -226,11 +212,11 @@ const StatsPage: React.FC = () => {
                       <td style={{ padding:'4px 8px' }}>{h.counters.shared_resolved||0}</td>
                       <td style={{ padding:'4px 8px' }}>{avgP2P!==undefined? formatMs(avgP2P): '—'}</td>
                       <td style={{ padding:'4px 8px' }}>{avgBase!==undefined? formatMs(avgBase): '—'}</td>
-                      <td style={{ padding:'4px 8px' }}>{h.counters.page_loads||0}</td>
-                      <td style={{ padding:'4px 8px' }}>{h.counters.cinematic_sessions||0}</td>
                       <td style={{ padding:'4px 8px' }}>{avgActive!==undefined? formatMs(avgActive): '—'}</td>
                       <td style={{ padding:'4px 8px' }}>{avgSaved!==undefined? avgSaved.toFixed(2): '—'}</td>
                       <td style={{ padding:'4px 8px' }}>{totalSaved!==undefined? totalSaved.toFixed(2): '—'}</td>
+                      <td style={{ padding:'4px 8px' }}>{h.counters.cinematic_sessions||0}</td>
+                      <td style={{ padding:'4px 8px' }}>{copyRate==='—'? '—' : copyRate+'%'}</td>
                     </tr>
                   );
                 })}
