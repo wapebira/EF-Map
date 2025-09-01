@@ -33,9 +33,34 @@ async function flush(){
   if(QUEUE.length) scheduleFlush();
 }
 
+const MAX_ACTIVE_GAP = 5 * 60 * 1000; // 5 minutes inactivity cap per gap
+
+function noteActivity(){
+  try {
+    if(typeof performance === 'undefined') return;
+    const now = performance.now();
+    const w:any = window as any;
+    // Legacy simple last-activity timestamp retained (not used for final calc now)
+    w.___efLastAct = now;
+    // Segmented active time accumulation:
+    if(w.___efActLastEvt === undefined){
+      w.___efActLastEvt = now; // first event
+      w.___efActAccum = 0;
+    } else {
+      const gap = now - w.___efActLastEvt;
+      // Add capped gap to accumulated active time
+      if(gap > 0){
+        const add = gap > MAX_ACTIVE_GAP ? MAX_ACTIVE_GAP : gap;
+        w.___efActAccum = (w.___efActAccum||0) + add;
+        w.___efActLastEvt = now;
+      }
+    }
+  } catch {/* ignore */}
+}
+
 export function track(evt: UsageEventBase){
   QUEUE.push(evt);
-  try { if(typeof performance !== 'undefined') { const now=performance.now(); (window as any).___efLastAct = now; } } catch {}
+  noteActivity();
   if(QUEUE.length >= MAX_BATCH) flush(); else scheduleFlush();
 }
 
@@ -49,10 +74,10 @@ export async function trackImmediate(evt: UsageEventBase){
   try {
     const res = await fetch('/.netlify/functions/usage-event', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(evt) });
     if(!res.ok){
-      // enqueue fallback to try later
-      track(evt);
+      track(evt); // fallback enqueue
+    } else {
+      noteActivity();
     }
-  try { if(typeof performance !== 'undefined') { const now=performance.now(); (window as any).___efLastAct = now; } } catch {}
   } catch {
     track(evt);
   }
@@ -69,6 +94,8 @@ if(typeof window !== 'undefined'){
   try { track({ type:'page_load' }); } catch {}
   // We'll store last activity on window to share with track()/trackImmediate
   (window as any).___efLastAct = sessionStart;
+  // Initialize segmented active timing state
+  (window as any).___efActLastEvt = sessionStart; (window as any).___efActAccum = 0;
 
   function endCinematicIfActive(){
     if(cinematicActive){
@@ -99,10 +126,13 @@ if(typeof window !== 'undefined'){
       endCinematicIfActive();
       const sessionMs = Math.max(0, performance.now() - sessionStart);
       if(sessionMs>0) track({ type:'session_time', ms: Math.round(sessionMs) });
-  // Active time = time between start and last tracked user event
-  const lastAct = (window as any).___efLastAct || sessionStart;
-  const activeMsRaw = Math.max(0, Math.min(lastAct - sessionStart, sessionMs));
-  if(activeMsRaw>0) track({ type:'active_session_time', ms: Math.round(activeMsRaw) });
+  // Active time (segmented): accumulated capped gaps + final gap (capped)
+  const w:any = window as any;
+  let activeAccum = w.___efActAccum || 0;
+  const lastEvt = w.___efActLastEvt || sessionStart;
+  const finalGap = performance.now() - lastEvt;
+  if(finalGap > 0){ activeAccum += finalGap > MAX_ACTIVE_GAP ? MAX_ACTIVE_GAP : finalGap; }
+  if(activeAccum>0){ track({ type:'active_session_time', ms: Math.round(Math.min(activeAccum, sessionMs)) }); }
   // Bucket event (based on total session length)
   let bucket='';
   if(sessionMs < 60_000) bucket='sess_lt_1m';

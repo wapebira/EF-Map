@@ -54,16 +54,46 @@ const StatsPage: React.FC = () => {
   };
 
   useEffect(()=>{ load(); const id = setInterval(load, 15000); return ()=> clearInterval(id); }, []);
+  // Force global body styles for consistent dark layout & natural scrolling
+  useEffect(()=>{
+    const prev = {
+      display: document.body.style.display,
+      placeItems: (document.body.style as any).placeItems,
+      alignItems: document.body.style.alignItems,
+      justifyContent: document.body.style.justifyContent,
+      background: document.body.style.background,
+      color: document.body.style.color,
+    };
+    document.body.style.display = 'block';
+    document.body.style.alignItems = '';
+    document.body.style.justifyContent = '';
+    (document.body.style as any).placeItems = '';
+    document.body.style.background = '#1f1f22';
+    document.body.style.color = '#e7e9ed';
+    document.documentElement.style.backgroundColor = '#1f1f22';
+    return () => {
+      document.body.style.display = prev.display;
+      document.body.style.alignItems = prev.alignItems;
+      document.body.style.justifyContent = prev.justifyContent;
+      (document.body.style as any).placeItems = prev.placeItems;
+      document.body.style.background = prev.background;
+      document.body.style.color = prev.color;
+      // Don't reset root background intentionally to avoid flash if user navigates back quickly
+    };
+  }, []);
 
+  // Force dark theme colors regardless of system preference
+  const pageBg = '#1f1f22';
+  const pageColor = '#e7e9ed';
   return (
-    <div style={{ maxWidth:800, margin:'30px auto', padding:'0 18px 40px 18px', fontFamily:'system-ui, sans-serif' }}>
+    <div style={{ maxWidth:900, margin:'0 auto', padding:'30px 26px 60px 26px', fontFamily:'system-ui, sans-serif', color:pageColor, background:pageBg, minHeight:'100vh', boxSizing:'border-box', overflowY:'auto' }}>
       <h1 style={{ fontSize:'28px', margin:'0 0 10px 0' }}>Usage Stats</h1>
       <p style={{ margin:'0 0 18px 0', fontSize:'14px', lineHeight:1.5, opacity:0.85 }}>Anonymous aggregate counters since deployment. Updates every ~15s. No personal or identifying data is tracked—only feature adoption and performance averages to guide roadmap decisions.</p>
       {error && <div style={{ color:'#f66', marginBottom:12 }}>{error}</div>}
       {!data && !error && <div>Loading...</div>}
   {data && (
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(260px,1fr))', gap:'18px' }}>
-          <section style={{ background:'rgba(255,255,255,0.04)', padding:'14px 16px', border:'1px solid rgba(255,255,255,0.12)', borderRadius:8 }}>
+  <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(260px,1fr))', gap:'18px' }}>
+          <section style={{ background:'rgba(255,255,255,0.06)', padding:'14px 16px', border:'1px solid rgba(255,255,255,0.15)', borderRadius:8, boxShadow:'0 2px 4px rgba(0,0,0,0.4)' }}>
             <h2 style={{ margin:'0 0 6px 0', fontSize:'15px', letterSpacing:'.5px', textTransform:'uppercase', opacity:0.85 }}>Routes</h2>
             <StatRow label="P2P routes" value={data.counters.p2p_routes||0} />
             <StatRow label="Scout baselines" value={data.counters.scout_baselines||0} />
@@ -72,7 +102,7 @@ const StatsPage: React.FC = () => {
             <StatRow label="Shared routes resolved" value={data.counters.shared_resolved||0} />
             <StatRow label="Planet-filter baselines" value={data.counters.planet_filter_baselines||0} />
           </section>
-          <section style={{ background:'rgba(255,255,255,0.04)', padding:'14px 16px', border:'1px solid rgba(255,255,255,0.12)', borderRadius:8 }}>
+          <section style={{ background:'rgba(255,255,255,0.06)', padding:'14px 16px', border:'1px solid rgba(255,255,255,0.15)', borderRadius:8, boxShadow:'0 2px 4px rgba(0,0,0,0.4)' }}>
             <h2 style={{ margin:'0 0 6px 0', fontSize:'15px', letterSpacing:'.5px', textTransform:'uppercase', opacity:0.85 }}>Performance (avg)</h2>
             <StatRow label="P2P route time" value={formatDurationAvg(data.sums.p2p_route_time_ms_sum, data.sums.p2p_route_time_count)} />
             <StatRow label="Scout baseline time" value={formatDurationAvg(data.sums.scout_baseline_time_ms_sum, data.sums.scout_baseline_time_count)} />
@@ -81,7 +111,7 @@ const StatsPage: React.FC = () => {
             <StatRow label="Scout LY saved (total)" value={( ()=> { const s=data.sums.scout_opt_savings_ly_sum; return s? s.toFixed(2)+' LY':'—'; })()} />
             <StatRow label="Scout LY saved (avg)" value={( ()=> { const s=data.sums.scout_opt_savings_ly_sum; const c=data.sums.scout_opt_savings_count; if(!s||!c) return '—'; return (s/c).toFixed(2)+' LY'; })()} />
           </section>
-          <section style={{ background:'rgba(255,255,255,0.04)', padding:'14px 16px', border:'1px solid rgba(255,255,255,0.12)', borderRadius:8 }}>
+          <section style={{ background:'rgba(255,255,255,0.06)', padding:'14px 16px', border:'1px solid rgba(255,255,255,0.15)', borderRadius:8, boxShadow:'0 2px 4px rgba(0,0,0,0.4)' }}>
             <h2 style={{ margin:'0 0 6px 0', fontSize:'15px', letterSpacing:'.5px', textTransform:'uppercase', opacity:0.85 }}>Features</h2>
             <StatRow label="Referral clicks" value={data.counters.referral_clicks||0} />
             <StatRow label="Baseline errors" value={data.counters.baseline_errors||0} />
@@ -92,7 +122,7 @@ const StatsPage: React.FC = () => {
             <StatRow label="Return-to-start used" value={data.counters.return_to_start||0} />
             <StatRow label="Gate reachable toggle" value={data.counters.gate_reachable||0} />
           </section>
-          <section style={{ background:'rgba(255,255,255,0.04)', padding:'14px 16px', border:'1px solid rgba(255,255,255,0.12)', borderRadius:8 }}>
+          <section style={{ background:'rgba(255,255,255,0.06)', padding:'14px 16px', border:'1px solid rgba(255,255,255,0.15)', borderRadius:8, boxShadow:'0 2px 4px rgba(0,0,0,0.4)' }}>
             <h2 style={{ margin:'0 0 6px 0', fontSize:'15px', letterSpacing:'.5px', textTransform:'uppercase', opacity:0.85 }}>UI</h2>
             <StatRow label="Blue theme" value={data.counters.theme_blue||0} />
             <StatRow label="Orange theme" value={data.counters.theme_orange||0} />
@@ -119,7 +149,7 @@ const StatsPage: React.FC = () => {
               return <StatRow label="Route copy rate" value={rate} />;
             })()}
           </section>
-          <section style={{ background:'rgba(255,255,255,0.04)', padding:'14px 16px', border:'1px solid rgba(255,255,255,0.12)', borderRadius:8 }}>
+          <section style={{ background:'rgba(255,255,255,0.06)', padding:'14px 16px', border:'1px solid rgba(255,255,255,0.15)', borderRadius:8, boxShadow:'0 2px 4px rgba(0,0,0,0.4)' }}>
             <h2 style={{ margin:'0 0 6px 0', fontSize:'15px', letterSpacing:'.5px', textTransform:'uppercase', opacity:0.85 }}>Engagement</h2>
             <StatRow label="Page loads" value={data.counters.page_loads||0} />
             <StatRow label="Cinematic sessions" value={data.counters.cinematic_sessions||0} />
@@ -149,7 +179,7 @@ const StatsPage: React.FC = () => {
             <StatRow label="Avg cinematic time" value={formatDurationAvg(data.sums.cinematic_time_ms_sum, data.sums.cinematic_time_count)} />
             <StatRow label="Avg cinematic share" value={( ()=>{ const cSum=data.sums.cinematic_time_ms_sum; const sSum=data.sums.session_time_ms_sum; if(!cSum||!sSum) return '—'; return ((cSum/sSum)*100).toFixed(1)+'%'; })()} />
           </section>
-          <section style={{ background:'rgba(255,255,255,0.04)', padding:'14px 16px', border:'1px solid rgba(255,255,255,0.12)', borderRadius:8, display:'flex', flexDirection:'column' }}>
+          <section style={{ background:'rgba(255,255,255,0.06)', padding:'14px 16px', border:'1px solid rgba(255,255,255,0.15)', borderRadius:8, display:'flex', flexDirection:'column', boxShadow:'0 2px 4px rgba(0,0,0,0.4)' }}>
             <h2 style={{ margin:'0 0 8px 0', fontSize:'15px', letterSpacing:'.5px', textTransform:'uppercase', opacity:0.85 }}>UI Scale Distribution</h2>
             {(()=>{
               const allowed = [50,60,70,80,90,100,110,120,130];
