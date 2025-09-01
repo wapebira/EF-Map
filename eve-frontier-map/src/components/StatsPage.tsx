@@ -125,7 +125,24 @@ const StatsPage: React.FC = () => {
             <StatRow label="Cinematic sessions" value={data.counters.cinematic_sessions||0} />
             <StatRow label="Cinematic enters" value={data.counters.cinematic_enters||0} />
             <StatRow label="Cinematic usage rate" value={( ()=>{ const pl=data.counters.page_loads||0; const cs=data.counters.cinematic_sessions||0; if(!pl) return '—'; return ((cs/pl)*100).toFixed(1)+'%'; })()} />
-            <StatRow label="Avg session length" value={formatDurationAvg(data.sums.session_time_ms_sum, data.sums.session_time_count)} />
+            <StatRow label="Avg open tab duration" value={formatDurationAvg(data.sums.session_time_ms_sum, data.sums.session_time_count)} />
+            <StatRow label="Avg active duration" value={formatDurationAvg(data.sums.active_session_time_ms_sum, data.sums.active_session_time_count)} />
+            {(()=>{ // median approximations not stored yet -> show placeholder if insufficient data
+              // We don't have raw distribution; approximate median via buckets if available
+              const counts = [
+                data.counters.sess_lt_1m||0,
+                data.counters.sess_1_5m||0,
+                data.counters.sess_5_15m||0,
+                data.counters.sess_15_60m||0,
+                data.counters.sess_gt_60m||0
+              ];
+              const total = counts.reduce((a,b)=>a+b,0);
+              if(!total) return <StatRow label="Median open duration" value="—" />;
+              const thresholds=[60_000,5*60_000,15*60_000,60*60_000,120*60_000]; // assume 2h midpoint for >60m bucket for median estimate
+              let cum=0; let medianMs=0;
+              for(let i=0;i<counts.length;i++){ cum+=counts[i]; if(cum >= total/2){ medianMs = thresholds[i]/2 + (i>0?thresholds[i-1]:0)/2; break; } }
+              return <StatRow label="Median open duration (est)" value={formatMs(medianMs)} />;
+            })()}
             <StatRow label="Avg cinematic time" value={formatDurationAvg(data.sums.cinematic_time_ms_sum, data.sums.cinematic_time_count)} />
             <StatRow label="Avg cinematic share" value={( ()=>{ const cSum=data.sums.cinematic_time_ms_sum; const sSum=data.sums.session_time_ms_sum; if(!cSum||!sSum) return '—'; return ((cSum/sSum)*100).toFixed(1)+'%'; })()} />
           </section>
@@ -225,6 +242,56 @@ const StatsPage: React.FC = () => {
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+      {data && (
+        <div style={{ marginTop:30 }}>
+          <h2 style={{ fontSize:'16px', margin:'0 0 8px 0' }}>Session Duration Distribution</h2>
+          <table style={{ borderCollapse:'collapse', width:'100%', fontSize:12 }}>
+            <thead>
+              <tr style={{ textAlign:'left', background:'rgba(255,255,255,0.05)' }}>
+                <th style={{ padding:'6px 8px' }}>Bucket</th>
+                <th style={{ padding:'6px 8px' }}>Count</th>
+                <th style={{ padding:'6px 8px' }}>%</th>
+                <th style={{ padding:'6px 8px' }}>Bar</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(()=>{
+                const buckets=[
+                  { key:'sess_lt_1m', label:'<1m' },
+                  { key:'sess_1_5m', label:'1–5m' },
+                  { key:'sess_5_15m', label:'5–15m' },
+                  { key:'sess_15_60m', label:'15–60m' },
+                  { key:'sess_gt_60m', label:'>60m' }
+                ];
+                const rows = buckets.map(b=> ({ ...b, count: data.counters[b.key]||0 }));
+                const total = rows.reduce((a,r)=>a+r.count,0);
+                if(!total) return <tr><td style={{ padding:'6px 8px', opacity:.7 }} colSpan={4}>No session buckets recorded yet.</td></tr>;
+                return <>
+                  {rows.map(r=>{ const pct = (r.count/total)*100; return (
+                    <tr key={r.key} style={{ borderTop:'1px solid rgba(255,255,255,0.08)' }}>
+                      <td style={{ padding:'4px 8px' }}>{r.label}</td>
+                      <td style={{ padding:'4px 8px', fontVariantNumeric:'tabular-nums' }}>{r.count}</td>
+                      <td style={{ padding:'4px 8px', fontVariantNumeric:'tabular-nums' }}>{pct.toFixed(1)}%</td>
+                      <td style={{ padding:'4px 8px' }}>
+                        <div style={{ background:'rgba(255,255,255,0.08)', height:6, borderRadius:3, position:'relative' }}>
+                          <div style={{ position:'absolute', left:0, top:0, bottom:0, width:pct+'%', background:'var(--accent)', borderRadius:3 }} />
+                        </div>
+                      </td>
+                    </tr>
+                  ); })}
+                  <tr style={{ borderTop:'1px solid rgba(255,255,255,0.12)', fontWeight:600 }}>
+                    <td style={{ padding:'4px 8px' }}>Total</td>
+                    <td style={{ padding:'4px 8px', fontVariantNumeric:'tabular-nums' }}>{total}</td>
+                    <td style={{ padding:'4px 8px' }}>100%</td>
+                    <td />
+                  </tr>
+                </>;
+              })()}
+            </tbody>
+          </table>
+          <div style={{ marginTop:6, fontSize:10, opacity:.55 }}>Open duration = full tab lifetime; active duration = time until last interaction. Median is an approximation from bucket midpoints.</div>
         </div>
       )}
     </div>

@@ -32,9 +32,17 @@ const EVENT_MAP = {
   // New engagement / cinematic events
   page_load: { counters: ['page_loads'] },
   session_time: { sum: { key: 'session_time_ms_sum', countKey: 'session_time_count', valueField: 'ms' } },
+  active_session_time: { sum: { key: 'active_session_time_ms_sum', countKey: 'active_session_time_count', valueField: 'ms' } },
   cinematic_enter: { counters: ['cinematic_enters'] },
   cinematic_first: { counters: ['cinematic_sessions'] },
   cinematic_time: { sum: { key: 'cinematic_time_ms_sum', countKey: 'cinematic_time_count', valueField: 'ms' } },
+  // Session duration buckets (client sends bucket id only at session end to reduce server calc)
+  session_bucket: { countersDynamic: (b)=> {
+    const valid=['sess_lt_1m','sess_1_5m','sess_5_15m','sess_15_60m','sess_gt_60m'];
+    const v = b.bucket;
+    if(valid.includes(v)) return [v];
+    return [];
+  } },
   feature_flags: { countersDynamic: (b)=> {
     const arr = [];
     if(b.waypoints) arr.push('waypoints_used');

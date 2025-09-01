@@ -35,6 +35,7 @@ async function flush(){
 
 export function track(evt: UsageEventBase){
   QUEUE.push(evt);
+  try { if(typeof performance !== 'undefined') { /* update last activity */ (window as any).___efLastAct = performance.now(); } } catch {}
   if(QUEUE.length >= MAX_BATCH) flush(); else scheduleFlush();
 }
 
@@ -65,6 +66,7 @@ if(typeof window !== 'undefined'){
 
   // Mark page load
   try { track({ type:'page_load' }); } catch {}
+  let lastActivity = sessionStart; // Initialize last activity timestamp
 
   function endCinematicIfActive(){
     if(cinematicActive){
@@ -88,11 +90,24 @@ if(typeof window !== 'undefined'){
     }
   };
 
+  // Update last activity timestamp for active session duration approximation
+  try { if(typeof performance !== 'undefined') lastActivity = performance.now(); } catch {}
   async function finalizeSession(){
     try {
       endCinematicIfActive();
       const sessionMs = Math.max(0, performance.now() - sessionStart);
       if(sessionMs>0) track({ type:'session_time', ms: Math.round(sessionMs) });
+  // Active time = time between start and last tracked user event; bounded by total session
+  const activeMsRaw = Math.max(0, Math.min(lastActivity - sessionStart, sessionMs));
+  if(activeMsRaw>0) track({ type:'active_session_time', ms: Math.round(activeMsRaw) });
+  // Bucket event (based on total session length)
+  let bucket='';
+  if(sessionMs < 60_000) bucket='sess_lt_1m';
+  else if(sessionMs < 5*60_000) bucket='sess_1_5m';
+  else if(sessionMs < 15*60_000) bucket='sess_5_15m';
+  else if(sessionMs < 60*60_000) bucket='sess_15_60m';
+  else bucket='sess_gt_60m';
+  track({ type:'session_bucket', bucket });
       if(cinematicAccum>0) track({ type:'cinematic_time', ms: Math.round(cinematicAccum) });
       await flush();
     } catch {}
