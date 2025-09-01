@@ -1265,15 +1265,15 @@ function App() {
             uColorA:{value:new THREE.Color(0x0b141c)},
             uColorB:{value:new THREE.Color(0x162630)},
             uBandColor:{value:new THREE.Color(0x274a62)},
-            uBandIntensity:{value:0.20},
-            uBandWidth:{value:0.40},
-            uNoiseAmp:{value:0.04},
-            uNoiseScale:{value:0.002},
-            uBrightness:{value:0.58},
+            uBandIntensity:{value:0.28},
+            uBandWidth:{value:0.45},
+            uNoiseAmp:{value:0.055},
+            uNoiseScale:{value:0.0022},
+            uBrightness:{value:0.70},
             uTime:{value:0}
           },
           vertexShader:'varying vec3 vPos; void main(){ vPos=position; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }',
-          fragmentShader:`varying vec3 vPos; uniform vec3 uColorA; uniform vec3 uColorB; uniform vec3 uBandColor; uniform float uBandIntensity; uniform float uBandWidth; uniform float uNoiseAmp; uniform float uNoiseScale; uniform float uBrightness; uniform float uTime;\nfloat hash(vec3 p){ p=fract(p*0.3183099+vec3(0.11,0.17,0.23)); p*=17.0; return fract(p.x*p.y*(p.x+p.y)+p.z*(p.x+p.z)); }\nfloat smoothNoise(vec3 p){ vec3 i=floor(p); vec3 f=fract(p); float n=0.0; for(int xo=0; xo<2; xo++){ for(int yo=0; yo<2; yo++){ for(int zo=0; zo<2; zo++){ vec3 of=vec3(float(xo),float(yo),float(zo)); float h=hash(i+of); vec3 w=abs(f-of); w=1.0-w; float wght = w.x*w.y*w.z; n += h*wght; } } } return n; }\nvoid main(){ vec3 n = normalize(vPos); float basis = n.x*n.x - n.y*n.y + n.z*0.35; basis = 0.5 + 0.5*sin(basis*2.2); vec3 col = mix(uColorA, uColorB, basis*0.35); float band = exp(-pow(abs(n.y)/uBandWidth,2.0)); col += uBandColor * (uBandIntensity * band); float nn = smoothNoise(n / uNoiseScale + vec3(uTime*0.015, uTime*0.01, -uTime*0.02)); col += (nn-0.5) * uNoiseAmp; col *= uBrightness; col = clamp(col,0.0,1.0); gl_FragColor = vec4(col, 0.60); }`
+          fragmentShader:`varying vec3 vPos; uniform vec3 uColorA; uniform vec3 uColorB; uniform vec3 uBandColor; uniform float uBandIntensity; uniform float uBandWidth; uniform float uNoiseAmp; uniform float uNoiseScale; uniform float uBrightness; uniform float uTime;\nfloat hash(vec3 p){ p=fract(p*0.3183099+vec3(0.11,0.17,0.23)); p*=17.0; return fract(p.x*p.y*(p.x+p.y)+p.z*(p.x+p.z)); }\nfloat smoothNoise(vec3 p){ vec3 i=floor(p); vec3 f=fract(p); float n=0.0; for(int xo=0; xo<2; xo++){ for(int yo=0; yo<2; yo++){ for(int zo=0; zo<2; zo++){ vec3 of=vec3(float(xo),float(yo),float(zo)); float h=hash(i+of); vec3 w=abs(f-of); w=1.0-w; float wght = w.x*w.y*w.z; n += h*wght; } } } return n; }\nvoid main(){ vec3 n = normalize(vPos); float basis = n.x*n.x - n.y*n.y + n.z*0.35; basis = 0.5 + 0.5*sin(basis*2.2); vec3 col = mix(uColorA, uColorB, basis*0.35); float band = exp(-pow(abs(n.y)/uBandWidth,2.0)); col += uBandColor * (uBandIntensity * band); float nn = smoothNoise(n / uNoiseScale + vec3(uTime*0.02, uTime*0.015, -uTime*0.025)); col += (nn-0.5) * uNoiseAmp; col *= uBrightness; col = clamp(col,0.0,1.0); gl_FragColor = vec4(col, 0.72); }`
         });
         const sky = new THREE.Mesh(skyGeo, skyMat); sky.renderOrder = -1000; sky.frustumCulled=false; skyDomeRef.current = sky; sceneRef.current.add(sky);
       } catch {/* ignore */}
