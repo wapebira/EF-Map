@@ -598,6 +598,20 @@ function App() {
     }
     selectedLabelObj.current.visible = true;
 
+    // Selection halo (pulsing sprite) setup
+    try {
+      if(sceneRef.current){
+        if(!selectedStarHaloRef.current){
+          const haloGeo = new THREE.BufferGeometry();
+          haloGeo.setAttribute('position', new THREE.Float32BufferAttribute([0,0,0],3));
+          const haloMat = new THREE.PointsMaterial({ size: 60, sizeAttenuation:false, transparent:true, opacity:0.8, color: accentIsBlue? 0x00aaff : 0xff4c26, depthWrite:false, map: ringTexture, alphaTest:0.3 });
+          selectedStarHaloRef.current = new THREE.Points(haloGeo, haloMat);
+        }
+        newSelectedLabelParent.add(selectedStarHaloRef.current!);
+        selectedStarHaloRef.current!.visible = true;
+      }
+    } catch {/* ignore */}
+
     // Fast local recolor so user sees feedback before layout effect re-runs.
     try {
       if (!isPlanetCountActive && !isRegionHighlighterActive && starFieldRef.current) {
@@ -1223,8 +1237,10 @@ function App() {
 
     sceneRef.current = new THREE.Scene();
     cameraRef.current = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 10000000);
-    rendererRef.current = new THREE.WebGLRenderer({ antialias: true });
-    rendererRef.current.setSize(window.innerWidth, window.innerHeight);
+  rendererRef.current = new THREE.WebGLRenderer({ antialias: true });
+  // Cap DPR for performance while keeping crisp rendering
+  try { rendererRef.current.setPixelRatio(Math.min(2, window.devicePixelRatio || 1)); } catch {}
+  rendererRef.current.setSize(window.innerWidth, window.innerHeight);
     currentMount.appendChild(rendererRef.current.domElement);
 
     // New: CSS2DRenderer setup
@@ -1265,7 +1281,8 @@ function App() {
     hoverPointRef.current.visible = false;
     sceneRef.current.add(hoverPointRef.current);
 
-    let running = true; let rafId = 0;
+  let running = true; let rafId = 0;
+  const pulseState = { t:0 }; // for selected star halo pulsing
     const animate = () => {
       if(!running) return;
       rafId = requestAnimationFrame(animate);
@@ -1283,8 +1300,14 @@ function App() {
        try {
          const updaters = routeAnimUpdatersRef.current;
          for (let i = 0; i < updaters.length; i++) updaters[i]();
-       } catch (e) {
-         // ignore
+       } catch (e) { /* ignore */ }
+       // Selection halo pulse
+       if(selectedStarHaloRef.current){
+         pulseState.t += 0.016; // approx frame delta
+         const scale = 1 + Math.sin(pulseState.t*2.2)*0.18;
+         selectedStarHaloRef.current.scale.setScalar(scale);
+         const mat = selectedStarHaloRef.current.material as THREE.PointsMaterial;
+         mat.opacity = 0.55 + Math.sin(pulseState.t*2.2 + Math.PI/2)*0.25;
        }
   controls.update();
   if (cinematicModeRef.current || cinematicMode) {
@@ -3203,7 +3226,8 @@ function App() {
           </div>
         </div>
       </div>
-    <div ref={mountRef} style={{ width: '100vw', height: '100vh' }} />
+  <div ref={mountRef} style={{ width: '100vw', height: '100vh' }} />
+  <div className="ef-vignette" />
   {/* Small persistent logo and referral code */}
   {/* Persistent logo (always visible even when UI hidden) */}
   <img src={logo} alt="EF Map" className="ef-small-logo" />
