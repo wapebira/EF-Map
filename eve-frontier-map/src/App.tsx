@@ -435,8 +435,8 @@ function App() {
         uCamPos: { value: new THREE.Vector3() },
         uNear: { value: 2500 },    // start bright zone (closer)
         uFar: { value: 90000 },    // fade distance (farther horizon)
-        uMinBright: { value: 0.55 }, // far lines still >50% brightness
-        uMaxBright: { value: 1.25 }, // slight boost near
+  uMinBright: { value: 1.0 },  // far lines full baseline brightness
+  uMaxBright: { value: 2.5 },  // strong near boost for test
         uOpacityNear: { value: 0.9 },
         uOpacityFar: { value: 0.28 },
         uGamma: { value: 1.4 }      // falloff shaping (>1 => slower fade near camera)
