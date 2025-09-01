@@ -72,11 +72,11 @@ const StatsPage: React.FC = () => {
     return ()=>{ cancelled=true; clearInterval(id); };
   },[]);
 
-  const pageBg = 'rgba(10,12,18,0.85)';
+  const pageBg = '#0b1119'; // unified dark background
   const pageColor = '#fff';
 
   return (
-    <div style={{ maxWidth:1400, margin:'0 auto', padding:'34px 32px 80px 32px', fontFamily:'system-ui, sans-serif', color:pageColor, background:pageBg, boxSizing:'border-box' }}>
+  <div style={{ maxWidth:1600, margin:'0 auto', padding:'34px 32px 80px 32px', fontFamily:'system-ui, sans-serif', color:pageColor, background:pageBg, boxSizing:'border-box' }}>
       <h1 style={{ fontSize:'28px', margin:'0 0 10px 0' }}>Usage Stats</h1>
       <p style={{ margin:'0 0 18px 0', fontSize:'14px', lineHeight:1.5, opacity:0.85 }}>Anonymous aggregate counters since deployment. Updates every ~15s. Diagnostic error counters hidden for clarity.</p>
       {error && <div style={{ color:'#f66', marginBottom:12 }}>{error}</div>}
@@ -169,11 +169,11 @@ const StatsPage: React.FC = () => {
             <StatRow label="Cinematic time share" value={( ()=>{ const cSum=data.sums.cinematic_time_ms_sum; const sSum=data.sums.session_time_ms_sum; if(!cSum||!sSum) return '—'; return ((cSum/sSum)*100).toFixed(1)+'%'; })()} />
           </section>
           {/* Distributions */}
-          <section style={{ background:'rgba(255,255,255,0.06)', padding:'16px 18px', border:'1px solid rgba(255,255,255,0.15)', borderRadius:10, boxShadow:'0 2px 4px rgba(0,0,0,0.45)', gridColumn:'1 / -1' }}>
-            <h2 style={{ margin:'0 0 12px 0', fontSize:'15px', letterSpacing:'.5px', textTransform:'uppercase', opacity:0.85 }}>Distributions</h2>
-            <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(200px,1fr))', gap:18 }}>
-              {(()=>{ const keys=['hops_lt_10','hops_10_30','hops_30_60','hops_gt_60']; const rows=keys.map(k=>({k,c:data.counters[k]||0,label:k.replace('hops_','').replace('_','–').replace('lt_','<').replace('gt_','>')})); const tot=rows.reduce((a,b)=>a+b.c,0); return <DistTable title="Route Hops" rows={rows} total={tot} />; })()}
-              {(()=>{ const keys=['wp_0','wp_1_2','wp_3_5','wp_6_plus']; const rows=keys.map(k=>({k,c:data.counters[k]||0,label:k.replace('wp_','').replace('_plus','+').replace('_1_2','1–2').replace('_3_5','3–5')})); const tot=rows.reduce((a,b)=>a+b.c,0); return <DistTable title="Waypoint Count" rows={rows} total={tot} />; })()}
+          <section style={{ background:'rgba(255,255,255,0.04)', padding:'18px 20px', border:'1px solid rgba(255,255,255,0.12)', borderRadius:12, boxShadow:'0 2px 4px rgba(0,0,0,0.55)', gridColumn:'1 / -1' }}>
+            <h2 style={{ margin:'0 0 14px 0', fontSize:'15px', letterSpacing:'.5px', textTransform:'uppercase', opacity:0.85 }}>Distributions</h2>
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(230px,1fr))', gap:22 }}>
+              {(()=>{ const keys=['hops_lt_10','hops_10_30','hops_30_60','hops_gt_60']; const labelMap:{[k:string]:string}={hops_lt_10:'<10',hops_10_30:'10–30',hops_30_60:'30–60',hops_gt_60:'>60'}; const rows=keys.map(k=>({k,c:data.counters[k]||0,label:labelMap[k]})); const tot=rows.reduce((a,b)=>a+b.c,0); return <DistTable title="P2P Route Hops" rows={rows} total={tot} />; })()}
+              {(()=>{ const keys=['scout_hops_lt_10','scout_hops_10_30','scout_hops_30_60','scout_hops_gt_60']; const labelMap:{[k:string]:string}={scout_hops_lt_10:'<10',scout_hops_10_30:'10–30',scout_hops_30_60:'30–60',scout_hops_gt_60:'>60'}; const rows=keys.map(k=>({k,c:data.counters[k]||0,label:labelMap[k]})); const tot=rows.reduce((a,b)=>a+b.c,0); return <DistTable title="Scout Baseline Hops" rows={rows} total={tot} />; })()}
               {(()=>{ const keys=['save_lt_5','save_5_20','save_20_50','save_gt_50']; const labelMap:{[k:string]:string}={save_lt_5:'<5',save_5_20:'5–20',save_20_50:'20–50',save_gt_50:'>50'}; const rows=keys.map(k=>({k,c:data.counters[k]||0,label:labelMap[k]})); const tot=rows.reduce((a,b)=>a+b.c,0); return <DistTable title="Savings (LY)" rows={rows} total={tot} />; })()}
               {(()=>{ const keys=['bins_5','bins_3_4','bins_1_2','bins_0']; const labelMap:{[k:string]:string}={bins_5:'5 bins',bins_3_4:'3–4 bins',bins_1_2:'1–2 bins',bins_0:'0'}; const rows=keys.map(k=>({k,c:data.counters[k]||0,label:labelMap[k]})); const tot=rows.reduce((a,b)=>a+b.c,0); return <DistTable title="Planet Bins Active" rows={rows} total={tot} />; })()}
               {(()=>{ const workerKeys=Object.keys(data.counters).filter(k=> k.startsWith('opt_workers_used_')); const rows=workerKeys.sort((a,b)=> parseInt(a.split('_').pop()||'0')-parseInt(b.split('_').pop()||'0')).map(k=>({k,c:data.counters[k]||0,label:k.replace('opt_workers_used_','')})); const tot=rows.reduce((a,b)=>a+b.c,0); return <DistTable title="Workers Used" rows={rows} total={tot} />; })()}

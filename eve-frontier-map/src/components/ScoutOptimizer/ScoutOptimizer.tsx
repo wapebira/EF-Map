@@ -380,6 +380,12 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	const handleBaselineResult = (path:string[], workerShipJumps?:number, workerShipDistance?:number) => {
 		if(baselineDoneRef.current) return;
 		baselineDoneRef.current=true;
+		// Record baseline hops distribution for stats (compare against P2P route hops)
+		try {
+			const hops = path.length>0 ? path.length-1 : 0;
+			let bucket = hops<10? 'scout_hops_lt_10' : hops<30? 'scout_hops_10_30' : hops<60? 'scout_hops_30_60' : 'scout_hops_gt_60';
+			track({ type:'scout_hops_bucket', bucket });
+		} catch {}
 		savingsRecordedRef.current = false; // reset savings recorded flag for new baseline
 		setChampionPath(path);
 		championPathRef.current = path;

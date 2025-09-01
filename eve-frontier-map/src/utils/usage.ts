@@ -121,12 +121,12 @@ if(typeof window !== 'undefined'){
     else if(w.___efInitialTheme !== newTheme){ try { track({ type:'theme_switch' }); } catch {} w.___efInitialTheme = newTheme; }
   };
   (window as any).__efTrackP2PRouteMeta = (algo:'astar'|'dijkstra', mode:'fuel'|'jumps', hops:number, waypoints:number)=>{
+    try { track({ type:'p2p_route' }); } catch {}
     try { track({ type:'p2p_algo', algo }); } catch {}
     try { track({ type:'p2p_opt_mode', mode }); } catch {}
-    // hops bucket
-    let hb = hops<10? 'hops_lt_10' : hops<30? 'hops_10_30' : hops<60? 'hops_30_60' : 'hops_gt_60';
+    const hb = hops<10? 'hops_lt_10' : hops<30? 'hops_10_30' : hops<60? 'hops_30_60' : 'hops_gt_60';
     try { track({ type:'p2p_hops_bucket', bucket: hb }); } catch {}
-    let wb = waypoints===0? 'wp_0' : waypoints<=2? 'wp_1_2' : waypoints<=5? 'wp_3_5' : 'wp_6_plus';
+    const wb = waypoints===0? 'wp_0' : waypoints<=2? 'wp_1_2' : waypoints<=5? 'wp_3_5' : 'wp_6_plus';
     try { track({ type:'waypoint_count_bucket', bucket: wb }); } catch {}
     if(!firstActionSent){ firstRouteStart = performance.now(); }
   };
