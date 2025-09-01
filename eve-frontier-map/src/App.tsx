@@ -326,6 +326,7 @@ function App() {
   const starFieldRef = useRef<THREE.Points | null>(null);
   const hoverPointRef = useRef<THREE.Points | null>(null);
   const stargateLinesRef = useRef<THREE.LineSegments | null>(null);
+  // Glow pass removed; no secondary line material
   const routeLinesRef = useRef<THREE.Group | null>(null); // New ref for route lines
   const cinematicModeRef = useRef(false);
   useEffect(()=>{ cinematicModeRef.current = cinematicMode; }, [cinematicMode]);
@@ -398,6 +399,7 @@ function App() {
   const ringTexture = useMemo(() => createRingTexture(), []);
 
   const pointsMaterial = useMemo(() => {
+    // Static star sprites (no temporal pulsing) with soft halo falloff
     const material = new THREE.PointsMaterial({
       size: 2,
       sizeAttenuation: true,
@@ -408,18 +410,47 @@ function App() {
     });
     material.onBeforeCompile = (shader) => {
       shader.uniforms.maxPointSize = { value: 10.0 };
-      shader.uniforms.uTime = { value: 0 };
-      shader.vertexShader = `uniform float maxPointSize;\nuniform float uTime;\nattribute float aSize;\n${shader.vertexShader}`;
+      shader.vertexShader = `uniform float maxPointSize;\nattribute float aSize;\n${shader.vertexShader}`;
       shader.vertexShader = shader.vertexShader.replace(
         '#include <logdepthbuf_vertex>',
-        `float tw = 1.0 + 0.02 * sin(uTime*0.9 + position.x*0.001 + position.y*0.001);\n gl_PointSize = min(gl_PointSize * aSize * tw, maxPointSize);\n#include <logdepthbuf_vertex>`
+        `gl_PointSize = min(gl_PointSize * aSize, maxPointSize);\n#include <logdepthbuf_vertex>`
       );
+      const finalToken = 'gl_FragColor = vec4( outgoingLight, diffuseColor.a );';
+      if(shader.fragmentShader.includes(finalToken)){
+        shader.fragmentShader = shader.fragmentShader.replace(finalToken,
+          // Radial intensity: brighter core (core^2.2), wider halo (power 0.65). Smooth alpha edge.
+          `vec2 uv = gl_PointCoord * 2.0 - 1.0;\nfloat r2 = dot(uv,uv);\nif(r2>1.0){ discard; }\nfloat core = pow(1.0 - r2, 2.2);\nfloat halo = pow(1.0 - r2, 0.65);\nvec3 col = outgoingLight * (0.55*core + 0.45*halo);\nfloat alpha = diffuseColor.a * (1.0 - smoothstep(0.85,1.0,sqrt(r2)));\ncol = clamp(col,0.0,1.0);\ngl_FragColor = vec4(col, alpha);`);
+      }
       (material as any).userData.shader = shader;
     };
     return material;
   }, [circleTexture]);
 
-  const stargateMaterial = useMemo(() => new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.4, depthWrite: false }), []);
+  const stargateMaterial = useMemo(() => {
+  const mat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      vertexColors: true,
+      blending: THREE.AdditiveBlending,
+      uniforms: {
+        uCamPos: { value: new THREE.Vector3() },
+        uNear: { value: 0 },
+  uFar: { value: 120000 }, // initial; will be dynamically scaled
+  uMinBright: { value: 1.80 }, // doubled far baseline visibility
+  uMaxBright: { value: 2.40 }, // doubled near lift (glow adds punch)
+        uBoost: { value: 1.0 },
+  uOpacityNear: { value: 0.60 }, // almost constant opacity
+  uOpacityFar: { value: 0.60 },
+        uGamma: { value: 1.35 },
+        uDebug: { value: 0.0 }
+  },
+  // Midpoint distance based fade (attribute 'mid') so each segment handled consistently.
+  vertexShader: `attribute vec3 mid; uniform vec3 uCamPos; varying float vDist; varying vec3 vColor; void main(){ vColor = color; vec3 worldMid = (modelMatrix * vec4(mid,1.0)).xyz; vDist = distance(uCamPos, worldMid); vec3 worldPos = (modelMatrix * vec4(position,1.0)).xyz; gl_Position = projectionMatrix * viewMatrix * vec4(worldPos,1.0); }`,
+  fragmentShader: `uniform float uNear; uniform float uFar; uniform float uMinBright; uniform float uMaxBright; uniform float uBoost; uniform float uOpacityNear; uniform float uOpacityFar; uniform float uGamma; uniform float uDebug; varying float vDist; varying vec3 vColor;\nvoid main(){\n  float t = clamp((vDist - uNear)/(uFar - uNear), 0.0, 1.0);\n  float tg = pow(t, uGamma);\n  if(uDebug > 0.5){ vec3 c1=vec3(0.2,1.0,1.0); vec3 c2=vec3(1.0,1.0,0.2); vec3 c3=vec3(1.0,0.2,1.0); vec3 colDbg = mix(mix(c1,c2,tg), c3, smoothstep(0.5,1.0,tg)); float opDbg = mix(uOpacityNear,uOpacityFar,tg); gl_FragColor = vec4(colDbg, opDbg); return; }\n  // Base pass: near-flat brightness so distant gates stay visible.\n  float bright = mix(uMaxBright, uMinBright, tg);\n  float op = mix(uOpacityNear, uOpacityFar, tg);\n  vec3 col = clamp(vColor * bright * uBoost, 0.0, 2.0);\n  gl_FragColor = vec4(col, op);\n}`
+    });
+    return mat;
+  }, []);
+
 
   const getTransformedPosition = useCallback((position: { x: number; y: number; z: number }) => {
     return {
@@ -1289,7 +1320,31 @@ function App() {
   // (Selection halo pulse removed – only hover ring retained)
        // Baseline micro‑twinkle and parallax rotation (non-cinematic)
        if(!cinematicModeRef.current){
-         if(starFieldRef.current){ const mat:any = starFieldRef.current.material; if(mat.userData?.shader){ mat.userData.shader.uniforms.uTime.value = performance.now()/1000; } }
+         const tNow = performance.now()/1000;
+         // Star field now static: guard in case legacy uniform lingers
+         if(starFieldRef.current){ const mat:any = starFieldRef.current.material; const sh = mat.userData?.shader; if(sh && sh.uniforms.uTime){ sh.uniforms.uTime.value = tNow; } }
+         if(stargateLinesRef.current && cameraRef.current){ const m:any = stargateLinesRef.current.material; if(m.uniforms?.uCamPos){ m.uniforms.uCamPos.value.copy(cameraRef.current.position); } }
+          // Removed glow material camera uniform update (glow pass removed)
+          // Removed dynamic distance-based brightness adaptation; static brightness now
+          try {
+            const geo:THREE.BufferGeometry|undefined = stargateLinesRef.current?.geometry;
+            if(geo && cameraRef.current){
+              const midAttr:any = geo.getAttribute('mid');
+              if(midAttr){ // no-op sampling retained only to avoid future rework; can be removed entirely later
+                const cam = cameraRef.current.position;
+                let maxD = 0; const count = midAttr.count; // each vertex duplicated; sampling stride
+                const stride = Math.max(1, Math.floor(count/500));
+                for(let i=0;i<count;i+=stride){
+                  const x = midAttr.getX(i), y = midAttr.getY(i), z = midAttr.getZ(i);
+                  const dx = x-cam.x, dy=y-cam.y, dz=z-cam.z; const d = Math.sqrt(dx*dx+dy*dy+dz*dz);
+                  if(d>maxD) maxD = d;
+                }
+                // Distance sampled but not used (static brightness)
+              }
+            }
+          } catch {}
+        // Allow enabling debug gradient in console: window.__efGateDebug = true
+  try { if((window as any).__efGateDebug !== undefined && stargateLinesRef.current){ const m:any = stargateLinesRef.current.material; if(m.uniforms?.uDebug){ m.uniforms.uDebug.value = (window as any).__efGateDebug ? 1.0 : 0.0; } } } catch {}
        }
   controls.update();
   if (cinematicModeRef.current || cinematicMode) {
@@ -1602,10 +1657,12 @@ function App() {
       sceneRef.current.remove(stargateLinesRef.current);
       stargateLinesRef.current.geometry.dispose();
     }
+  // Glow lines removal not needed (already removed)
 
-    const stargateVertices: number[] = [];
+  const stargateVertices: number[] = [];
+  const stargateMidpoints: number[] = [];
     const stargateColors: number[] = [];
-    const defaultStargateColor = new THREE.Color(0x444444);
+  const defaultStargateColor = new THREE.Color(0xffffff); // white base; shader controls brightness span
     const stargateData: { source_system_id: number, destination_system_id: number }[] = [];
 
     if (mapData.stargates) {
@@ -1617,6 +1674,12 @@ function App() {
           const destPos = getTransformedPosition(destinationSystem.position);
           stargateVertices.push(sourcePos.x, sourcePos.y, sourcePos.z);
           stargateVertices.push(destPos.x, destPos.y, destPos.z);
+          const midx = (sourcePos.x + destPos.x)/2;
+          const midy = (sourcePos.y + destPos.y)/2;
+          const midz = (sourcePos.z + destPos.z)/2;
+          // duplicate midpoint for each vertex of the segment
+          stargateMidpoints.push(midx, midy, midz);
+          stargateMidpoints.push(midx, midy, midz);
 
           stargateColors.push(defaultStargateColor.r, defaultStargateColor.g, defaultStargateColor.b);
           stargateColors.push(defaultStargateColor.r, defaultStargateColor.g, defaultStargateColor.b);
@@ -1627,12 +1690,17 @@ function App() {
       const stargateGeometry = new THREE.BufferGeometry();
       stargateGeometry.setAttribute('position', new THREE.Float32BufferAttribute(stargateVertices, 3));
       stargateGeometry.setAttribute('color', new THREE.Float32BufferAttribute(stargateColors, 3));
+      if(stargateMidpoints.length === stargateVertices.length){
+        stargateGeometry.setAttribute('mid', new THREE.Float32BufferAttribute(stargateMidpoints, 3));
+      }
       stargateGeometry.userData = { stargateData };
 
-      const stargateLines = new THREE.LineSegments(stargateGeometry, stargateMaterial);
-      stargateLines.visible = !cinematicMode; // hide when cinematic
-      sceneRef.current?.add(stargateLines);
-      stargateLinesRef.current = stargateLines;
+  const stargateLines = new THREE.LineSegments(stargateGeometry, stargateMaterial);
+  stargateLines.visible = !cinematicMode; // hide when cinematic
+  sceneRef.current?.add(stargateLines);
+  stargateLinesRef.current = stargateLines;
+  // Glow pass (same geometry, stronger near-only fade) layered above
+  // Glow pass removed
     }
   }, [mapData, getTransformedPosition, pointsMaterial, stargateMaterial, cinematicMode]);
 
