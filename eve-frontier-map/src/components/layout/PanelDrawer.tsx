@@ -48,7 +48,7 @@ const PanelDrawer = forwardRef<PanelDrawerHandle, PanelDrawerProps>(({ id, title
   return (
     <div className={`ef-drawer ${drag.isDragging? 'dragging':''}`} aria-label={`${title||'Panel'} drawer`} style={{ left: drag.pos.x, top: drag.pos.y, transform:`scale(${scale})`, transformOrigin:'top left', zIndex }} onMouseDown={()=> onActivate && onActivate(id)}>
       <div className="ef-drawer-head" {...drag.bind} style={{ cursor:'move' }} onMouseDown={()=> onActivate && onActivate(id)}>
-  <span className="ef-drawer-title">{id==='routing'? <span className="icon" aria-hidden="true">🛰️</span>: id==='cinematic'? <span className="icon" aria-hidden="true">✨</span>: <span className="icon" aria-hidden="true">📌</span>}{title}</span>
+  <span className="ef-drawer-title">{title}</span>
         <button className="ef-drawer-close" onClick={()=> onClose(id)} aria-label={`Close ${title||'panel'}`}>✕</button>
       </div>
       <div className="ef-drawer-body">{children}</div>
