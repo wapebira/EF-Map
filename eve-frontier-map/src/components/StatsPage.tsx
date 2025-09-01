@@ -72,6 +72,26 @@ const StatsPage: React.FC = () => {
     return ()=>{ cancelled=true; clearInterval(id); };
   },[]);
 
+  // Force full-page navy background (independent of user system theme) while on stats page
+  useEffect(()=>{
+    const prevHtmlBg = document.documentElement.style.background;
+    const prevBodyBg = document.body.style.background;
+    const prevBodyColor = document.body.style.color;
+    const prevColorScheme = (document.documentElement.style as any).colorScheme;
+    document.documentElement.style.background = '#0b1119';
+    document.body.style.background = '#0b1119';
+    document.body.style.color = '#ffffff';
+    (document.documentElement.style as any).colorScheme = 'dark';
+    document.body.setAttribute('data-ef-stats','true');
+    return ()=>{
+      document.body.removeAttribute('data-ef-stats');
+      document.documentElement.style.background = prevHtmlBg;
+      document.body.style.background = prevBodyBg;
+      document.body.style.color = prevBodyColor;
+      (document.documentElement.style as any).colorScheme = prevColorScheme || '';
+    };
+  }, []);
+
   const pageBg = '#0b1119'; // unified dark background
   const pageColor = '#fff';
 
