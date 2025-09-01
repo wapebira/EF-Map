@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useLayoutEffect } from 'react';
 
 interface StatsSnapshot { version: number; updatedAt: string; counters: Record<string, number>; sums: Record<string, number>; date?: string }
 interface StatsResponse { current: StatsSnapshot; history: StatsSnapshot[] }
@@ -54,16 +54,61 @@ const StatsPage: React.FC = () => {
   };
 
   useEffect(()=>{ load(); const id = setInterval(load, 15000); return ()=> clearInterval(id); }, []);
+  // Force global body/html styles early for consistent dark layout & ensure vertical scroll always available
+  useLayoutEffect(()=>{
+    const html = document.documentElement;
+    const prevHtml = { overflowY: html.style.overflowY, background: html.style.background, height: html.style.height };
+    const prevBody = {
+      display: document.body.style.display,
+      placeItems: (document.body.style as any).placeItems,
+      alignItems: document.body.style.alignItems,
+      justifyContent: document.body.style.justifyContent,
+      background: document.body.style.background,
+      color: document.body.style.color,
+      overflowY: document.body.style.overflowY,
+      height: document.body.style.height,
+      minHeight: document.body.style.minHeight
+    };
+    html.style.overflowY = 'auto';
+    html.style.height = 'auto';
+    html.style.background = '#1f1f22';
+    document.body.style.display = 'block';
+    document.body.style.alignItems = '';
+    document.body.style.justifyContent = '';
+    (document.body.style as any).placeItems = '';
+    document.body.style.background = '#1f1f22';
+    document.body.style.color = '#e7e9ed';
+    document.body.style.overflowY = 'auto';
+    document.body.style.height = 'auto';
+    document.body.style.minHeight = 'auto';
+    return ()=>{
+      html.style.overflowY = prevHtml.overflowY;
+      html.style.background = prevHtml.background;
+      html.style.height = prevHtml.height;
+      document.body.style.display = prevBody.display;
+      document.body.style.alignItems = prevBody.alignItems;
+      document.body.style.justifyContent = prevBody.justifyContent;
+      (document.body.style as any).placeItems = prevBody.placeItems;
+      document.body.style.background = prevBody.background;
+      document.body.style.color = prevBody.color;
+      document.body.style.overflowY = prevBody.overflowY;
+      document.body.style.height = prevBody.height;
+      document.body.style.minHeight = prevBody.minHeight;
+    };
+  }, []);
 
+  // Force dark theme colors regardless of system preference
+  const pageBg = '#1f1f22';
+  const pageColor = '#e7e9ed';
   return (
-    <div style={{ maxWidth:800, margin:'30px auto', padding:'0 18px 40px 18px', fontFamily:'system-ui, sans-serif' }}>
+  <div style={{ maxWidth:900, margin:'0 auto', padding:'30px 26px 60px 26px', fontFamily:'system-ui, sans-serif', color:pageColor, background:pageBg, boxSizing:'border-box' }}>
       <h1 style={{ fontSize:'28px', margin:'0 0 10px 0' }}>Usage Stats</h1>
       <p style={{ margin:'0 0 18px 0', fontSize:'14px', lineHeight:1.5, opacity:0.85 }}>Anonymous aggregate counters since deployment. Updates every ~15s. No personal or identifying data is tracked—only feature adoption and performance averages to guide roadmap decisions.</p>
       {error && <div style={{ color:'#f66', marginBottom:12 }}>{error}</div>}
       {!data && !error && <div>Loading...</div>}
   {data && (
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(260px,1fr))', gap:'18px' }}>
-          <section style={{ background:'rgba(255,255,255,0.04)', padding:'14px 16px', border:'1px solid rgba(255,255,255,0.12)', borderRadius:8 }}>
+  <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(260px,1fr))', gap:'18px' }}>
+          <section style={{ background:'rgba(255,255,255,0.06)', padding:'14px 16px', border:'1px solid rgba(255,255,255,0.15)', borderRadius:8, boxShadow:'0 2px 4px rgba(0,0,0,0.4)' }}>
             <h2 style={{ margin:'0 0 6px 0', fontSize:'15px', letterSpacing:'.5px', textTransform:'uppercase', opacity:0.85 }}>Routes</h2>
             <StatRow label="P2P routes" value={data.counters.p2p_routes||0} />
             <StatRow label="Scout baselines" value={data.counters.scout_baselines||0} />
@@ -72,7 +117,7 @@ const StatsPage: React.FC = () => {
             <StatRow label="Shared routes resolved" value={data.counters.shared_resolved||0} />
             <StatRow label="Planet-filter baselines" value={data.counters.planet_filter_baselines||0} />
           </section>
-          <section style={{ background:'rgba(255,255,255,0.04)', padding:'14px 16px', border:'1px solid rgba(255,255,255,0.12)', borderRadius:8 }}>
+          <section style={{ background:'rgba(255,255,255,0.06)', padding:'14px 16px', border:'1px solid rgba(255,255,255,0.15)', borderRadius:8, boxShadow:'0 2px 4px rgba(0,0,0,0.4)' }}>
             <h2 style={{ margin:'0 0 6px 0', fontSize:'15px', letterSpacing:'.5px', textTransform:'uppercase', opacity:0.85 }}>Performance (avg)</h2>
             <StatRow label="P2P route time" value={formatDurationAvg(data.sums.p2p_route_time_ms_sum, data.sums.p2p_route_time_count)} />
             <StatRow label="Scout baseline time" value={formatDurationAvg(data.sums.scout_baseline_time_ms_sum, data.sums.scout_baseline_time_count)} />
@@ -81,7 +126,7 @@ const StatsPage: React.FC = () => {
             <StatRow label="Scout LY saved (total)" value={( ()=> { const s=data.sums.scout_opt_savings_ly_sum; return s? s.toFixed(2)+' LY':'—'; })()} />
             <StatRow label="Scout LY saved (avg)" value={( ()=> { const s=data.sums.scout_opt_savings_ly_sum; const c=data.sums.scout_opt_savings_count; if(!s||!c) return '—'; return (s/c).toFixed(2)+' LY'; })()} />
           </section>
-          <section style={{ background:'rgba(255,255,255,0.04)', padding:'14px 16px', border:'1px solid rgba(255,255,255,0.12)', borderRadius:8 }}>
+          <section style={{ background:'rgba(255,255,255,0.06)', padding:'14px 16px', border:'1px solid rgba(255,255,255,0.15)', borderRadius:8, boxShadow:'0 2px 4px rgba(0,0,0,0.4)' }}>
             <h2 style={{ margin:'0 0 6px 0', fontSize:'15px', letterSpacing:'.5px', textTransform:'uppercase', opacity:0.85 }}>Features</h2>
             <StatRow label="Referral clicks" value={data.counters.referral_clicks||0} />
             <StatRow label="Baseline errors" value={data.counters.baseline_errors||0} />
@@ -92,7 +137,7 @@ const StatsPage: React.FC = () => {
             <StatRow label="Return-to-start used" value={data.counters.return_to_start||0} />
             <StatRow label="Gate reachable toggle" value={data.counters.gate_reachable||0} />
           </section>
-          <section style={{ background:'rgba(255,255,255,0.04)', padding:'14px 16px', border:'1px solid rgba(255,255,255,0.12)', borderRadius:8 }}>
+          <section style={{ background:'rgba(255,255,255,0.06)', padding:'14px 16px', border:'1px solid rgba(255,255,255,0.15)', borderRadius:8, boxShadow:'0 2px 4px rgba(0,0,0,0.4)' }}>
             <h2 style={{ margin:'0 0 6px 0', fontSize:'15px', letterSpacing:'.5px', textTransform:'uppercase', opacity:0.85 }}>UI</h2>
             <StatRow label="Blue theme" value={data.counters.theme_blue||0} />
             <StatRow label="Orange theme" value={data.counters.theme_orange||0} />
@@ -119,17 +164,37 @@ const StatsPage: React.FC = () => {
               return <StatRow label="Route copy rate" value={rate} />;
             })()}
           </section>
-          <section style={{ background:'rgba(255,255,255,0.04)', padding:'14px 16px', border:'1px solid rgba(255,255,255,0.12)', borderRadius:8 }}>
+          <section style={{ background:'rgba(255,255,255,0.06)', padding:'14px 16px', border:'1px solid rgba(255,255,255,0.15)', borderRadius:8, boxShadow:'0 2px 4px rgba(0,0,0,0.4)' }}>
             <h2 style={{ margin:'0 0 6px 0', fontSize:'15px', letterSpacing:'.5px', textTransform:'uppercase', opacity:0.85 }}>Engagement</h2>
             <StatRow label="Page loads" value={data.counters.page_loads||0} />
             <StatRow label="Cinematic sessions" value={data.counters.cinematic_sessions||0} />
             <StatRow label="Cinematic enters" value={data.counters.cinematic_enters||0} />
             <StatRow label="Cinematic usage rate" value={( ()=>{ const pl=data.counters.page_loads||0; const cs=data.counters.cinematic_sessions||0; if(!pl) return '—'; return ((cs/pl)*100).toFixed(1)+'%'; })()} />
-            <StatRow label="Avg session length" value={formatDurationAvg(data.sums.session_time_ms_sum, data.sums.session_time_count)} />
+            <StatRow label="Avg open tab duration" value={formatDurationAvg(data.sums.session_time_ms_sum, data.sums.session_time_count)} />
+            <StatRow label="Avg active duration" value={formatDurationAvg(data.sums.active_session_time_ms_sum, data.sums.active_session_time_count)} />
+            {(()=>{ // median approximation using bucket midpoints
+              const buckets=[
+                { c:data.counters.sess_lt_1m||0, min:0, max:60_000 },
+                { c:data.counters.sess_1_5m||0, min:60_000, max:5*60_000 },
+                { c:data.counters.sess_5_15m||0, min:5*60_000, max:15*60_000 },
+                { c:data.counters.sess_15_60m||0, min:15*60_000, max:60*60_000 },
+                { c:data.counters.sess_gt_60m||0, min:60*60_000, max:120*60_000 } // assume 60–120m span midpoint
+              ];
+              const total = buckets.reduce((a,b)=>a+b.c,0);
+              if(!total) return <StatRow label="Median open duration (est)" value="—" />;
+              let cum=0; let medianMs=0; const target = total/2;
+              for(const b of buckets){
+                if(cum + b.c >= target){
+                  medianMs = (b.min + b.max)/2; break;
+                }
+                cum += b.c;
+              }
+              return <StatRow label="Median open duration (est)" value={formatMs(medianMs)} />;
+            })()}
             <StatRow label="Avg cinematic time" value={formatDurationAvg(data.sums.cinematic_time_ms_sum, data.sums.cinematic_time_count)} />
             <StatRow label="Avg cinematic share" value={( ()=>{ const cSum=data.sums.cinematic_time_ms_sum; const sSum=data.sums.session_time_ms_sum; if(!cSum||!sSum) return '—'; return ((cSum/sSum)*100).toFixed(1)+'%'; })()} />
           </section>
-          <section style={{ background:'rgba(255,255,255,0.04)', padding:'14px 16px', border:'1px solid rgba(255,255,255,0.12)', borderRadius:8, display:'flex', flexDirection:'column' }}>
+          <section style={{ background:'rgba(255,255,255,0.06)', padding:'14px 16px', border:'1px solid rgba(255,255,255,0.15)', borderRadius:8, display:'flex', flexDirection:'column', boxShadow:'0 2px 4px rgba(0,0,0,0.4)' }}>
             <h2 style={{ margin:'0 0 8px 0', fontSize:'15px', letterSpacing:'.5px', textTransform:'uppercase', opacity:0.85 }}>UI Scale Distribution</h2>
             {(()=>{
               const allowed = [50,60,70,80,90,100,110,120,130];
@@ -187,24 +252,25 @@ const StatsPage: React.FC = () => {
                   <th style={{ padding:'6px 8px' }}>Date</th>
                   <th style={{ padding:'6px 8px' }}>P2P</th>
                   <th style={{ padding:'6px 8px' }}>Baselines</th>
-                  <th style={{ padding:'6px 8px' }}>Opt Starts</th>
+                  <th style={{ padding:'6px 8px' }}>Opt starts</th>
                   <th style={{ padding:'6px 8px' }}>Shares</th>
                   <th style={{ padding:'6px 8px' }}>Resolved</th>
-                  <th style={{ padding:'6px 8px' }}>Avg P2P ms</th>
-                  <th style={{ padding:'6px 8px' }}>Avg Baseline ms</th>
-                  <th style={{ padding:'6px 8px' }}>PgLoads</th>
-                  <th style={{ padding:'6px 8px' }}>CinSess</th>
-                  <th style={{ padding:'6px 8px' }}>AvgSess ms</th>
-                  <th style={{ padding:'6px 8px' }}>Avg LY Saved</th>
-                  <th style={{ padding:'6px 8px' }}>Avg LY Saved</th>
+                  <th style={{ padding:'6px 8px' }}>Avg P2P</th>
+                  <th style={{ padding:'6px 8px' }}>Avg baseline</th>
+                  <th style={{ padding:'6px 8px' }}>Page loads</th>
+                  <th style={{ padding:'6px 8px' }}>Cinematic sessions</th>
+                  <th style={{ padding:'6px 8px' }}>Avg active session</th>
+                  <th style={{ padding:'6px 8px' }}>Avg LY saved</th>
+                  <th style={{ padding:'6px 8px' }}>Total LY saved</th>
                 </tr>
               </thead>
               <tbody>
                 {history.map(h=>{
           const avgP2P = h.sums.p2p_route_time_count ? (h.sums.p2p_route_time_ms_sum / h.sums.p2p_route_time_count) : undefined;
           const avgBase = h.sums.scout_baseline_time_count ? (h.sums.scout_baseline_time_ms_sum / h.sums.scout_baseline_time_count) : undefined;
-          const avgSess = h.sums.session_time_count ? (h.sums.session_time_ms_sum / h.sums.session_time_count) : undefined;
+          const avgActive = h.sums.active_session_time_count ? (h.sums.active_session_time_ms_sum / h.sums.active_session_time_count) : undefined;
           const avgSaved = h.sums.scout_opt_savings_count ? (h.sums.scout_opt_savings_ly_sum / h.sums.scout_opt_savings_count) : undefined;
+          const totalSaved = h.sums.scout_opt_savings_ly_sum;
                   return (
                     <tr key={h.date||h.updatedAt} style={{ borderTop:'1px solid rgba(255,255,255,0.07)' }}>
                       <td style={{ padding:'4px 8px', opacity:0.85 }}>{h.date || h.updatedAt.slice(0,10)}</td>
@@ -217,14 +283,65 @@ const StatsPage: React.FC = () => {
             <td style={{ padding:'4px 8px' }}>{avgBase!==undefined? formatMs(avgBase): '—'}</td>
                       <td style={{ padding:'4px 8px' }}>{h.counters.page_loads||0}</td>
                       <td style={{ padding:'4px 8px' }}>{h.counters.cinematic_sessions||0}</td>
-            <td style={{ padding:'4px 8px' }}>{avgSess!==undefined? formatMs(avgSess): '—'}</td>
+            <td style={{ padding:'4px 8px' }}>{avgActive!==undefined? formatMs(avgActive): '—'}</td>
             <td style={{ padding:'4px 8px' }}>{avgSaved!==undefined? avgSaved.toFixed(2): '—'}</td>
+            <td style={{ padding:'4px 8px' }}>{totalSaved!==undefined? totalSaved.toFixed(2): '—'}</td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+      {data && (
+        <div style={{ marginTop:30 }}>
+          <h2 style={{ fontSize:'16px', margin:'0 0 8px 0' }}>Session Duration Distribution</h2>
+          <table style={{ borderCollapse:'collapse', width:'100%', fontSize:12 }}>
+            <thead>
+              <tr style={{ textAlign:'left', background:'rgba(255,255,255,0.05)' }}>
+                <th style={{ padding:'6px 8px' }}>Bucket</th>
+                <th style={{ padding:'6px 8px' }}>Count</th>
+                <th style={{ padding:'6px 8px' }}>%</th>
+                <th style={{ padding:'6px 8px' }}>Bar</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(()=>{
+                const buckets=[
+                  { key:'sess_lt_1m', label:'<1m' },
+                  { key:'sess_1_5m', label:'1–5m' },
+                  { key:'sess_5_15m', label:'5–15m' },
+                  { key:'sess_15_60m', label:'15–60m' },
+                  { key:'sess_gt_60m', label:'>60m' }
+                ];
+                const rows = buckets.map(b=> ({ ...b, count: data.counters[b.key]||0 }));
+                const total = rows.reduce((a,r)=>a+r.count,0);
+                if(!total) return <tr><td style={{ padding:'6px 8px', opacity:.7 }} colSpan={4}>No session buckets recorded yet.</td></tr>;
+                return <>
+                  {rows.map(r=>{ const pct = (r.count/total)*100; return (
+                    <tr key={r.key} style={{ borderTop:'1px solid rgba(255,255,255,0.08)' }}>
+                      <td style={{ padding:'4px 8px' }}>{r.label}</td>
+                      <td style={{ padding:'4px 8px', fontVariantNumeric:'tabular-nums' }}>{r.count}</td>
+                      <td style={{ padding:'4px 8px', fontVariantNumeric:'tabular-nums' }}>{pct.toFixed(1)}%</td>
+                      <td style={{ padding:'4px 8px' }}>
+                        <div style={{ background:'rgba(255,255,255,0.08)', height:6, borderRadius:3, position:'relative' }}>
+                          <div style={{ position:'absolute', left:0, top:0, bottom:0, width:pct+'%', background:'var(--accent)', borderRadius:3 }} />
+                        </div>
+                      </td>
+                    </tr>
+                  ); })}
+                  <tr style={{ borderTop:'1px solid rgba(255,255,255,0.12)', fontWeight:600 }}>
+                    <td style={{ padding:'4px 8px' }}>Total</td>
+                    <td style={{ padding:'4px 8px', fontVariantNumeric:'tabular-nums' }}>{total}</td>
+                    <td style={{ padding:'4px 8px' }}>100%</td>
+                    <td />
+                  </tr>
+                </>;
+              })()}
+            </tbody>
+          </table>
+          <div style={{ marginTop:6, fontSize:10, opacity:.55 }}>Open duration = full tab lifetime; active duration = time until last interaction. Median is an approximation from bucket midpoints.</div>
         </div>
       )}
     </div>

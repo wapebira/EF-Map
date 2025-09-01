@@ -70,6 +70,9 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	// Display path = macro path expanded into individual gate hops (BFS) so gate segments are shown instead of ship jumps when possible
 	const [championDisplayPath, setChampionDisplayPath] = useState<string[]|null>(null);
 	const [championDistance, setChampionDistance] = useState<number|null>(null);
+	// Mirror distance for reliable metric capture
+	const championDistanceRefVal = useRef<number|null>(null);
+	useEffect(()=>{ championDistanceRefVal.current = championDistance; }, [championDistance]);
 	// Ship jump metrics for current champion (lexicographic primary criteria)
 	const [championShipJumps, setChampionShipJumps] = useState<number|null>(null);
 	const [championShipDistance, setChampionShipDistance] = useState<number|null>(null);
@@ -99,20 +102,22 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	const baselineStartTimeRef = useRef<number>(0);
 	// Track whether we've already recorded savings for the current baseline (avoid double counting if user stops multiple times)
 	const savingsRecordedRef = useRef<boolean>(false);
-	// Helper to record optimization savings + session time once (used on Stop, unmount, visibility hidden, or time budget)
+	// Helper to record optimization savings + session time once (used on Stop, unmount, visibility hidden, panel close, or time budget)
 	const recordOptimizationMetrics = useCallback(async (label?:string)=>{
 		try {
 			let sent=false;
-			// Savings (only if we actually improved beyond baseline and not yet recorded)
-			if(!savingsRecordedRef.current && baselineDistanceRef.current!==null && championDistance!==null){
-				const saved = baselineDistanceRef.current - championDistance;
+			const baseline = baselineDistanceRef.current;
+			const champ = championDistanceRefVal.current;
+			// Savings
+			if(!savingsRecordedRef.current && baseline!==null && champ!==null){
+				const saved = baseline - champ;
 				if(saved > 0){
-					console.debug('[ScoutOpt] recording savings', saved.toFixed(4), label||'');
+					console.debug('[ScoutOpt] recording savings', { saved: saved.toFixed(4), baseline, champion: champ, label });
 					await trackImmediate({ type:'scout_opt_savings', saved: parseFloat(saved.toFixed(4)) });
 					savingsRecordedRef.current = true; sent=true;
 				}
 			}
-			// Session time (optimization phase) partial or full
+			// Session time
 			if(optimizationStartTimeRef.current){
 				const ms = Date.now() - optimizationStartTimeRef.current;
 				if(ms>0){
@@ -122,7 +127,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 				optimizationStartTimeRef.current = 0;
 			}
 			if(sent){ await flushNow(); }
-		} catch(e){ /* ignore */ }
+		} catch(e){ console.debug('[ScoutOpt][diag] metrics error', e); }
 	}, [championDistance]);
 	const globalMonitorRef = useRef<number|undefined>(undefined);
 	const totalMaxTimeSecRef = useRef<number>(0);
@@ -829,6 +834,17 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		};
 	// eslint-disable-next-line react-hooks/exhaustive-deps
 	},[]);
+	// Capture metrics when panel is closed (user clicks close without pressing Stop)
+	const prevOpenRef = useRef(open);
+	useEffect(()=>{
+		if(prevOpenRef.current && !open){
+			// Panel just closed
+			if(isCalculating || optimizationStartTimeRef.current || (!savingsRecordedRef.current && baselineDistanceRef.current!==null && championDistance!==null && championDistance < baselineDistanceRef.current)){
+				recordOptimizationMetrics('panel-close');
+			}
+		}
+		prevOpenRef.current = open;
+	}, [open, isCalculating, recordOptimizationMetrics, championDistance]);
 
 	// Page/tab hide handler (best-effort capture without requiring explicit Stop)
 	useEffect(()=>{
