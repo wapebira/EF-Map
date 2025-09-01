@@ -1,6 +1,11 @@
 body {
   margin: 0;
-  /* Allow vertical scroll so smaller viewports can reach lower UI (stats page, long panels). */
+  /* Default: no page scroll for immersive map experience. */
+  overflow: hidden;
+}
+
+/* Enable vertical scrolling ONLY while on stats page (StatsPage sets data-ef-stats attribute). */
+body[data-ef-stats='true'] {
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior-y: contain;
