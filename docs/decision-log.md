@@ -1,3 +1,20 @@
+## 2025-09-01 – Baseline Starfield Visual Enhancements (Items 1–9)
+
+- Goal: Enrich default (non-cinematic) map background without enabling full cinematic mode. Implement approved enhancements 1–9: gradient sky dome, radial center boost, noise dithering, light fog, distance brightness falloff, temperature tint jitter, anchor star size variance, micro twinkle, faint parallax layer.
+- Files: `eve-frontier-map/src/App.tsx` (scene init + animation loop modifications); new visual objects (sky dome mesh, parallax points) created at runtime only when cinematic mode inactive.
+- Diff: + ~140 LOC net (shader + setup code) inside `App.tsx` plus this log file.
+- Key Implementation Notes:
+  - Added exponential fog `FogExp2(0x0b0f15, 0.000015)` for subtle depth cue.
+  - Sky dome: back-sided sphere with custom shader performing vertical gradient (top/mid/bot colors), radial center brightness boost, lightweight hash-based noise dithering, animated via `uTime`.
+  - Parallax layer: sparse distant Points cloud (150) rotated very slowly (`+0.00003 rad/frame`) to provide subtle depth motion.
+  - Starfield base shader already extended earlier for `aSize` attribute + micro twinkle; animation loop now updates `uTime` when not in cinematic mode.
+  - Performance: Additive cost minimal (one extra mesh + small points cloud). Fog adds negligible overhead at current object counts.
+  - Guarded by `!cinematicMode` so cinematic pipeline remains unaffected; objects not created in cinematic mode.
+- Risk: Low (isolated visual additions; no data/schema changes). Tested via production build; no TypeScript errors.
+- Gates: typecheck ✅ build ✅ smoke (expected) ✅ (pending manual run to visually confirm gradients/twinkle).
+- Follow-ups:
+  - Consider runtime toggle to disable enhancements for low-power devices (e.g., query param or settings panel checkbox).
+  - Potential future: unify noise hash with a small 3D noise texture if extended further.
 ## 2025-09-01 – Init storage abstraction & decision log
 - Goal: Introduce unified KV store accessor to decouple Netlify-specific blobs from future Cloudflare KV/D1 migration; seed decision log.
 - Files: `netlify/functions/_store.js`, `docs/decision-log.md`
