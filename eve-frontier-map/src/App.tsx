@@ -426,20 +426,21 @@ function App() {
   }, [circleTexture]);
 
   const stargateMaterial = useMemo(() => {
-    // Custom shader (simpler + guaranteed) for stargate links; strong pulse for debug visibility
+    // Custom shader for stargate links (subtle pulse + distance falloff)
     const mat = new THREE.ShaderMaterial({
       transparent: true,
       depthWrite: false,
       vertexColors: true,
       uniforms: {
         uTime: { value: 0 },
-        uFadeNear: { value: 2000 },
-        uFadeFar: { value: 80000 },
-        uPulseAmp: { value: 1.0 }, // debug amplitude
-        uSpeed: { value: 0.6 }
+        // Narrower range so distance brightness difference is noticeable
+        uFadeNear: { value: 3000 },
+        uFadeFar: { value: 28000 },
+        uPulseAmp: { value: 0.12 }, // subtle (±12%)
+        uSpeed: { value: 0.25 } // slower cycle (~4s)
       },
       vertexShader: `varying float vViewDist; varying vec3 vColor;\nvoid main(){ vColor = color; vec4 mvPos = modelViewMatrix * vec4(position,1.0); vViewDist = length(mvPos.xyz); gl_Position = projectionMatrix * mvPos; }`,
-      fragmentShader: `uniform float uTime; uniform float uFadeNear; uniform float uFadeFar; uniform float uPulseAmp; uniform float uSpeed; varying float vViewDist; varying vec3 vColor;\nvoid main(){ float df = 1.0 - smoothstep(uFadeNear, uFadeFar, vViewDist); float pulse = 1.0 + uPulseAmp * sin(uTime * 6.28318 * uSpeed); vec3 col = vColor * (0.35 + 0.65*df) * pulse; float alpha = (0.12 + 0.88*df); gl_FragColor = vec4(col, alpha); }`
+      fragmentShader: `uniform float uTime; uniform float uFadeNear; uniform float uFadeFar; uniform float uPulseAmp; uniform float uSpeed; varying float vViewDist; varying vec3 vColor;\nvoid main(){\n  float df = 1.0 - smoothstep(uFadeNear, uFadeFar, vViewDist); // 0 far -> 1 near\n  float base = mix(0.28, 1.0, df); // far lines dim to 28%\n  float pulse = 1.0 + uPulseAmp * sin(uTime * 6.28318 * uSpeed); // 1 +/- amp\n  float p = 0.9 + 0.1 * pulse; // restrict to ±10% visual modulation (never black)\n  vec3 col = vColor * base * p;\n  float alpha = mix(0.08, 0.85, df); // nearer more opaque\n  gl_FragColor = vec4(col, alpha);\n}`
     });
     return mat;
   }, []);
