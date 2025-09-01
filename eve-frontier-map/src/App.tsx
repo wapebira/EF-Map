@@ -410,13 +410,13 @@ function App() {
       shader.uniforms.maxPointSize = { value: 10.0 };
       shader.uniforms.uTime = { value: 0 };
       shader.uniforms.uLightDir = { value: new THREE.Vector3(0.4, 0.25, 0.87).normalize() };
-  shader.uniforms.uRimStrength = { value: 0.55 }; // boosted for visibility
-  shader.uniforms.uRimPower = { value: 2.4 }; // slightly softer falloff
-  shader.uniforms.uCoreBoost = { value: 1.30 }; // brighter core
+  shader.uniforms.uRimStrength = { value: 1.4 }; // DEBUG exaggerated rim
+  shader.uniforms.uRimPower = { value: 1.6 }; // broader rim
+  shader.uniforms.uCoreBoost = { value: 1.85 }; // very bright core for verification
       shader.vertexShader = `uniform float maxPointSize;\nuniform float uTime;\nattribute float aSize;\n${shader.vertexShader}`;
       shader.vertexShader = shader.vertexShader.replace(
         '#include <logdepthbuf_vertex>',
-  `float tw = 1.0 + 0.06 * sin(uTime*0.9 + position.x*0.001 + position.y*0.001);\n gl_PointSize = min(gl_PointSize * aSize * tw, maxPointSize);\n#include <logdepthbuf_vertex>`
+  `float tw = 1.0 + 0.22 * sin(uTime*3.0 + position.x*0.002 + position.y*0.002);\n gl_PointSize = min(gl_PointSize * aSize * tw, maxPointSize);\n#include <logdepthbuf_vertex>`
       );
       // Fragment rim lighting: treat sprite as lit sphere with rim highlight
       shader.fragmentShader = `uniform vec3 uLightDir;\nuniform float uRimStrength;\nuniform float uRimPower;\nuniform float uCoreBoost;\n${shader.fragmentShader}`.replace(
@@ -436,10 +436,10 @@ gl_FragColor = vec4(finalCol, diffuseColor.a);`
     mat.onBeforeCompile = (shader)=>{
       shader.uniforms.uTime = { value: 0 };
       shader.uniforms.uCamPos = { value: new THREE.Vector3() };
-  shader.uniforms.uPulseAmp = { value: 0.25 }; // more visible first pass
-  shader.uniforms.uFadeNear = { value: 6000 }; // adjust fade window
-  shader.uniforms.uFadeFar = { value: 60000 };
-  shader.uniforms.uSpeed = { value: 0.18 }; // slower breathing (~35s per cycle 2pi*0.18)
+  shader.uniforms.uPulseAmp = { value: 0.9 }; // DEBUG large pulse
+  shader.uniforms.uFadeNear = { value: 4000 }; // nearer emphasis
+  shader.uniforms.uFadeFar = { value: 65000 };
+  shader.uniforms.uSpeed = { value: 0.8 }; // faster (~1.25s cycle)
       shader.fragmentShader = `uniform float uTime;\nuniform vec3 uCamPos;\nuniform float uPulseAmp;\nuniform float uFadeNear;\nuniform float uFadeFar;\nuniform float uSpeed;\n${shader.fragmentShader}`.replace(
         'gl_FragColor = vec4( diffuseColor.rgb, diffuseColor.a );',
         `// approximate line midpoint in camera space for fade
