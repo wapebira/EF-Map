@@ -829,6 +829,17 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		};
 	// eslint-disable-next-line react-hooks/exhaustive-deps
 	},[]);
+	// Capture metrics when panel is closed (user clicks close without pressing Stop)
+	const prevOpenRef = useRef(open);
+	useEffect(()=>{
+		if(prevOpenRef.current && !open){
+			// Panel just closed
+			if(isCalculating || optimizationStartTimeRef.current || (!savingsRecordedRef.current && baselineDistanceRef.current!==null && championDistance!==null && championDistance < baselineDistanceRef.current)){
+				recordOptimizationMetrics('panel-close');
+			}
+		}
+		prevOpenRef.current = open;
+	}, [open, isCalculating, recordOptimizationMetrics, championDistance]);
 
 	// Page/tab hide handler (best-effort capture without requiring explicit Stop)
 	useEffect(()=>{
