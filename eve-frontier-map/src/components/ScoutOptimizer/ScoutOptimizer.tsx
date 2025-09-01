@@ -80,6 +80,9 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	const [championGateJumps, setChampionGateJumps] = useState<number|null>(null);
 	// Track baseline distance separately for improvement % display
 	const baselineDistanceRef = useRef<number|null>(null);
+	// Track whether a completed baseline has not yet led to an optimization start.
+	// Used to count "abandoned" baselines when user closes panel or leaves session without optimizing.
+	const baselineAwaitingOptRef = useRef<boolean>(false);
 	const [datasetChanged, setDatasetChanged] = useState(false);
 	const championPathRef = useRef<string[]|null>(null); // macro path ref
 	const championDisplayPathRef = useRef<string[]|null>(null);
@@ -380,6 +383,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	const handleBaselineResult = (path:string[], workerShipJumps?:number, workerShipDistance?:number) => {
 		if(baselineDoneRef.current) return;
 		baselineDoneRef.current=true;
+		baselineAwaitingOptRef.current = true; // baseline finished and optimization not yet started
 		// Record baseline hops distribution for stats (compare against P2P route hops)
 		try {
 			const hops = path.length>0 ? path.length-1 : 0;
@@ -473,6 +477,8 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 
 	const startContinuousOptimization = () => {
 		if(!championPath){ alert('Baseline not finished yet.'); return; }
+		// Starting optimization means baseline is no longer considered "abandoned"
+		baselineAwaitingOptRef.current = false;
 		const total = parseFloat(maxOptimizeTime)||0; const stall = parseFloat(stallTimeout)||0;
 		setIsCalculating(true);
 		setHideInputsPref(true); // auto-hide inputs (but allow user to re-show if they uncheck)
@@ -850,6 +856,9 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 			if(globalMonitorRef.current!==undefined){ clearInterval(globalMonitorRef.current); globalMonitorRef.current=undefined; }
 			// If optimization was running, capture partial savings/session
 			if(isCalculating || optimizationStartTimeRef.current){ recordOptimizationMetrics('unmount'); }
+			// Count abandoned baseline on unmount if user never started optimization after baseline completed
+			if(baselineAwaitingOptRef.current){ try { track({ type:'scout_abandoned' }); } catch {}
+			}
 		};
 	// eslint-disable-next-line react-hooks/exhaustive-deps
 	},[]);
@@ -859,6 +868,8 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		if(prevOpenRef.current && !open){
 			// Panel just closed; if baseline not finished and was calculating baseline -> abandoned
 			if(isCalculating && !baselineDoneRef.current){ try { track({ type:'scout_abandoned' }); } catch {} }
+			// Or if baseline completed but optimization not started
+			else if(baselineAwaitingOptRef.current){ try { track({ type:'scout_abandoned' }); } catch {} }
 			if(isCalculating || optimizationStartTimeRef.current || (!savingsRecordedRef.current && baselineDistanceRef.current!==null && championDistance!==null && championDistance < baselineDistanceRef.current)){
 				recordOptimizationMetrics('panel-close');
 			}
