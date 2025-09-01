@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useLayoutEffect } from 'react';
 
 interface StatsSnapshot { version: number; updatedAt: string; counters: Record<string, number>; sums: Record<string, number>; date?: string }
 interface StatsResponse { current: StatsSnapshot; history: StatsSnapshot[] }
@@ -54,31 +54,46 @@ const StatsPage: React.FC = () => {
   };
 
   useEffect(()=>{ load(); const id = setInterval(load, 15000); return ()=> clearInterval(id); }, []);
-  // Force global body styles for consistent dark layout & natural scrolling
-  useEffect(()=>{
-    const prev = {
+  // Force global body/html styles early for consistent dark layout & ensure vertical scroll always available
+  useLayoutEffect(()=>{
+    const html = document.documentElement;
+    const prevHtml = { overflowY: html.style.overflowY, background: html.style.background, height: html.style.height };
+    const prevBody = {
       display: document.body.style.display,
       placeItems: (document.body.style as any).placeItems,
       alignItems: document.body.style.alignItems,
       justifyContent: document.body.style.justifyContent,
       background: document.body.style.background,
       color: document.body.style.color,
+      overflowY: document.body.style.overflowY,
+      height: document.body.style.height,
+      minHeight: document.body.style.minHeight
     };
+    html.style.overflowY = 'auto';
+    html.style.height = 'auto';
+    html.style.background = '#1f1f22';
     document.body.style.display = 'block';
     document.body.style.alignItems = '';
     document.body.style.justifyContent = '';
     (document.body.style as any).placeItems = '';
     document.body.style.background = '#1f1f22';
     document.body.style.color = '#e7e9ed';
-    document.documentElement.style.backgroundColor = '#1f1f22';
-    return () => {
-      document.body.style.display = prev.display;
-      document.body.style.alignItems = prev.alignItems;
-      document.body.style.justifyContent = prev.justifyContent;
-      (document.body.style as any).placeItems = prev.placeItems;
-      document.body.style.background = prev.background;
-      document.body.style.color = prev.color;
-      // Don't reset root background intentionally to avoid flash if user navigates back quickly
+    document.body.style.overflowY = 'auto';
+    document.body.style.height = 'auto';
+    document.body.style.minHeight = 'auto';
+    return ()=>{
+      html.style.overflowY = prevHtml.overflowY;
+      html.style.background = prevHtml.background;
+      html.style.height = prevHtml.height;
+      document.body.style.display = prevBody.display;
+      document.body.style.alignItems = prevBody.alignItems;
+      document.body.style.justifyContent = prevBody.justifyContent;
+      (document.body.style as any).placeItems = prevBody.placeItems;
+      document.body.style.background = prevBody.background;
+      document.body.style.color = prevBody.color;
+      document.body.style.overflowY = prevBody.overflowY;
+      document.body.style.height = prevBody.height;
+      document.body.style.minHeight = prevBody.minHeight;
     };
   }, []);
 
@@ -86,7 +101,7 @@ const StatsPage: React.FC = () => {
   const pageBg = '#1f1f22';
   const pageColor = '#e7e9ed';
   return (
-    <div style={{ maxWidth:900, margin:'0 auto', padding:'30px 26px 60px 26px', fontFamily:'system-ui, sans-serif', color:pageColor, background:pageBg, minHeight:'100vh', boxSizing:'border-box', overflowY:'auto' }}>
+  <div style={{ maxWidth:900, margin:'0 auto', padding:'30px 26px 60px 26px', fontFamily:'system-ui, sans-serif', color:pageColor, background:pageBg, boxSizing:'border-box' }}>
       <h1 style={{ fontSize:'28px', margin:'0 0 10px 0' }}>Usage Stats</h1>
       <p style={{ margin:'0 0 18px 0', fontSize:'14px', lineHeight:1.5, opacity:0.85 }}>Anonymous aggregate counters since deployment. Updates every ~15s. No personal or identifying data is tracked—only feature adoption and performance averages to guide roadmap decisions.</p>
       {error && <div style={{ color:'#f66', marginBottom:12 }}>{error}</div>}
