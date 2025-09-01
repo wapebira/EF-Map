@@ -426,8 +426,24 @@ function App() {
   }, [circleTexture]);
 
   const stargateMaterial = useMemo(() => {
-    // Reverted: simple static line material (no pulse) for consistent readability
-    return new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.55, depthWrite: false });
+    // Distance-based brightness falloff (no pulse). Near gates brighter, far gates dimmer.
+    const mat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      vertexColors: true,
+      uniforms: {
+        uCamPos: { value: new THREE.Vector3() },
+        uNear: { value: 4000 },   // start of bright zone
+        uFar: { value: 65000 },   // fully faded distance
+        uMinBright: { value: 0.32 }, // minimum brightness multiplier at/after uFar
+        uMaxBright: { value: 1.0 },  // brightness at/inside uNear
+        uOpacityNear: { value: 0.75 },
+        uOpacityFar: { value: 0.18 }
+      },
+      vertexShader: `uniform vec3 uCamPos; varying float vDist; varying vec3 vColor;\nvoid main(){ vColor = color; vec3 worldPos = (modelMatrix * vec4(position,1.0)).xyz; vDist = distance(uCamPos, worldPos); gl_Position = projectionMatrix * viewMatrix * vec4(worldPos,1.0); }`,
+      fragmentShader: `uniform float uNear; uniform float uFar; uniform float uMinBright; uniform float uMaxBright; uniform float uOpacityNear; uniform float uOpacityFar; varying float vDist; varying vec3 vColor;\nvoid main(){ float t = clamp((vDist - uNear)/(uFar - uNear), 0.0, 1.0); float bright = mix(uMaxBright, uMinBright, t); float op = mix(uOpacityNear, uOpacityFar, t); vec3 col = vColor * bright; gl_FragColor = vec4(col, op); }`
+    });
+    return mat;
   }, []);
 
   const getTransformedPosition = useCallback((position: { x: number; y: number; z: number }) => {
@@ -1301,7 +1317,7 @@ function App() {
          const tNow = performance.now()/1000;
          // Star field now static: guard in case legacy uniform lingers
          if(starFieldRef.current){ const mat:any = starFieldRef.current.material; const sh = mat.userData?.shader; if(sh && sh.uniforms.uTime){ sh.uniforms.uTime.value = tNow; } }
-         if(stargateLinesRef.current){ const m:any = stargateLinesRef.current.material; if(m.uniforms?.uTime){ m.uniforms.uTime.value = tNow; } }
+         if(stargateLinesRef.current && cameraRef.current){ const m:any = stargateLinesRef.current.material; if(m.uniforms?.uCamPos){ m.uniforms.uCamPos.value.copy(cameraRef.current.position); } }
        }
   controls.update();
   if (cinematicModeRef.current || cinematicMode) {
@@ -1617,7 +1633,7 @@ function App() {
 
     const stargateVertices: number[] = [];
     const stargateColors: number[] = [];
-  const defaultStargateColor = new THREE.Color(0x777777); // brighter static gate color
+  const defaultStargateColor = new THREE.Color(0x888888); // base gray (shader scales brightness)
     const stargateData: { source_system_id: number, destination_system_id: number }[] = [];
 
     if (mapData.stargates) {
