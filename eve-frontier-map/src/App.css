@@ -1,6 +1,9 @@
 body {
   margin: 0;
-  overflow: hidden; /* Hide scrollbars */
+  /* Allow vertical scroll so smaller viewports can reach lower UI (stats page, long panels). */
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
 }
 
  :root {
@@ -13,7 +16,8 @@ body {
 
 #root {
   width: 100vw;
-  height: 100vh;
+  min-height: 100vh;
+  /* Do not force fixed height; let content extend and scroll when needed. */
 }
 
   .system-label-wrapper {
