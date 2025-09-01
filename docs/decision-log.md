@@ -13,3 +13,11 @@
 - Risk: low (no business logic change; same API surface)
 - Gates: typecheck ✅ (TS unaffected) | build ✅ | smoke pending (share create/get, usage event POST, stats fetch)
 - Follow-ups: Later swap internals in `_store.js` for Cloudflare KV; add optional retries & instrumentation.
+
+## 2025-09-01 – Instrument gateReachable feature flag
+- Goal: Ensure "Only Gate-Reachable From Start" toggle usage increments `gate_reachable` counter in Stats.
+- Files: `ScoutOptimizer.tsx` (baseline start now tracks feature_flags w/ gateReachable), `App.tsx` (comment clarifying P2P gateReachable= false).
+- Diff: +8 LoC
+- Risk: low (adds client-only tracking call; server already whitelists dynamic `feature_flags`).
+- Gates: typecheck ✅ | build ✅ (expected) | smoke: toggle gate filter -> run Calculate Route -> stats should show increment next aggregation.
+- Follow-ups: Consider capturing gateReachable usage on optimization start as well (currently only baseline start).

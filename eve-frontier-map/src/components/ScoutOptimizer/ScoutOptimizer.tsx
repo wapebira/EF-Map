@@ -308,7 +308,11 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		const collected = collectSystems();
 		if(!collected.length){ alert('No systems collected (check start system / radius / region).'); return; }
 		setMinRequiredShipRange(null); // reset previous requirement banner
-		try { track({ type:'scout_baseline', collectedSystems: collected.length, planetFilterOn: usePlanetCount }); } catch {}
+		try {
+			track({ type:'scout_baseline', collectedSystems: collected.length, planetFilterOn: usePlanetCount });
+			// Feature flag snapshot (captures gateReachable filter usage for Stats counters)
+			track({ type:'feature_flags', waypoints:false, avoid:false, waypointOpt:false, returnToStart, gateReachable: gateReachableOnly });
+		} catch {}
 		baselineStartTimeRef.current = Date.now();
 		systemsForRunRef.current = collected;
 		const signature = collected.slice().sort().join('|');
