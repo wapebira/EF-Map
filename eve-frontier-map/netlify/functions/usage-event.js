@@ -1,4 +1,4 @@
-import { getStore } from '@netlify/blobs';
+import { getStatsStore } from './_store.js';
 
 // Allowed event types and their mapped counter keys / sum keys
 const EVENT_MAP = {
@@ -70,17 +70,7 @@ function upgradeSnapshot(snapshot){
 
 const STORE_NAME = process.env.STATS_STORE || 'app-stats';
 
-async function getStatsStore(){
-  let store; let storeError;
-  const siteID = process.env.BLOB_SITE_ID || process.env.NETLIFY_SITE_ID || process.env.SITE_ID;
-  const token = process.env.BLOB_PAT || process.env.BLOBS_TOKEN;
-  if(siteID && token){
-    try { store = getStore({ name: STORE_NAME, siteID, token }); } catch(e) { storeError = e; }
-    if(!store){ try { store = getStore(STORE_NAME, { siteID, token }); storeError = undefined; } catch(e2){ storeError = e2; } }
-  }
-  if(!store){ try { store = getStore(STORE_NAME); storeError = undefined; } catch(e) { storeError = e; } }
-  return store;
-}
+// store retrieval now delegated to unified abstraction
 
 async function loadSnapshot(store, key){
   let raw = await store.get(key);
