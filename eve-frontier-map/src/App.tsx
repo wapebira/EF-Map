@@ -937,6 +937,7 @@ function App() {
           track({ type:'p2p_route' });
           if(elapsed!==undefined) track({ type:'p2p_route_time', ms: elapsed });
           // Feature flags snapshot (matches server dynamic keys logic)
+          // Feature flags snapshot. gateReachable currently only applies to Scout Optimizer, so always false here.
           track({ type:'feature_flags', waypoints: waypoints.length>0, avoid: avoidSystems.length>0, waypointOpt: waypointOptimize, returnToStart, gateReachable: false });
         } catch {}
         if(fullPath.length && mapData){
