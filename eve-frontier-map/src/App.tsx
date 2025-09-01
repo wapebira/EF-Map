@@ -890,6 +890,7 @@ function App() {
   }, [mapData, selectSystem]);
 
   const calculateRoute = useCallback((fromSystemName: string, toSystemName: string, maxJumpDistance: number, optimizeFor: 'fuel' | 'jumps', algorithm: 'astar' | 'dijkstra') => {
+  try { (window as any).__efMarkFirstRouteStarted && (window as any).__efMarkFirstRouteStarted(); } catch {}
     try { (lastP2PParamsRef as any).current = { jump:maxJumpDistance, optimize:optimizeFor, algo:algorithm, from:fromSystemName, to:toSystemName }; } catch(e) { /* ignore */ }
     if (!mapData) { alert('Map data is not loaded yet.'); return; }
     if(!fromSystemName || !toSystemName){ alert('Both From and To are required.'); return; }
@@ -951,8 +952,15 @@ function App() {
           track({ type:'p2p_route' });
           if(elapsed!==undefined) track({ type:'p2p_route_time', ms: elapsed });
           // Feature flags snapshot (matches server dynamic keys logic)
-          // Feature flags snapshot. gateReachable currently only applies to Scout Optimizer, so always false here.
           track({ type:'feature_flags', waypoints: waypoints.length>0, avoid: avoidSystems.length>0, waypointOpt: waypointOptimize, returnToStart, gateReachable: false });
+          // Ensure algo/mode + hops + waypoint buckets recorded (segmented path fallback)
+          try {
+            const hops = fullPath ? Math.max(0, fullPath.length-1) : 0;
+            const algoUsed = (lastP2PParamsRef.current?.algo) || 'astar';
+            const optMode = (lastP2PParamsRef.current?.optimize) || 'fuel';
+            (window as any).__efTrackP2PRouteMeta && (window as any).__efTrackP2PRouteMeta(algoUsed, optMode, hops, waypoints.length);
+            (window as any).__efMarkFirstAction && (window as any).__efMarkFirstAction('p2p');
+          } catch {}
         } catch {}
         if(fullPath.length && mapData){
           const sysMap = Object.fromEntries(Object.values(mapData.solar_systems).map(s=> [s.name.toLowerCase(), s]));
@@ -990,7 +998,7 @@ function App() {
         avoidSystemNames: avoidSystems.filter(a=> a!==segFrom && a!==segTo && !orderedWaypoints.includes(a)),
       });
     };
-    runNext();
+  runNext();
   }, [mapData, scoutRouteResult, clearCurrentRoute, waypoints, avoidSystems, waypointOptimize, selectSystem]);
 
   // Helper to get planet count color

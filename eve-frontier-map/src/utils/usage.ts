@@ -120,6 +120,10 @@ if(typeof window !== 'undefined'){
     if(!w.___efInitialTheme){ w.___efInitialTheme = newTheme; }
     else if(w.___efInitialTheme !== newTheme){ try { track({ type:'theme_switch' }); } catch {} w.___efInitialTheme = newTheme; }
   };
+  (window as any).__efMarkFirstRouteStarted = ()=>{
+    // Capture earliest start timestamp if not set
+    if(firstRouteStart===undefined){ firstRouteStart = performance.now(); }
+  };
   (window as any).__efTrackP2PRouteMeta = (algo:'astar'|'dijkstra', mode:'fuel'|'jumps', hops:number, waypoints:number)=>{
     try { track({ type:'p2p_route' }); } catch {}
     try { track({ type:'p2p_algo', algo }); } catch {}
@@ -128,7 +132,7 @@ if(typeof window !== 'undefined'){
     try { track({ type:'p2p_hops_bucket', bucket: hb }); } catch {}
     const wb = waypoints===0? 'wp_0' : waypoints<=2? 'wp_1_2' : waypoints<=5? 'wp_3_5' : 'wp_6_plus';
     try { track({ type:'waypoint_count_bucket', bucket: wb }); } catch {}
-    if(!firstActionSent){ firstRouteStart = performance.now(); }
+  // First route start moved earlier via __efMarkFirstRouteStarted
   };
   (window as any).__efTrackP2PCancelled = ()=>{ try { track({ type:'p2p_cancelled' }); } catch {}; };
   (window as any).__efTrackScoutWorkers = (count:number)=>{ try { track({ type:'opt_workers_used', count }); } catch {}; };

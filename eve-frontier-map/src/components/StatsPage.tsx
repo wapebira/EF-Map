@@ -59,7 +59,7 @@ const StatsPage: React.FC = () => {
     let cancelled=false;
     const fetchData = async () => {
       try {
-        const res = await fetch('/.netlify/functions/stats');
+  const res = await fetch('/.netlify/functions/stats?history=7');
         if(!res.ok) throw new Error('Failed');
         const json = await res.json();
         if(cancelled) return;
