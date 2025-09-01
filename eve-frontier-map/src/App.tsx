@@ -829,6 +829,12 @@ function App() {
       const ref = (calculateRoute as any)._cancelRef;
       if (ref) ref.value = true;
     } catch { /* ignore */ }
+    // If a calculation was actively running (routeCalcStartRef set and isCalculatingRoute true), record cancellation metric
+    try {
+      if(routeCalcStartRef.current !== null || isCalculatingRoute){
+        (window as any).__efTrackP2PCancelled && (window as any).__efTrackP2PCancelled();
+      }
+    } catch { /* ignore */ }
     if (routingWorkerRef.current) {
       try {
         routingWorkerRef.current.terminate();
