@@ -398,6 +398,7 @@ function App() {
   const ringTexture = useMemo(() => createRingTexture(), []);
 
   const pointsMaterial = useMemo(() => {
+    // Static star sprites (no temporal pulsing) with soft halo falloff
     const material = new THREE.PointsMaterial({
       size: 2,
       sizeAttenuation: true,
@@ -408,46 +409,45 @@ function App() {
     });
     material.onBeforeCompile = (shader) => {
       shader.uniforms.maxPointSize = { value: 10.0 };
-      shader.uniforms.uTime = { value: 0 };
-      shader.uniforms.uLightDir = { value: new THREE.Vector3(0.4, 0.25, 0.87).normalize() };
-  shader.uniforms.uRimStrength = { value: 1.4 }; // DEBUG exaggerated rim
-  shader.uniforms.uRimPower = { value: 1.6 }; // broader rim
-  shader.uniforms.uCoreBoost = { value: 1.85 }; // very bright core for verification
-      shader.vertexShader = `uniform float maxPointSize;\nuniform float uTime;\nattribute float aSize;\n${shader.vertexShader}`;
+      shader.vertexShader = `uniform float maxPointSize;\nattribute float aSize;\n${shader.vertexShader}`;
       shader.vertexShader = shader.vertexShader.replace(
         '#include <logdepthbuf_vertex>',
-  `float tw = 1.0 + 0.22 * sin(uTime*3.0 + position.x*0.002 + position.y*0.002);\n gl_PointSize = min(gl_PointSize * aSize * tw, maxPointSize);\n#include <logdepthbuf_vertex>`
+        `gl_PointSize = min(gl_PointSize * aSize, maxPointSize);\n#include <logdepthbuf_vertex>`
       );
-      // Fragment rim lighting: treat sprite as lit sphere with rim highlight
-      shader.fragmentShader = `uniform vec3 uLightDir;\nuniform float uRimStrength;\nuniform float uRimPower;\nuniform float uCoreBoost;\n${shader.fragmentShader}`.replace(
-        'gl_FragColor = vec4( outgoingLight, diffuseColor.a );',
-        `vec2 uv = gl_PointCoord * 2.0 - 1.0;\nfloat r2 = dot(uv,uv);\nif(r2>1.0){ discard; }\nfloat z = sqrt(max(0.0, 1.0 - r2));\nvec3 normal = normalize(vec3(uv, z));\nfloat lambert = max(0.0, dot(normal, normalize(uLightDir)));\n// core shading mixes lambert with base to avoid harsh terminator\nvec3 lit = outgoingLight * (0.6 + 0.4*lambert) * uCoreBoost;\n// rim: highlight edge opposite view (view ~ +Z) producing sparkle edge
-float rim = pow(1.0 - max(0.0, normal.z), uRimPower) * uRimStrength;\n// slight light-direction accent: brighten rim a bit more where light grazes
-rim *= 0.6 + 0.4*lambert;\nvec3 finalCol = lit + outgoingLight * rim;\nfinalCol = clamp(finalCol, 0.0, 1.0);\n// Preserve original alpha falloff
-gl_FragColor = vec4(finalCol, diffuseColor.a);`
-      );
+      const finalToken = 'gl_FragColor = vec4( outgoingLight, diffuseColor.a );';
+      if(shader.fragmentShader.includes(finalToken)){
+        shader.fragmentShader = shader.fragmentShader.replace(finalToken,
+          // Radial intensity: brighter core (core^2.2), wider halo (power 0.65). Smooth alpha edge.
+          `vec2 uv = gl_PointCoord * 2.0 - 1.0;\nfloat r2 = dot(uv,uv);\nif(r2>1.0){ discard; }\nfloat core = pow(1.0 - r2, 2.2);\nfloat halo = pow(1.0 - r2, 0.65);\nvec3 col = outgoingLight * (0.55*core + 0.45*halo);\nfloat alpha = diffuseColor.a * (1.0 - smoothstep(0.85,1.0,sqrt(r2)));\ncol = clamp(col,0.0,1.0);\ngl_FragColor = vec4(col, alpha);`);
+      }
       (material as any).userData.shader = shader;
     };
     return material;
   }, [circleTexture]);
 
   const stargateMaterial = useMemo(() => {
-    const mat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.4, depthWrite: false });
+    // Debug-pulse stargate lines (strong color cycling to verify shader hook). Will dial back later.
+    const mat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.5, depthWrite: false });
     mat.onBeforeCompile = (shader)=>{
       shader.uniforms.uTime = { value: 0 };
-      shader.uniforms.uCamPos = { value: new THREE.Vector3() };
-  shader.uniforms.uPulseAmp = { value: 0.9 }; // DEBUG large pulse
-  shader.uniforms.uFadeNear = { value: 4000 }; // nearer emphasis
-  shader.uniforms.uFadeFar = { value: 65000 };
-  shader.uniforms.uSpeed = { value: 0.8 }; // faster (~1.25s cycle)
-      shader.fragmentShader = `uniform float uTime;\nuniform vec3 uCamPos;\nuniform float uPulseAmp;\nuniform float uFadeNear;\nuniform float uFadeFar;\nuniform float uSpeed;\n${shader.fragmentShader}`.replace(
-        'gl_FragColor = vec4( diffuseColor.rgb, diffuseColor.a );',
-        `// approximate line midpoint in camera space for fade
-vec3 mid = (gl_FragCoord.xyz); // screen space not useful for distance; fallback uniform fade in vertex might be better (future)
-// Use varying absence: simple distance via camera to first vertex not accessible here -> approximate with constant fade from camera position length of modelView origin
-float dist = length(uCamPos); // fallback coarse fade; upgrade later with custom attribute
-float df = 1.0 - smoothstep(uFadeNear, uFadeFar, dist);\nfloat pulse = 1.0 + sin(uTime * uSpeed)*uPulseAmp;\nfloat f = pulse * (0.85 + 0.15*df);\nvec3 col = diffuseColor.rgb * f * (0.65 + 0.35*df);\nfloat alpha = diffuseColor.a * (0.55 + 0.45*df);\ngl_FragColor = vec4(col, alpha);`
-      );
+      shader.uniforms.uPulseAmp = { value: 1.5 }; // exaggerated
+      shader.uniforms.uFadeNear = { value: 2000 };
+      shader.uniforms.uFadeFar = { value: 80000 };
+      shader.uniforms.uSpeed = { value: 0.8 };
+      shader.uniforms.uTintA = { value: new THREE.Color(0xff6600) };
+      shader.uniforms.uTintB = { value: new THREE.Color(0x00aaff) };
+      // Inject view-space distance varying
+      shader.vertexShader = shader.vertexShader.replace('void main() {', 'varying float vViewDist;\nvoid main(){');
+      shader.vertexShader = shader.vertexShader.replace('#include <fog_vertex>', '#include <fog_vertex>\n vViewDist = length( (modelViewMatrix * vec4(position,1.0)).xyz );');
+      shader.fragmentShader = `uniform float uTime;\nuniform float uPulseAmp;\nuniform float uFadeNear;\nuniform float uFadeFar;\nuniform float uSpeed;\nuniform vec3 uTintA;\nuniform vec3 uTintB;\nvarying float vViewDist;\n${shader.fragmentShader}`;
+      const tokens = [
+        'gl_FragColor = vec4( diffuse, opacity );',
+        'gl_FragColor = vec4( diffuseColor.rgb, diffuseColor.a );'
+      ];
+      const replacement = `float df = 1.0 - smoothstep(uFadeNear, uFadeFar, vViewDist);\nfloat phase = (sin(uTime * 6.2831 * uSpeed) + 1.0)*0.5;\nfloat amp = mix(0.3, 1.0 + uPulseAmp, phase) * df + 0.15;\nvec3 tint = mix(uTintA, uTintB, phase);\n#ifdef diffuse\nvec3 baseCol = diffuse * tint;\n#else\nvec3 baseCol = diffuseColor.rgb * tint;\n#endif\nvec3 col = baseCol * amp;\nfloat alpha = opacity * (0.25 + 0.75*df);\ngl_FragColor = vec4(col, alpha);`;
+      let applied = false;
+      for(const t of tokens){ if(shader.fragmentShader.includes(t)){ shader.fragmentShader = shader.fragmentShader.replace(t, replacement); applied = true; break; } }
+      if(!applied){ shader.fragmentShader += `\n// fallback injected\n${replacement}`; }
       (mat as any).userData.shader = shader;
     };
     return mat;
@@ -1322,8 +1322,10 @@ float df = 1.0 - smoothstep(uFadeNear, uFadeFar, dist);\nfloat pulse = 1.0 + sin
        // Baseline micro‑twinkle and parallax rotation (non-cinematic)
        if(!cinematicModeRef.current){
          const tNow = performance.now()/1000;
-         if(starFieldRef.current){ const mat:any = starFieldRef.current.material; if(mat.userData?.shader){ mat.userData.shader.uniforms.uTime.value = tNow; } }
-         if(stargateLinesRef.current){ const sm:any = (stargateLinesRef.current.material as any).userData?.shader; if(sm){ sm.uniforms.uTime.value = tNow; if(cameraRef.current){ sm.uniforms.uCamPos.value.copy(cameraRef.current.position); } } }
+         // Star field now static: guard in case legacy uniform lingers
+         if(starFieldRef.current){ const mat:any = starFieldRef.current.material; const sh = mat.userData?.shader; if(sh && sh.uniforms.uTime){ sh.uniforms.uTime.value = tNow; } }
+         if(stargateLinesRef.current){ const sh:any = (stargateLinesRef.current.material as any).userData?.shader; if(sh){ if(sh.uniforms.uTime) sh.uniforms.uTime.value = tNow; }
+         }
        }
   controls.update();
   if (cinematicModeRef.current || cinematicMode) {
