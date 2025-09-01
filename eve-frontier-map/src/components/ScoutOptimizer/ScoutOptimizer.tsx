@@ -99,20 +99,30 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	const baselineStartTimeRef = useRef<number>(0);
 	// Track whether we've already recorded savings for the current baseline (avoid double counting if user stops multiple times)
 	const savingsRecordedRef = useRef<boolean>(false);
-	// Helper to record optimization savings + session time once (used on Stop, unmount, visibility hidden, or time budget)
+	// Helper to record optimization savings + session time once (used on Stop, unmount, visibility hidden, panel close, or time budget)
 	const recordOptimizationMetrics = useCallback(async (label?:string)=>{
 		try {
 			let sent=false;
-			// Savings (only if we actually improved beyond baseline and not yet recorded)
+			console.debug('[ScoutOpt][diag] metrics attempt', {
+				label,
+				baseline: baselineDistanceRef.current,
+				champion: championDistance,
+				savingsRecorded: savingsRecordedRef.current
+			});
+			// Savings
 			if(!savingsRecordedRef.current && baselineDistanceRef.current!==null && championDistance!==null){
 				const saved = baselineDistanceRef.current - championDistance;
 				if(saved > 0){
-					console.debug('[ScoutOpt] recording savings', saved.toFixed(4), label||'');
+					console.debug('[ScoutOpt] recording savings', { saved: saved.toFixed(4), baseline: baselineDistanceRef.current, champion: championDistance, label });
 					await trackImmediate({ type:'scout_opt_savings', saved: parseFloat(saved.toFixed(4)) });
 					savingsRecordedRef.current = true; sent=true;
+				} else {
+					console.debug('[ScoutOpt][diag] no positive savings', { saved, baseline: baselineDistanceRef.current, champion: championDistance, label });
 				}
+			} else if(!savingsRecordedRef.current){
+				console.debug('[ScoutOpt][diag] savings condition unmet', { baselinePresent: baselineDistanceRef.current!==null, championPresent: championDistance!==null });
 			}
-			// Session time (optimization phase) partial or full
+			// Session time
 			if(optimizationStartTimeRef.current){
 				const ms = Date.now() - optimizationStartTimeRef.current;
 				if(ms>0){
@@ -122,7 +132,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 				optimizationStartTimeRef.current = 0;
 			}
 			if(sent){ await flushNow(); }
-		} catch(e){ /* ignore */ }
+		} catch(e){ console.debug('[ScoutOpt][diag] metrics error', e); }
 	}, [championDistance]);
 	const globalMonitorRef = useRef<number|undefined>(undefined);
 	const totalMaxTimeSecRef = useRef<number>(0);
