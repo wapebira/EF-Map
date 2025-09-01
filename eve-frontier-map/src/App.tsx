@@ -433,22 +433,18 @@ function App() {
       vertexColors: true,
       uniforms: {
         uCamPos: { value: new THREE.Vector3() },
-        uNear: { value: 2500 },    // start bright zone (closer)
-        uFar: { value: 90000 },    // fade distance (farther horizon)
-  uMinBright: { value: 1.0 },  // far lines full baseline brightness
-  uMaxBright: { value: 2.5 },  // strong near boost for test
-        uOpacityNear: { value: 0.9 },
-        uOpacityFar: { value: 0.28 },
-        uGamma: { value: 1.4 }      // falloff shaping (>1 => slower fade near camera)
+        uNear: { value: 2500 },     // distance at which lines are at max brightness
+        uFar: { value: 90000 },     // distance at which lines reach min brightness
+        // Brightness range NOTE: keep <=1 to avoid HDR clamp -> ensures relative differences visible.
+        // We'll use white vertex colors so multiplying stays in gamut.
+        uMinBright: { value: 0.22 }, // far brightness (dim but visible)
+        uMaxBright: { value: 1.0 },  // near brightness (no clipping)
+        uOpacityNear: { value: 0.85 },
+        uOpacityFar: { value: 0.25 },
+        uGamma: { value: 1.35 }      // shaping (>1 slows early fade)
       },
       vertexShader: `uniform vec3 uCamPos; varying float vDist; varying vec3 vColor;\nvoid main(){ vColor = color; vec3 worldPos = (modelMatrix * vec4(position,1.0)).xyz; vDist = distance(uCamPos, worldPos); gl_Position = projectionMatrix * viewMatrix * vec4(worldPos,1.0); }`,
-      fragmentShader: `uniform float uNear; uniform float uFar; uniform float uMinBright; uniform float uMaxBright; uniform float uOpacityNear; uniform float uOpacityFar; uniform float uGamma; varying float vDist; varying vec3 vColor;\nvoid main(){ float t = clamp((vDist - uNear)/(uFar - uNear), 0.0, 1.0); // linear 0..1
-  float tg = pow(t, uGamma); // shaped
-  float bright = mix(uMaxBright, uMinBright, tg);
-  float op = mix(uOpacityNear, uOpacityFar, tg);
-  vec3 col = vColor * bright;
-  gl_FragColor = vec4(col, op);
-}`
+      fragmentShader: `uniform float uNear; uniform float uFar; uniform float uMinBright; uniform float uMaxBright; uniform float uOpacityNear; uniform float uOpacityFar; uniform float uGamma; varying float vDist; varying vec3 vColor;\nvoid main(){\n  float t = clamp((vDist - uNear)/(uFar - uNear), 0.0, 1.0); // linear 0..1\n  float tg = pow(t, uGamma); // shaped 0..1\n  float bright = mix(uMaxBright, uMinBright, tg);\n  float op = mix(uOpacityNear, uOpacityFar, tg);\n  vec3 col = vColor * bright;\n  col = clamp(col, 0.0, 1.0);\n  gl_FragColor = vec4(col, op);\n}`
     });
     return mat;
   }, []);
@@ -1640,7 +1636,7 @@ function App() {
 
     const stargateVertices: number[] = [];
     const stargateColors: number[] = [];
-  const defaultStargateColor = new THREE.Color(0xaaaaaa); // lighter base (shader applies bright/dim)
+  const defaultStargateColor = new THREE.Color(0xffffff); // white base; shader controls brightness span
     const stargateData: { source_system_id: number, destination_system_id: number }[] = [];
 
     if (mapData.stargates) {
