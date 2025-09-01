@@ -426,30 +426,21 @@ function App() {
   }, [circleTexture]);
 
   const stargateMaterial = useMemo(() => {
-    // Debug-pulse stargate lines (strong color cycling to verify shader hook). Will dial back later.
-    const mat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.5, depthWrite: false });
-    mat.onBeforeCompile = (shader)=>{
-      shader.uniforms.uTime = { value: 0 };
-      shader.uniforms.uPulseAmp = { value: 1.5 }; // exaggerated
-      shader.uniforms.uFadeNear = { value: 2000 };
-      shader.uniforms.uFadeFar = { value: 80000 };
-      shader.uniforms.uSpeed = { value: 0.8 };
-      shader.uniforms.uTintA = { value: new THREE.Color(0xff6600) };
-      shader.uniforms.uTintB = { value: new THREE.Color(0x00aaff) };
-      // Inject view-space distance varying
-      shader.vertexShader = shader.vertexShader.replace('void main() {', 'varying float vViewDist;\nvoid main(){');
-      shader.vertexShader = shader.vertexShader.replace('#include <fog_vertex>', '#include <fog_vertex>\n vViewDist = length( (modelViewMatrix * vec4(position,1.0)).xyz );');
-      shader.fragmentShader = `uniform float uTime;\nuniform float uPulseAmp;\nuniform float uFadeNear;\nuniform float uFadeFar;\nuniform float uSpeed;\nuniform vec3 uTintA;\nuniform vec3 uTintB;\nvarying float vViewDist;\n${shader.fragmentShader}`;
-      const tokens = [
-        'gl_FragColor = vec4( diffuse, opacity );',
-        'gl_FragColor = vec4( diffuseColor.rgb, diffuseColor.a );'
-      ];
-      const replacement = `float df = 1.0 - smoothstep(uFadeNear, uFadeFar, vViewDist);\nfloat phase = (sin(uTime * 6.2831 * uSpeed) + 1.0)*0.5;\nfloat amp = mix(0.3, 1.0 + uPulseAmp, phase) * df + 0.15;\nvec3 tint = mix(uTintA, uTintB, phase);\n#ifdef diffuse\nvec3 baseCol = diffuse * tint;\n#else\nvec3 baseCol = diffuseColor.rgb * tint;\n#endif\nvec3 col = baseCol * amp;\nfloat alpha = opacity * (0.25 + 0.75*df);\ngl_FragColor = vec4(col, alpha);`;
-      let applied = false;
-      for(const t of tokens){ if(shader.fragmentShader.includes(t)){ shader.fragmentShader = shader.fragmentShader.replace(t, replacement); applied = true; break; } }
-      if(!applied){ shader.fragmentShader += `\n// fallback injected\n${replacement}`; }
-      (mat as any).userData.shader = shader;
-    };
+    // Custom shader (simpler + guaranteed) for stargate links; strong pulse for debug visibility
+    const mat = new THREE.ShaderMaterial({
+      transparent: true,
+      depthWrite: false,
+      vertexColors: true,
+      uniforms: {
+        uTime: { value: 0 },
+        uFadeNear: { value: 2000 },
+        uFadeFar: { value: 80000 },
+        uPulseAmp: { value: 1.0 }, // debug amplitude
+        uSpeed: { value: 0.6 }
+      },
+      vertexShader: `varying float vViewDist; varying vec3 vColor;\nvoid main(){ vColor = color; vec4 mvPos = modelViewMatrix * vec4(position,1.0); vViewDist = length(mvPos.xyz); gl_Position = projectionMatrix * mvPos; }`,
+      fragmentShader: `uniform float uTime; uniform float uFadeNear; uniform float uFadeFar; uniform float uPulseAmp; uniform float uSpeed; varying float vViewDist; varying vec3 vColor;\nvoid main(){ float df = 1.0 - smoothstep(uFadeNear, uFadeFar, vViewDist); float pulse = 1.0 + uPulseAmp * sin(uTime * 6.28318 * uSpeed); vec3 col = vColor * (0.35 + 0.65*df) * pulse; float alpha = (0.12 + 0.88*df); gl_FragColor = vec4(col, alpha); }`
+    });
     return mat;
   }, []);
 
@@ -1324,8 +1315,7 @@ function App() {
          const tNow = performance.now()/1000;
          // Star field now static: guard in case legacy uniform lingers
          if(starFieldRef.current){ const mat:any = starFieldRef.current.material; const sh = mat.userData?.shader; if(sh && sh.uniforms.uTime){ sh.uniforms.uTime.value = tNow; } }
-         if(stargateLinesRef.current){ const sh:any = (stargateLinesRef.current.material as any).userData?.shader; if(sh){ if(sh.uniforms.uTime) sh.uniforms.uTime.value = tNow; }
-         }
+         if(stargateLinesRef.current){ const m:any = stargateLinesRef.current.material; if(m.uniforms?.uTime){ m.uniforms.uTime.value = tNow; } }
        }
   controls.update();
   if (cinematicModeRef.current || cinematicMode) {
