@@ -29,3 +29,11 @@
 - Risk: medium (broad client edits, but additive only; no existing logic altered besides theme tracking hook). Server accepts new event types via EVENT_MAP extension.
 - Gates: typecheck ✅ | build ✅ (post-change) | smoke pending (manually verify route calc, optimization start, theme switch, donate modal, baseline cancel).
 - Follow-ups: Update StatsPage layout to surface new metrics; possibly group donation stats separately; add pruning if counter set grows large over months.
+
+## 2025-09-01 – Stats Page Redesign & Cleanup
+- Goal: Surface newly added instrumentation (activation, routing, scout, UI/theme, sharing/donations, session/cinematic, distributions) in grouped layout; hide noisy diagnostic counters (baseline_errors, stall_restarts). Replace corrupted previous file content.
+- Files: `src/components/StatsPage.tsx`
+- Diff: Replaced entire component (cleanup + ~300 LoC consolidated). Removed duplicate helper & stray fragments causing syntax errors.
+- Risk: low (isolated UI component).
+- Gates: typecheck ✅ | build ✅ | smoke pending (visual grouping & value sanity).
+- Follow-ups: Add tooltips & trend charts; consider dynamic import to reduce main bundle size; maybe expose error counters behind toggle if needed later.
