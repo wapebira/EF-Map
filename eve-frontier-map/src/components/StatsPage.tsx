@@ -265,7 +265,11 @@ const StatsPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {history.map(h=>{
+                {[...history].sort((a,b)=>{
+                  const da = (a.date? a.date.replace(/\.json$/,'') : a.updatedAt.slice(0,10));
+                  const db = (b.date? b.date.replace(/\.json$/,'') : b.updatedAt.slice(0,10));
+                  return db.localeCompare(da); // newest first
+                }).map(h=>{
           const avgP2P = h.sums.p2p_route_time_count ? (h.sums.p2p_route_time_ms_sum / h.sums.p2p_route_time_count) : undefined;
           const avgBase = h.sums.scout_baseline_time_count ? (h.sums.scout_baseline_time_ms_sum / h.sums.scout_baseline_time_count) : undefined;
           const avgActive = h.sums.active_session_time_count ? (h.sums.active_session_time_ms_sum / h.sums.active_session_time_count) : undefined;
@@ -273,7 +277,9 @@ const StatsPage: React.FC = () => {
           const totalSaved = h.sums.scout_opt_savings_ly_sum;
                   return (
                     <tr key={h.date||h.updatedAt} style={{ borderTop:'1px solid rgba(255,255,255,0.07)' }}>
-                      <td style={{ padding:'4px 8px', opacity:0.85 }}>{h.date || h.updatedAt.slice(0,10)}</td>
+                      <td style={{ padding:'4px 8px', opacity:0.85 }}>
+                        {(h.date? h.date.replace(/\.json$/,'') : h.updatedAt.slice(0,10))}
+                      </td>
                       <td style={{ padding:'4px 8px' }}>{h.counters.p2p_routes||0}</td>
                       <td style={{ padding:'4px 8px' }}>{h.counters.scout_baselines||0}</td>
                       <td style={{ padding:'4px 8px' }}>{h.counters.scout_optimizations||0}</td>
