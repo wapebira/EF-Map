@@ -107,3 +107,12 @@
 - Risk: Low (isolated to fallback rebuild after cinematic disable; normal initial build path unchanged).
 - Gates: typecheck ✅ (no new errors) | build pending (expected ✅) | smoke: enter cinematic -> exit -> zoom in/out: star size variance & scale cap (maxPointSize=10) restored ✅.
 - Follow-ups: Consider extracting starfield generation into a shared function to avoid future divergence between initial build and rebuild fallback.
+
+## 2025-09-02 – Fix Auto Reachability Stale Closure
+- Goal: Ensure disabling "Auto" for Reachability immediately stops automatic recomputes on subsequent system selections. Previously, `selectSystem` captured an outdated `reachAuto` (and `reachRange`) because they were omitted from the `useCallback` dependency array, leading to unexpected recomputes after Auto was toggled OFF.
+- Files: `App.tsx` (added `reachAuto`, `reachRange` to `selectSystem` dependencies) plus this log.
+- Root Cause: Stale closure pattern; handler only recreated when other listed deps changed (theme / highlighter states), so it continued to see the prior value of `reachAuto`.
+- Diff: +2 deps (no logic change) / negligible LOC.
+- Risk: Low (pure dependency update). Behavior now matches toggle state deterministically.
+- Gates: typecheck ✅ | build pending (expected ✅) | smoke: Toggle Auto off, select new systems → no recompute; toggle Auto on → recompute occurs.
+- Alternative Considered: Ref-based pattern or effect-driven recompute; deferred as unnecessary for current complexity.

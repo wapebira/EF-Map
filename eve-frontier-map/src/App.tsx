@@ -674,7 +674,7 @@ function App() {
       }
     } catch { /* ignore */ }
 
-  }, [createSystemLabelElement, setLabelText, getTransformedPosition, isPlanetCountActive, isRegionHighlighterActive, accentIsBlue]);
+  }, [createSystemLabelElement, setLabelText, getTransformedPosition, isPlanetCountActive, isRegionHighlighterActive, accentIsBlue, reachAuto, reachRange]);
 
   // Reachability: init worker lazily
   const ensureReachWorker = () => {
