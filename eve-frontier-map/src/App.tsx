@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
+import { createRouteRibbon } from './modules/RouteRibbon';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
@@ -368,9 +369,7 @@ function App() {
   // Updaters that run each frame (used for route pulse animations)
   const routeAnimUpdatersRef = useRef<Array<() => void>>([]);
   // Dynamic route thickness scaling refs (for pulse sphere sync with pixel cap)
-  const routeBaseRadiusRef = useRef<number>(0.375); // default base tube radius
-  const routeCurrentRadiusRef = useRef<number>(0.375);
-  const routeRadiusScaleRef = useRef<number>(1); // currentRadius / baseRadius
+  // (Legacy tube radius refs removed; ribbon handles pixel sizing in shader.)
 
   // New refs for managing overlays
   const selectedStarHaloRef = useRef<THREE.Points | null>(null);
@@ -2351,14 +2350,12 @@ function App() {
 
     if (routeLinesRef.current) {
       try {
+        // Dispose previous ribbon resources if present
+        const old = routeLinesRef.current as any;
+        if (old.userData?.routeGeometry) (old.userData.routeGeometry as THREE.BufferGeometry).dispose();
+        if (old.userData?.routeMaterial) (old.userData.routeMaterial as THREE.Material).dispose();
         sceneRef.current.remove(routeLinesRef.current);
-        routeLinesRef.current.traverse(child => {
-          if (child instanceof THREE.Mesh) {
-            child.geometry.dispose();
-            (child.material as THREE.Material).dispose();
-          }
-        });
-      } catch (e) { /* ignore */ }
+      } catch {/* ignore */}
       routeLinesRef.current = null;
     }
 
@@ -2377,103 +2374,22 @@ function App() {
       return;
     }
 
-  const routeGroup = new THREE.Group();
-    routeLinesRef.current = routeGroup;
+    // Build ribbon route instead of tube meshes
     routeSourceRef.current = scoutRouteResult?.path ? 'scout' : 'p2p';
     const accentHex = accentIsBlue ? 0x00aaff : 0xff4c26;
-  const ROUTE_TUBE_RADIUS = 0.375; // base world radius (will be capped by screen-space)
-  routeBaseRadiusRef.current = ROUTE_TUBE_RADIUS;
-  routeCurrentRadiusRef.current = ROUTE_TUBE_RADIUS;
-  routeRadiusScaleRef.current = 1;
-  const ROUTE_TUBULAR_SEGMENTS = 64;
-  const pulseSpheres: THREE.Mesh[] = [];
-  const segmentDescriptors: Array<{ isStargate: boolean; startVec: THREE.Vector3; endVec: THREE.Vector3; controlPoint?: THREE.Vector3; mesh: THREE.Mesh; }> = [];
-
-    for (let i = 0; i < pathSystems.length - 1; i++) {
-      const startSystem = pathSystems[i];
-      const endSystem = pathSystems[i + 1];
-      const startPos = getTransformedPosition(startSystem.position);
-      const endPos = getTransformedPosition(endSystem.position);
-      const startVec = new THREE.Vector3(startPos.x, startPos.y, startPos.z);
-      const endVec = new THREE.Vector3(endPos.x, endPos.y, endPos.z);
-      const isStargateJump = Object.values(mapData.stargates).some(gate =>
-        (gate.source_system_id === startSystem.id && gate.destination_system_id === endSystem.id) ||
-        (gate.source_system_id === endSystem.id && gate.destination_system_id === startSystem.id)
-      );
-      if (isStargateJump) {
-        const points = [startVec.clone(), endVec.clone()];
-        const curve = new THREE.CatmullRomCurve3(points);
-        const geometry = new THREE.TubeGeometry(curve, Math.max(8, Math.floor(startVec.distanceTo(endVec) / 10)), ROUTE_TUBE_RADIUS, 8, false);
-        const material = new THREE.MeshBasicMaterial({ color: accentHex, transparent: true, opacity: 0.95, depthWrite: false });
-        const mesh = new THREE.Mesh(geometry, material);
-        mesh.renderOrder = 1;
-        routeGroup.add(mesh);
-        const pulseGeo = new THREE.SphereGeometry(Math.max(ROUTE_TUBE_RADIUS * 0.6, 0.5), 8, 8);
-        const pulseMat = new THREE.MeshBasicMaterial({ color: accentHex, transparent: true, opacity: 1.0 });
-        const pulse = new THREE.Mesh(pulseGeo, pulseMat);
-        pulse.position.copy(startVec);
-        routeGroup.add(pulse);
-        pulseSpheres.push(pulse);
-        segmentDescriptors.push({ isStargate: true, startVec, endVec, mesh });
-      } else {
-        const midPoint = new THREE.Vector3().addVectors(startVec, endVec).multiplyScalar(0.5);
-        const dist = startVec.distanceTo(endVec);
-        const controlPointOffset = new THREE.Vector3(0, dist * 0.30, 0);
-        const controlPoint = new THREE.Vector3().addVectors(midPoint, controlPointOffset);
-        const curve = new THREE.QuadraticBezierCurve3(startVec, controlPoint, endVec);
-        const geometry = new THREE.TubeGeometry(curve as any, ROUTE_TUBULAR_SEGMENTS, ROUTE_TUBE_RADIUS, 8, false);
-        const material = new THREE.MeshBasicMaterial({ color: accentHex, transparent: true, opacity: 0.95, depthWrite: false });
-        const mesh = new THREE.Mesh(geometry, material);
-        mesh.renderOrder = 1;
-        routeGroup.add(mesh);
-        const pulseGeo = new THREE.SphereGeometry(Math.max(ROUTE_TUBE_RADIUS * 0.6, 0.5), 8, 8);
-        const pulseMat = new THREE.MeshBasicMaterial({ color: accentHex, transparent: true, opacity: 1.0 });
-        const pulse = new THREE.Mesh(pulseGeo, pulseMat);
-        pulse.position.copy(startVec);
-        routeGroup.add(pulse);
-        pulseSpheres.push(pulse);
-        segmentDescriptors.push({ isStargate: false, startVec, endVec, controlPoint, mesh });
-      }
+    const group = createRouteRibbon({
+      pathSystems,
+      mapData: mapData as any,
+      accentHex,
+      getTransformedPosition,
+  cameraRef,
+      rendererRef,
+      animUpdatersRef: routeAnimUpdatersRef as any
+    });
+    if (group) {
+      routeLinesRef.current = group;
+      sceneRef.current.add(group);
     }
-    sceneRef.current.add(routeGroup);
-
-    // Dynamic pixel-size capped thickness updater (8px diameter cap)
-    const routePts = segmentDescriptors.flatMap(s => [s.startVec, s.endVec]);
-    const routeBox = new THREE.Box3().setFromPoints(routePts);
-    const routeSphere = routeBox.getBoundingSphere(new THREE.Sphere());
-    let lastAppliedRadius = ROUTE_TUBE_RADIUS;
-    const thicknessUpdater = () => {
-      if (!cameraRef.current || !rendererRef.current) return;
-      const cam = cameraRef.current;
-      const dist = cam.position.distanceTo(routeSphere.center);
-      if (dist <= 0) return;
-      const fov = cam.fov * Math.PI / 180;
-      const canvasH = rendererRef.current.domElement.clientHeight || window.innerHeight;
-      const desiredPixelDiameter = 8; // cap
-      const desiredPixelRadius = desiredPixelDiameter / 2;
-      // pixelHeight = (worldHeight / dist) * (canvasH / (2 * tan(fov/2)))
-      // worldRadius = pixelRadius * dist * (2 * tan(fov/2)) / canvasH
-      const worldRadiusCap = desiredPixelRadius * dist * (2 * Math.tan(fov / 2)) / canvasH;
-      const targetRadius = Math.min(ROUTE_TUBE_RADIUS, worldRadiusCap);
-      if (Math.abs(targetRadius - lastAppliedRadius) < 0.01) return; // skip small changes
-      // Rebuild geometries with new radius
-      segmentDescriptors.forEach(seg => {
-        try {
-          (seg.mesh.geometry as THREE.TubeGeometry).dispose();
-          if (seg.isStargate) {
-            const curve = new THREE.CatmullRomCurve3([seg.startVec.clone(), seg.endVec.clone()]);
-            seg.mesh.geometry = new THREE.TubeGeometry(curve, Math.max(8, Math.floor(seg.startVec.distanceTo(seg.endVec) / 10)), targetRadius, 8, false);
-          } else {
-            const curve = new THREE.QuadraticBezierCurve3(seg.startVec, seg.controlPoint!, seg.endVec);
-            seg.mesh.geometry = new THREE.TubeGeometry(curve as any, ROUTE_TUBULAR_SEGMENTS, targetRadius, 8, false);
-          }
-        } catch (e) { /* ignore */ }
-      });
-      lastAppliedRadius = targetRadius;
-      routeCurrentRadiusRef.current = targetRadius;
-      routeRadiusScaleRef.current = targetRadius / routeBaseRadiusRef.current;
-    };
-    routeAnimUpdatersRef.current.push(thicknessUpdater);
 
     // --- Auto zoom & animated transition to encompass route ---
     try {
@@ -2531,46 +2447,16 @@ function App() {
       }
     } catch (e) { /* ignore auto zoom errors */ }
 
-    const animators: Array<() => void> = [];
-  pulseSpheres.forEach((pulse, idx) => {
-      const start = pathSystems[idx];
-      const end = pathSystems[idx + 1];
-      const startPos = getTransformedPosition(start.position);
-      const endPos = getTransformedPosition(end.position);
-      const sVec = new THREE.Vector3(startPos.x, startPos.y, startPos.z);
-      const eVec = new THREE.Vector3(endPos.x, endPos.y, endPos.z);
-      const curve = new THREE.QuadraticBezierCurve3(sVec, new THREE.Vector3().addVectors(sVec, eVec).multiplyScalar(0.5).add(new THREE.Vector3(0, sVec.distanceTo(eVec) * 0.25, 0)), eVec);
-      let t = 0;
-      const speed = 0.5 + (idx % 3) * 0.1;
-      const updater = () => {
-        t += 0.01 * speed;
-        if (t > 1) t = 0;
-        const pos = curve.getPoint(t);
-        pulse.position.copy(pos);
-    const animScale = 1 + Math.sin(t * Math.PI * 2) * 0.3;
-    const thicknessScale = routeRadiusScaleRef.current; // sync with tube thickness cap
-    const finalScale = animScale * thicknessScale;
-    pulse.scale.set(finalScale, finalScale, finalScale);
-      };
-      animators.push(updater);
-    });
-  routeAnimUpdatersRef.current = [...routeAnimUpdatersRef.current, ...animators];
+  // Pulse spheres removed; ribbon shader handles directional pulse internally.
 
     return () => {
-      animators.forEach(a => {
-        const idx = routeAnimUpdatersRef.current.indexOf(a);
-        if (idx !== -1) routeAnimUpdatersRef.current.splice(idx, 1);
-      });
       if (routeLinesRef.current) {
         try {
-          routeLinesRef.current.traverse(child => {
-            if (child instanceof THREE.Mesh) {
-              child.geometry.dispose();
-              (child.material as THREE.Material).dispose();
-            }
-          });
+          const old = routeLinesRef.current as any;
+            if (old.userData?.routeGeometry) (old.userData.routeGeometry as THREE.BufferGeometry).dispose();
+            if (old.userData?.routeMaterial) (old.userData.routeMaterial as THREE.Material).dispose();
           sceneRef.current?.remove(routeLinesRef.current);
-        } catch (e) { /* ignore */ }
+        } catch {/* ignore */}
         routeLinesRef.current = null;
       }
       routeSourceRef.current = null;
@@ -2581,12 +2467,12 @@ function App() {
   useEffect(() => {
     if (!sceneRef.current || !routeLinesRef.current) return;
     const accentHex = accentIsBlue ? 0x00aaff : 0xff4c26;
-    routeLinesRef.current.traverse((child) => {
-      const anyChild: any = child as any;
-      if (anyChild.material && (anyChild.material as any).color) {
-        (anyChild.material as any).color.set(accentHex);
-      }
-    });
+    // Update ribbon shader uniform color
+    try {
+      const group: any = routeLinesRef.current;
+      const mat = group?.userData?.routeMaterial;
+      if (mat && mat.uniforms?.u_color) mat.uniforms.u_color.value.setHex(accentHex);
+    } catch {/* ignore */}
   }, [accentIsBlue]);
 
   // Final pass to ensure selected star is colored with accent after all other color pipelines.

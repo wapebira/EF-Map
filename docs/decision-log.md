@@ -70,3 +70,21 @@
 - Risk: low (presentation only, no logic change to tracking or aggregation).
 - Gates: typecheck ✅ | build ✅ (post-stats tooltip build) | smoke ✅ (tooltips appear via title attribute, Help panel shorter).
 - Follow-ups: Optional custom styled tooltip component for richer formatting; a11y enhancement using aria-describedby with offscreen text; add trend sparklines later.
+
+## 2025-09-02 – Route Ribbon Shader Rewrite (Pulse Tail & Visibility Fixes)
+- Goal: Replace legacy per-segment TubeGeometry + pulse spheres with a single screen-space ribbon polyline supporting per-hop bright directional pulse, trailing tail, consistent thin width, and robustness when viewing long straight segments head-on.
+- Files: `src/modules/RouteRibbon.ts` (new / rewritten), `src/App.tsx` (integration: remove tube build logic, adopt ribbon creation & recolor logic), `decision-log.md` (this entry).
+- Diff: Net removal of legacy tube code (~180+ LOC removed in `App.tsx` route section) and addition of ribbon module (~300 LOC including shaders). Added tail & head-on fallback uniforms.
+- Key Implementation Notes:
+  - Geometry built as expanded quad strip with prev/next references; per-hop attributes (hopLocal, hopLength, hopIndex) drive animation.
+  - Long gate segments subdivided (>600 units) to prevent collapsing expansion vector when camera aligns exactly with segment direction.
+  - Vertex shader head-on fallback injects minimal (~2px) NDC span to avoid disappearance when projected length nearly zero.
+  - Fragment shader: Gaussian pulse head + exponential tail (u_tailStrength / u_tailDecay) with base color normalization (u_targetMax) to keep baseline consistent across orange/blue themes.
+  - Screen-space constant thickness via u_pxTarget adjusted each frame (5–8px window) in updater; double-sided rendering for visibility.
+  - Removed pulse spheres & dynamic tube radius recalculation; greatly reduces geometry rebuilds & CPU overhead.
+- Risk: Medium (custom shader + geometry math). Contained to new module and integration points.
+- Gates: typecheck ✅ | build (pending full project build) | smoke (pending visual confirmation: pulse head, tail, no disappearing long segments on axial camera alignment).
+- Follow-ups:
+  - Optional bloom-specific additive pass for pulse head only if extra glow desired.
+  - Expose tail parameters via a debug or settings panel for user tuning.
+  - Potential batching of multiple alternate routes (if added later) into instanced ribbon draws.
