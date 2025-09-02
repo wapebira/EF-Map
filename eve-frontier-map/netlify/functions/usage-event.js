@@ -20,7 +20,7 @@ const EVENT_MAP = {
   // Scout optimization lightyears saved (baseline distance - optimized distance)
   scout_opt_savings: { sum: { key: 'scout_opt_savings_ly_sum', countKey: 'scout_opt_savings_count', valueField: 'saved' } },
   // Bucketed savings distribution
-  scout_opt_savings_bucket: { countersDynamic: (b)=> { const v=b.bucket; const allowed=['save_lt_5','save_5_20','save_20_50','save_gt_50']; return allowed.includes(v)? [v]:[]; } },
+  scout_opt_savings_bucket: { countersDynamic: (b)=> { const v=b.bucket; const allowed=['save_0_50','save_50_100','save_100_200','save_gt_200']; return allowed.includes(v)? [v]:[]; } },
   // UI / interaction metrics
   ui_hide: { counters: ['ui_hide'] },
   show_distance: { counters: ['show_distance'] },
@@ -73,7 +73,19 @@ const EVENT_MAP = {
     if(b.returnToStart) arr.push('return_to_start');
     if(b.gateReachable) arr.push('gate_reachable');
     return arr;
-  } }
+  } },
+  // Reachability / jump range features
+  reachability_enable: { counters: ['reachability_enable'] },
+  reachability_disable: { counters: ['reachability_disable'] },
+  reachability_compute: { counters: ['reachability_computes'] },
+  rangebubble_show: { counters: ['rangebubble_show'] },
+  rangebubble_hide: { counters: ['rangebubble_hide'] },
+  reachability_auto_on: { counters: ['reachability_auto_on'] },
+  reachability_auto_off: { counters: ['reachability_auto_off'] },
+  reachability_tab_open: { counters: ['reachability_tab_open'] },
+  reachability_inrange_on: { counters: ['reachability_inrange_on'] },
+  reachability_inrange_off: { counters: ['reachability_inrange_off'] },
+  reachability_range_bucket: { countersDynamic: (b)=> { const v=b.bucket; const allowed=['rng_lt_10','rng_10_25','rng_25_50','rng_50_100','rng_gt_100']; return allowed.includes(v)? [v]: []; } }
 };
 
 // Schema versioning for aggregate snapshots.

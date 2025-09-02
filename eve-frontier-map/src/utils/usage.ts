@@ -136,7 +136,7 @@ if(typeof window !== 'undefined'){
   };
   (window as any).__efTrackP2PCancelled = ()=>{ try { track({ type:'p2p_cancelled' }); } catch {}; };
   (window as any).__efTrackScoutWorkers = (count:number)=>{ try { track({ type:'opt_workers_used', count }); } catch {}; };
-  (window as any).__efTrackSavingsBucket = (saved:number)=>{ let b = saved<5? 'save_lt_5' : saved<20? 'save_5_20' : saved<50? 'save_20_50' : 'save_gt_50'; try { track({ type:'scout_opt_savings_bucket', bucket:b }); } catch {}; };
+  (window as any).__efTrackSavingsBucket = (saved:number)=>{ let b = saved<50? 'save_0_50' : saved<100? 'save_50_100' : saved<200? 'save_100_200' : 'save_gt_200'; try { track({ type:'scout_opt_savings_bucket', bucket:b }); } catch {}; };
   (window as any).__efTrackPlanetBins = (activeBins:number)=>{ let b = activeBins===5? 'bins_5' : activeBins>=3? 'bins_3_4' : activeBins>=1? 'bins_1_2' : 'bins_0'; try { track({ type:'planet_bins_active_bucket', bucket:b }); } catch {}; };
   (window as any).__efTrackDonateModalOpen = ()=>{ try { track({ type:'donate_modal_open' }); } catch {} };
   (window as any).__efTrackDonateClick = (kind:'stripe'|'crypto')=>{ try { track({ type: kind==='stripe' ? 'donate_stripe_click':'donate_crypto_click' }); } catch {} };
