@@ -20,7 +20,7 @@ const EVENT_MAP = {
   // Scout optimization lightyears saved (baseline distance - optimized distance)
   scout_opt_savings: { sum: { key: 'scout_opt_savings_ly_sum', countKey: 'scout_opt_savings_count', valueField: 'saved' } },
   // Bucketed savings distribution
-  scout_opt_savings_bucket: { countersDynamic: (b)=> { const v=b.bucket; const allowed=['save_lt_5','save_5_20','save_20_50','save_gt_50']; return allowed.includes(v)? [v]:[]; } },
+  scout_opt_savings_bucket: { countersDynamic: (b)=> { const v=b.bucket; const allowed=['save_0_50','save_50_100','save_100_200','save_gt_200']; return allowed.includes(v)? [v]:[]; } },
   // UI / interaction metrics
   ui_hide: { counters: ['ui_hide'] },
   show_distance: { counters: ['show_distance'] },
