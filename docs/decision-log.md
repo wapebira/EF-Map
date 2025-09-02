@@ -97,3 +97,13 @@
 - Risk: Low (UI copy + additive metrics; no core algorithm changes). All new counters safely whitelisted server-side.
 - Gates: typecheck ✅ | build (pending) | smoke (pending manual: open tab, toggle each checkbox, verify counters increment after stats refresh).
 - Follow-ups: Consider timing metric for reachability compute duration distribution; potential cache for last range bucket to avoid duplicate rapid events; maybe add tooltip clarifying difference between geometric in-range vs graph reachable.
+
+## 2025-09-02 – Fix Star Size Scaling Regression After Cinematic Mode
+- Goal: Restore proper star point size scaling (distance + per-star variance) that was lost after exiting cinematic mode; stars were stuck at minimal size (~1px) due to missing `aSize` attribute on rebuilt geometry.
+- Files: `App.tsx` (cinematic disable path starfield rebuild section) updated to regenerate brightness/tint falloff and reattach `aSize` attribute when reconstructing the base starfield.
+- Diff: +~35 / -~9 LOC (replacement block inside rebuild fallback).
+- Root Cause: Cinematic teardown fallback rebuilt starfield geometry but only restored position & color attributes, omitting `aSize`; shader (already patched with `gl_PointSize = min(gl_PointSize * aSize, maxPointSize)`) then multiplied by unbound attribute (default 0/1), collapsing intended scaling. Some GPUs silently supplied 1, others produced near-constant tiny points.
+- Fix Details: Recreated original generation logic (distance falloff, deterministic tint jitter, anchor size variance) and added `aSize` Float32 attribute. Comment added clarifying critical nature of attribute for zoom scaling.
+- Risk: Low (isolated to fallback rebuild after cinematic disable; normal initial build path unchanged).
+- Gates: typecheck ✅ (no new errors) | build pending (expected ✅) | smoke: enter cinematic -> exit -> zoom in/out: star size variance & scale cap (maxPointSize=10) restored ✅.
+- Follow-ups: Consider extracting starfield generation into a shared function to avoid future divergence between initial build and rebuild fallback.
