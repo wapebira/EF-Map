@@ -449,6 +449,64 @@ const baseSections: SectionDef[] = [
           },
     ],
   },
+      {
+        id: 'reachability',
+        title: 'Reachability (Jump Range)',
+        subsections: [
+          {
+            id: 'reach-overview',
+            title: 'Overview & Workflow',
+            content: (
+              <div>
+                <p>Analyze which systems are gate/ship reachable from a chosen <em>Origin</em> within a maximum jump distance. Enter an origin system, set a <em>Max Jump Range</em> (LY), then click <strong>Compute</strong> (or enable <strong>Auto</strong>) to evaluate.</p>
+                <ul style={{ paddingLeft: '18px', margin: '6px 0' }}>
+                  <li><strong>Origin System:</strong> Autocomplete; changes trigger recompute when Auto is ON.</li>
+                  <li><strong>Max Jump Range:</strong> Direct distance ceiling for individual ship jumps used in reachability logic & bubble radius.</li>
+                  <li><strong>Compute:</strong> Manual run (disabled if incomplete or already computing).</li>
+                  <li><strong>Stats Line:</strong> Shows reachable vs total systems and time (ms).</li>
+                </ul>
+              </div>
+            )
+          },
+          {
+            id: 'reach-checkboxes',
+            title: 'Checkboxes & Interaction',
+            content: (
+              <div>
+                <ul style={{ paddingLeft: '18px', margin: '6px 0' }}>
+                  <li><strong>Auto:</strong> Debounced recompute (≈280ms) whenever Origin or Range changes. Off = only manual Compute.</li>
+                  <li><strong>Highlight unreachable:</strong> Colors systems outside the reachable gate/ship graph red; others retain base/other mode colors. (Toggle tracked independently of bubble.)</li>
+                  <li><strong>Show bubble:</strong> Displays a smooth animated sphere centered on the selected/highlighted system sized to the Max Jump Range (pure geometric radius; not path graph aware). Camera may reframe after large range changes.</li>
+                  <li><strong>Highlight in-range:</strong> When the bubble is ON, colors all systems whose straight-line distance from the bubble center ≤ range in the accent color. This can visually contrast raw distance coverage vs graph reachability.</li>
+                </ul>
+              </div>
+            )
+          },
+          {
+            id: 'reach-precedence',
+            title: 'Color Precedence Rules',
+            content: (
+              <div>
+                <ul style={{ paddingLeft: '18px', margin: '6px 0' }}>
+                  <li><strong>In‑range vs Unreachable:</strong> In‑range accent overrides unreachable red if a system is both within geometric range yet unreachable via gates/ship jumps under the current graph constraints.</li>
+                  <li><strong>In‑range + Other Modes:</strong> When <em>Highlight in-range</em> AND <em>Show bubble</em> are active, in‑range accent colors take precedence over Region Highlight & Display Planet Counts modes (those modes are visually suspended while this pairing is active).</li>
+                  <li><strong>Unreachable Highlight alone:</strong> Without in‑range highlighting the unreachable red overlay coexists with Region / Planet coloring for reachable systems.</li>
+                  <li><strong>Turning Off In‑range:</strong> Restores prior base / Region / Planet colors; unreachable red is then re-applied if its checkbox remains on.</li>
+                </ul>
+              </div>
+            )
+          },
+          {
+            id: 'reach-metrics',
+            title: 'Metrics Captured (Anonymous)',
+            content: (
+              <div>
+                <p>The stats page tracks: tab opens, compute runs, Auto on/off, Unreachable highlight on/off, Bubble show/hide, In‑range highlight on/off, and range bucket distribution. Use these to gauge feature adoption & typical planning ranges.</p>
+              </div>
+            )
+          }
+        ]
+      },
   {
     id: 'cinematic-mode',
     title: 'Cinematic Mode',

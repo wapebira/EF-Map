@@ -72,6 +72,8 @@ const DESCRIPTIONS: Record<string,string> = {
   'Planet Bins Active':'How many planet legend bins were enabled during baseline creation.',
   'Workers Used':'Parallel optimization workers selected.',
   'UI Scale':'Chosen interface scale percentages distribution.',
+  'Reachability Usage':'Adoption & interaction with jump range reachability tools.',
+  'Range Buckets':'Distribution of chosen max jump ranges (approx – sampled on edit pauses).',
   'Last 7 Days (Newest First)':'Daily aggregate snapshot: one JSON per day.'
 };
 
@@ -251,6 +253,19 @@ const StatsPage: React.FC = () => {
             <StatRow label="Avg cinematic time" value={formatDurationAvg(data.sums.cinematic_time_ms_sum, data.sums.cinematic_time_count)} />
             <StatRow label="Cinematic time share" value={( ()=>{ const cSum=data.sums.cinematic_time_ms_sum; const sSum=data.sums.session_time_ms_sum; if(!cSum||!sSum) return '—'; return ((cSum/sSum)*100).toFixed(1)+'%'; })()} />
           </section>
+          {/* Reachability */}
+          <section style={{ background:'rgba(255,255,255,0.06)', padding:'16px 18px', border:'1px solid rgba(255,255,255,0.15)', borderRadius:10, boxShadow:'0 2px 4px rgba(0,0,0,0.45)' }}>
+            <h2 style={{ margin:'0 0 8px 0', fontSize:'15px', letterSpacing:'.5px', textTransform:'uppercase', opacity:0.85 }}>Reachability</h2>
+            <StatRow label="Reachability Usage" value={( ()=>{ const opens=data.counters.reachability_tab_open||0; const computes=data.counters.reachability_computes||0; return `${opens} opens / ${computes} computes`; })()} />
+            <StatRow label="Auto on" value={data.counters.reachability_auto_on||0} />
+            <StatRow label="Auto off" value={data.counters.reachability_auto_off||0} />
+            <StatRow label="Unreachable on" value={data.counters.reachability_enable||0} />
+            <StatRow label="Unreachable off" value={data.counters.reachability_disable||0} />
+            <StatRow label="Bubble show" value={data.counters.rangebubble_show||0} />
+            <StatRow label="Bubble hide" value={data.counters.rangebubble_hide||0} />
+            <StatRow label="In-range on" value={data.counters.reachability_inrange_on||0} />
+            <StatRow label="In-range off" value={data.counters.reachability_inrange_off||0} />
+          </section>
           {/* Distributions */}
           <section style={{ background:'rgba(255,255,255,0.04)', padding:'18px 20px', border:'1px solid rgba(255,255,255,0.12)', borderRadius:12, boxShadow:'0 2px 4px rgba(0,0,0,0.55)', gridColumn:'1 / -1' }}>
             <h2 style={{ margin:'0 0 14px 0', fontSize:'15px', letterSpacing:'.5px', textTransform:'uppercase', opacity:0.85 }}>Distributions</h2>
@@ -261,6 +276,7 @@ const StatsPage: React.FC = () => {
               {(()=>{ const keys=['bins_5','bins_3_4','bins_1_2','bins_0']; const labelMap:{[k:string]:string}={bins_5:'5',bins_3_4:'3–4',bins_1_2:'1–2',bins_0:'0'}; const rows=keys.map(k=>({k,c:data.counters[k]||0,label:labelMap[k]})); const tot=rows.reduce((a,b)=>a+b.c,0); return <DistTable title="Planet Bins Active" rows={rows} total={tot} />; })()}
               {(()=>{ const workerKeys=Object.keys(data.counters).filter(k=> k.startsWith('opt_workers_used_')); const rows=workerKeys.sort((a,b)=> parseInt(a.split('_').pop()||'0')-parseInt(b.split('_').pop()||'0')).map(k=>({k,c:data.counters[k]||0,label:k.replace('opt_workers_used_','')})); const tot=rows.reduce((a,b)=>a+b.c,0); return <DistTable title="Workers Used" rows={rows} total={tot} />; })()}
               {(()=>{ const scaleKeys=Object.keys(data.counters).filter(k=> k.startsWith('ui_scale_')); const rows=scaleKeys.sort((a,b)=> parseInt(a.replace('ui_scale_',''))-parseInt(b.replace('ui_scale_',''))).map(k=>({k,c:data.counters[k]||0,label:k.replace('ui_scale_','')+'%'})); const tot=rows.reduce((a,b)=>a+b.c,0); return <DistTable title="UI Scale" rows={rows} total={tot} />; })()}
+              {(()=>{ const keys=['rng_lt_10','rng_10_25','rng_25_50','rng_50_100','rng_gt_100']; const labelMap:{[k:string]:string}={rng_lt_10:'<10',rng_10_25:'10–25',rng_25_50:'25–50',rng_50_100:'50–100',rng_gt_100:'>100'}; const rows=keys.map(k=>({k,c:data.counters[k]||0,label:labelMap[k]})); const tot=rows.reduce((a,b)=>a+b.c,0); return <DistTable title="Range Buckets" rows={rows} total={tot} />; })()}
             </div>
           </section>
         </div>

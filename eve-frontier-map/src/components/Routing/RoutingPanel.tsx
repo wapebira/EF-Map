@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
+import { track } from '../../utils/usage';
 import P2PRouting from '../P2PRouting/P2PRouting';
 import ScoutOptimizer from '../ScoutOptimizer/ScoutOptimizer';
+import ReachabilitySection from './ReachabilitySection';
 
 interface RoutingPanelProps {
   onCalculateRoute: any;
@@ -36,15 +38,34 @@ interface RoutingPanelProps {
   planetBinsActive?: boolean[];
   minPlanets?: number;
   maxPlanets?: number;
+  reachabilityProps?: {
+    originSystemName?: string;
+    range: number;
+    auto: boolean;
+    dim: boolean;
+    bubble: boolean;
+  inRange: boolean;
+    stats: { reachable:number; total:number; ms:number }|null;
+    disabled: string | null;
+    computing: boolean;
+    onCompute:(origin:string, range:number)=>void;
+    onRangeChange:(r:number)=>void;
+    onOriginChange:(o:string)=>void;
+    onAutoChange:(v:boolean)=>void;
+    onDimChange:(v:boolean)=>void;
+    onBubbleChange:(v:boolean)=>void;
+  onInRangeChange:(v:boolean)=>void;
+  };
 }
 
 const RoutingPanel: React.FC<RoutingPanelProps> = (props) => {
-  const [tab, setTab] = useState<'p2p'|'scout'>('p2p');
+  const [tab, setTab] = useState<'p2p'|'scout'|'reach'>('p2p');
   return (
     <div>
       <div className="ef-tabs" role="tablist">
         <button className={`ef-tab-btn ${tab==='p2p'?'active':''}`} role="tab" aria-selected={tab==='p2p'} onClick={()=> setTab('p2p')}>Point to Point</button>
         <button className={`ef-tab-btn ${tab==='scout'?'active':''}`} role="tab" aria-selected={tab==='scout'} onClick={()=> setTab('scout')}>Scout Optimizer</button>
+  <button className={`ef-tab-btn ${tab==='reach'?'active':''}`} role="tab" aria-selected={tab==='reach'} onClick={()=> { setTab('reach'); try { track({ type:'reachability_tab_open' }); } catch {} }}>Reachability</button>
       </div>
       {tab==='p2p' && (
         <P2PRouting
@@ -93,6 +114,27 @@ const RoutingPanel: React.FC<RoutingPanelProps> = (props) => {
           planetBinsActive={props.planetBinsActive}
           minPlanets={props.minPlanets}
           maxPlanets={props.maxPlanets}
+        />
+      )}
+      {tab==='reach' && props.reachabilityProps && (
+        <ReachabilitySection
+          originSystemName={props.reachabilityProps.originSystemName}
+          systemNames={props.systemNames}
+          onCompute={props.reachabilityProps.onCompute}
+          onRangeChange={props.reachabilityProps.onRangeChange}
+          onOriginChange={props.reachabilityProps.onOriginChange}
+          range={props.reachabilityProps.range}
+          auto={props.reachabilityProps.auto}
+          onAutoChange={props.reachabilityProps.onAutoChange}
+          dim={props.reachabilityProps.dim}
+          onDimChange={props.reachabilityProps.onDimChange}
+          bubble={props.reachabilityProps.bubble}
+          onBubbleChange={props.reachabilityProps.onBubbleChange}
+          inRange={props.reachabilityProps.inRange}
+          onInRangeChange={props.reachabilityProps.onInRangeChange}
+          lastStats={props.reachabilityProps.stats}
+          disabledReason={props.reachabilityProps.disabled}
+          computing={props.reachabilityProps.computing}
         />
       )}
     </div>

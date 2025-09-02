@@ -11,6 +11,7 @@ import RegionHighlighterModule, { setRegionHighlightColors } from './modules/Reg
 import logo from './assets/logo/logo.png';
 import { openDbFromArrayBuffer } from "./lib/sql";
 import type { SystemRow, StargateRow, RegionRow, ConstellationRow } from "./types/db";
+import { createJumpRangeBubble } from './modules/JumpRangeBubble';
 import LoadingScreen from './components/LoadingScreen';
 // Legacy panel components kept for reference removed in favor of unified RoutingPanel
 import PanelRail from './components/layout/PanelRail';
@@ -197,6 +198,20 @@ function App() {
   const [maxPlanets, setMaxPlanets] = useState(0);
   // Cinematic mode active flag (enables scene post-processing & behavior changes)
   const [cinematicMode, setCinematicMode] = useState(false);
+  // Reachability feature state
+  const [reachRange, setReachRange] = useState<number>(120);
+  const [reachAuto, setReachAuto] = useState(false);
+  const [reachDim, setReachDim] = useState(true); // default highlight unreachable ON
+  const [reachBubble, setReachBubble] = useState(false);
+  const [reachInRangeHighlight, setReachInRangeHighlight] = useState(false); // highlight stars within raw distance <= reachRange when bubble shown
+  const [reachStats, setReachStats] = useState<{ reachable:number; total:number; ms:number }|null>(null);
+  const [reachComputing, setReachComputing] = useState(false);
+  const reachabilityWorkerRef = useRef<Worker|null>(null);
+  const reachInFlightRef = useRef<number>(0);
+  const starBaseColorsRef = useRef<Float32Array|null>(null);
+  const reachableSetRef = useRef<Set<number>|null>(null);
+  const rangeBubbleRef = useRef<import('./modules/JumpRangeBubble').JumpRangeBubbleHandle|null>(null);
+  const inRangeSetRef = useRef<Set<number>|null>(null);
   // External trigger for expanding Support section in Help
   const [supportExpandRequestId, setSupportExpandRequestId] = useState(0);
   const [cryptoModalOpen, setCryptoModalOpen] = useState(false);
@@ -365,6 +380,10 @@ function App() {
     endTarget: new THREE.Vector3(),
     duration: 500, // ms
   });
+  // Bubble transition state (so bubble slides smoothly between old/new system centers instead of teleport)
+  const bubbleAnimRef = useRef<{
+    active:boolean; start:THREE.Vector3; end:THREE.Vector3; startTime:number; duration:number;
+  }>({ active:false, start:new THREE.Vector3(), end:new THREE.Vector3(), startTime:0, duration:600 });
 
   // Updaters that run each frame (used for route pulse animations)
   const routeAnimUpdatersRef = useRef<Array<() => void>>([]);
@@ -569,7 +588,7 @@ function App() {
   }, [isPlanetCountActive]);
 
   const selectSystem = useCallback((system: SolarSystem) => {
-    // Set the highlighted system for camera animation and the main rendering effect
+  // Set the highlighted system for camera animation and the main rendering effect.
     setHighlightedSystem(system);
   // Store name for external consumers (P2P / Scout)
   try { setLastSelectedSystemName(system.name); } catch {/* ignore */}
@@ -619,6 +638,22 @@ function App() {
       newSelectedLabelParent.add(selectedLabelObj.current);
     }
     selectedLabelObj.current.visible = true;
+    // Trigger auto reachability recompute when origin changes and auto enabled
+    if(reachAuto){ computeReachability(system.name, reachRange); }
+    // Initiate bubble center interpolation if bubble active & we have an existing bubble position
+    if(reachBubble && rangeBubbleRef.current){
+      try {
+        const currentPos = rangeBubbleRef.current.group.position.clone();
+        const newPosRaw = getTransformedPosition(system.position);
+        const newPos = new THREE.Vector3(newPosRaw.x,newPosRaw.y,newPosRaw.z);
+        bubbleAnimRef.current.active = true;
+        bubbleAnimRef.current.start.copy(currentPos);
+        bubbleAnimRef.current.end.copy(newPos);
+        bubbleAnimRef.current.startTime = performance.now();
+        // Match animation duration to camera animation if one is about to run (will be set shortly below). Fallback 600ms.
+        bubbleAnimRef.current.duration = animationRef.current.isAnimating ? animationRef.current.duration : 600;
+      } catch {/* ignore bubble anim setup */}
+    }
 
     // Removed selection halo (persistent orange ring) per request; rely solely on small hover ring for targeting feedback.
     if(selectedStarHaloRef.current){
@@ -640,6 +675,263 @@ function App() {
     } catch { /* ignore */ }
 
   }, [createSystemLabelElement, setLabelText, getTransformedPosition, isPlanetCountActive, isRegionHighlighterActive, accentIsBlue]);
+
+  // Reachability: init worker lazily
+  const ensureReachWorker = () => {
+    if(!reachabilityWorkerRef.current){
+      reachabilityWorkerRef.current = new Worker(new URL('./utils/reachability_worker.ts', import.meta.url), { type:'module' });
+      reachabilityWorkerRef.current.onmessage = (e)=>{
+        const data = e.data;
+        if(!data || data.type!=='result') return;
+        const token = data.token; if(token !== reachInFlightRef.current) return; // stale
+  setReachComputing(false);
+  const reachableIds:number[] = data.reachableIds || [];
+        const elapsedMs:number = data.elapsedMs || 0;
+        const setReachable = new Set(reachableIds);
+        reachableSetRef.current = setReachable;
+        const total = visibleSystemsRef.current.length;
+        setReachStats({ reachable: setReachable.size, total, ms: elapsedMs });
+        try { track({ type:'reachability_compute' }); } catch {}
+        if(reachDim){ applyReachabilityDimming(); }
+      };
+    }
+  };
+
+  const computeReachability = (originName:string, range:number) => {
+    if(!mapData || !originName || !isFinite(range) || range<=0) return;
+    ensureReachWorker();
+    if(!reachabilityWorkerRef.current) return;
+    reachInFlightRef.current = Date.now();
+  setReachComputing(true);
+  reachabilityWorkerRef.current.postMessage({ systems: mapData.solar_systems, stargates: mapData.stargates, originName, maxJumpDistance: range, token: reachInFlightRef.current });
+  };
+
+  // Apply / clear dimming
+  const applyReachabilityDimming = () => {
+    if(!reachDim){ clearReachabilityDimming(); return; }
+    if(isRegionHighlighterActive || isPlanetCountActive) return; // avoid conflicts
+    if(!starFieldRef.current || !reachableSetRef.current) return;
+  const BASE_GATE_COLOR = new THREE.Color(0x444444); // normal map gate color
+    const geom = starFieldRef.current.geometry as THREE.BufferGeometry;
+    const colAttr = geom.getAttribute('color') as THREE.BufferAttribute;
+    if(!colAttr) return;
+    if(!starBaseColorsRef.current){
+      starBaseColorsRef.current = new Float32Array(colAttr.array as ArrayLike<number>);
+    } else {
+      (colAttr.array as Float32Array).set(starBaseColorsRef.current);
+    }
+  // Unreachable star color (bright for point visibility)
+  const rCol = new THREE.Color(0xff2c2c);
+    for(let i=0;i<colAttr.count;i++){
+      const sys = visibleSystemsRef.current[i]; if(!sys) continue;
+      if(!reachableSetRef.current.has(sys.id)){
+        const idx = i*3; const arr = colAttr.array as Float32Array;
+        arr[idx] = rCol.r; arr[idx+1] = rCol.g; arr[idx+2] = rCol.b;
+      }
+    }
+    colAttr.needsUpdate = true;
+    // Recolor stargate lines unreachable (both endpoints unreachable or one unreachable?) choose both endpoints unreachable
+    if(stargateLinesRef.current){
+      const g2 = stargateLinesRef.current.geometry as THREE.BufferGeometry;
+      const col2 = g2.getAttribute('color') as THREE.BufferAttribute;
+      const stargateData = g2.userData?.stargateData as { source_system_id:number; destination_system_id:number }[]|undefined;
+      if(col2 && stargateData){
+        // restore to base grey for reachable segments; we recolor unreachable after
+        for(let i=0;i<stargateData.length;i++){
+          const a = stargateData[i];
+          const unreachable = !reachableSetRef.current.has(a.source_system_id) && !reachableSetRef.current.has(a.destination_system_id);
+          const baseIdx = i*2*3; // two vertices per segment, 3 components each
+          const setSegment = (c:THREE.Color)=>{
+            const arr = col2.array as Float32Array;
+            arr[baseIdx] = c.r; arr[baseIdx+1]=c.g; arr[baseIdx+2]=c.b;
+            arr[baseIdx+3] = c.r; arr[baseIdx+4]=c.g; arr[baseIdx+5]=c.b;
+          };
+          if(unreachable){
+            // Gate lines: deeper burgundy to reduce perceived brightness under additive blending
+            const dimGate = new THREE.Color(0x4f0d0d); // ~20% deeper burgundy for lower luminance
+            setSegment(dimGate);
+          } else setSegment(BASE_GATE_COLOR);
+        }
+        col2.needsUpdate = true;
+      }
+    }
+  };
+  const clearReachabilityDimming = () => {
+    if(starBaseColorsRef.current && starFieldRef.current){
+      const geom = starFieldRef.current.geometry as THREE.BufferGeometry;
+      const colAttr = geom.getAttribute('color') as THREE.BufferAttribute;
+      (colAttr.array as Float32Array).set(starBaseColorsRef.current);
+      colAttr.needsUpdate = true;
+    }
+    // Also restore stargate line colors to normal base grey
+    if(stargateLinesRef.current){
+      try {
+        const g2 = stargateLinesRef.current.geometry as THREE.BufferGeometry;
+        const col2 = g2.getAttribute('color') as THREE.BufferAttribute;
+        if(col2){
+          const base = new THREE.Color(0x444444);
+          for(let i=0;i<col2.array.length; i+=3){ base.toArray(col2.array as Float32Array, i); }
+          col2.needsUpdate = true;
+        }
+      } catch { /* ignore */ }
+    }
+  };
+
+  useEffect(()=>{ if(!reachDim) { clearReachabilityDimming(); try { track({ type:'reachability_disable' }); } catch {} } else { if(reachableSetRef.current) { applyReachabilityDimming(); try { track({ type:'reachability_enable' }); } catch {} } } }, [reachDim]);
+  useEffect(()=>{ // if region/planet mode toggled while dim active, reapply or clear
+    if(reachDim){ applyReachabilityDimming(); }
+  }, [isRegionHighlighterActive, isPlanetCountActive]);
+
+  // Bubble overlay lifecycle
+  useEffect(()=>{
+    if(!reachBubble){
+      if(rangeBubbleRef.current && sceneRef.current){ sceneRef.current.remove(rangeBubbleRef.current.group); rangeBubbleRef.current.dispose(); rangeBubbleRef.current=null; }
+      try { track({ type:'rangebubble_hide' }); } catch {}
+      return;
+    }
+    if(!sceneRef.current || !cameraRef.current) return;
+    let created = false;
+  if(!rangeBubbleRef.current){
+      try {
+    const handle = createJumpRangeBubble(reachRange, accentIsBlue);
+        rangeBubbleRef.current = handle;
+        sceneRef.current.add(handle.group);
+        created = true;
+        if(highlightedSystem){
+          const pos = getTransformedPosition(highlightedSystem.position);
+          handle.update(new THREE.Vector3(pos.x,pos.y,pos.z), reachRange, accentIsBlue, cameraRef.current);
+        }
+      } catch {/* ignore create errors */}
+    }
+    if(created){
+      try { track({ type:'rangebubble_show' }); } catch {}
+      // Auto-frame bubble on first creation
+      if(highlightedSystem && controlsRef.current && cameraRef.current){
+        try {
+          const cam = cameraRef.current; const controls = controlsRef.current; const pos = getTransformedPosition(highlightedSystem.position);
+          const center = new THREE.Vector3(pos.x,pos.y,pos.z);
+          const radius = reachRange; if(radius>0){
+            const fov = cam.fov * Math.PI/180; const aspect = cam.aspect; const hFov = 2*Math.atan(Math.tan(fov/2)*aspect);
+            const desiredFill = 0.55; const effectiveR = radius/desiredFill; const distV = effectiveR/Math.tan(fov/2); const distH = effectiveR/Math.tan(hFov/2); const neededDist = Math.max(distV, distH);
+            const currentDir = cam.position.clone().sub(controls.target).normalize();
+            const newPos = center.clone().add(currentDir.multiplyScalar(neededDist));
+            const anim = animationRef.current; anim.isAnimating = true; anim.startTime = Date.now(); anim.duration = 700;
+            anim.startPos.copy(cam.position); anim.startTarget.copy(controls.target); anim.endTarget.copy(center); anim.endPos.copy(newPos);
+          }
+        } catch {/* ignore bubble zoom errors */}
+      }
+    }
+  }, [reachBubble]);
+  // Update bubble when inputs change
+  useEffect(()=>{
+    if(rangeBubbleRef.current && reachBubble && highlightedSystem && cameraRef.current){
+  const { getTransformedPosition } = { getTransformedPosition: (p:any)=>({ x:p.x, y:p.z, z:p.y*-1 }) }; // replicate local helper minimally
+      const posT = getTransformedPosition(highlightedSystem.position);
+      const targetPos = new THREE.Vector3(posT.x, posT.y, posT.z);
+      // Start or restart tween if new system selected
+      const lastId = (bubbleAnimRef as any).current.lastSystemId as number|undefined;
+      if(lastId === undefined || lastId !== highlightedSystem.id){
+        const startPos = rangeBubbleRef.current.group.position.clone();
+        bubbleAnimRef.current.active = true;
+        bubbleAnimRef.current.start.copy(startPos);
+        bubbleAnimRef.current.end.copy(targetPos);
+        bubbleAnimRef.current.startTime = performance.now();
+        bubbleAnimRef.current.duration = animationRef.current.isAnimating ? animationRef.current.duration : 600;
+        (bubbleAnimRef as any).current.lastSystemId = highlightedSystem.id;
+      }
+      const currentPos = rangeBubbleRef.current.group.position.clone();
+      const applyPos = bubbleAnimRef.current.active ? currentPos : targetPos;
+      rangeBubbleRef.current.update(applyPos, reachRange, accentIsBlue, cameraRef.current);
+      // Re-frame camera if range changed significantly (>5% delta) relative to current distance
+  try {
+        if(cameraRef.current && controlsRef.current){
+          const cam = cameraRef.current; const controls = controlsRef.current; const center = new THREE.Vector3(posT.x,posT.y,posT.z);
+          const desiredFill = 0.55; const fov = cam.fov*Math.PI/180; const aspect = cam.aspect; const hFov = 2*Math.atan(Math.tan(fov/2)*aspect);
+          const effectiveR = reachRange/desiredFill; const distV = effectiveR/Math.tan(fov/2); const distH = effectiveR/Math.tan(hFov/2); const neededDist = Math.max(distV, distH);
+          const currentDist = cam.position.clone().sub(center).length();
+          if(Math.abs(currentDist - neededDist) / neededDist > 0.05){
+            const dir = cam.position.clone().sub(controls.target).normalize();
+            const newPos = center.clone().add(dir.multiplyScalar(neededDist));
+            const anim = animationRef.current; anim.isAnimating = true; anim.startTime = Date.now(); anim.duration = 600;
+            anim.startPos.copy(cam.position); anim.startTarget.copy(controls.target); anim.endTarget.copy(center); anim.endPos.copy(newPos);
+          }
+        }
+      } catch {/* ignore */}
+    }
+  }, [reachRange, highlightedSystem, reachBubble, accentIsBlue]);
+
+  // Public handlers passed to routing panel reachability tab via props (added later)
+  const handleReachCompute = useCallback((origin:string, range:number)=>{ computeReachability(origin, range); // center if not already selected
+    if(mapData){
+      const systems = Object.values(mapData.solar_systems);
+      const sys = systems.find(s=> s.name.toLowerCase()===origin.toLowerCase());
+      if(sys){ selectSystem(sys as any); }
+    }
+  }, [mapData, selectSystem]);
+
+  // Reachability origin manual change (from tab input)
+  const handleReachOriginChange = (origin:string)=>{
+    if(reachAuto && origin){ computeReachability(origin, reachRange); }
+  };
+  const handleReachRangeChange = (r:number)=>{
+    setReachRange(r);
+    if(reachAuto && highlightedSystem){ computeReachability(highlightedSystem.name, r); }
+  };
+  // Track range bucket on stable changes (debounced)
+  useEffect(()=>{
+    if(!reachRange) return;
+    const id = setTimeout(()=>{
+      const r = reachRange;
+      let bucket:string;
+      if(r < 10) bucket='rng_lt_10';
+      else if(r < 25) bucket='rng_10_25';
+      else if(r < 50) bucket='rng_25_50';
+      else if(r < 100) bucket='rng_50_100';
+      else bucket='rng_gt_100';
+      try { track({ type:'reachability_range_bucket', bucket }); } catch {}
+    }, 600); // wait for user to pause editing
+    return ()=> clearTimeout(id);
+  }, [reachRange]);
+  const handleReachAutoChange = (v:boolean)=>{ setReachAuto(v); try { track({ type: v? 'reachability_auto_on':'reachability_auto_off' }); } catch {}; if(v && highlightedSystem){ computeReachability(highlightedSystem.name, reachRange); } };
+  const handleReachDimChange = (v:boolean)=>{ setReachDim(v); /* effect will apply */ };
+  const handleReachBubbleChange = (v:boolean)=>{ setReachBubble(v); try { track({ type: v? 'rangebubble_show':'rangebubble_hide' }); } catch {}; };
+  const handleReachInRangeChange = (v:boolean)=>{
+    setReachInRangeHighlight(v);
+    try { track({ type: v? 'reachability_inrange_on':'reachability_inrange_off' }); } catch {}
+    if(!v){
+      // restore baseline or dim if active
+      if(starBaseColorsRef.current && starFieldRef.current){
+        const geom = starFieldRef.current.geometry as THREE.BufferGeometry; const colAttr = geom.getAttribute('color') as THREE.BufferAttribute; (colAttr.array as Float32Array).set(starBaseColorsRef.current); colAttr.needsUpdate = true; }
+      if(reachDim && reachableSetRef.current){ applyReachabilityDimming(); }
+    } else {
+      applyInRangeHighlight();
+    }
+  };
+
+  const applyInRangeHighlight = () => {
+    if(!reachInRangeHighlight || !reachBubble) return;
+    if(isRegionHighlighterActive || isPlanetCountActive) return; // precedence rules
+    if(!highlightedSystem || !starFieldRef.current) return;
+    const geom = starFieldRef.current.geometry as THREE.BufferGeometry; const colAttr = geom.getAttribute('color') as THREE.BufferAttribute; if(!colAttr) return;
+    if(!starBaseColorsRef.current){ starBaseColorsRef.current = new Float32Array(colAttr.array as ArrayLike<number>); } else { (colAttr.array as Float32Array).set(starBaseColorsRef.current); }
+    const origin = highlightedSystem.position; const r2 = reachRange*reachRange; const arr = colAttr.array as Float32Array; inRangeSetRef.current = new Set();
+    const accentHex = accentIsBlue ? 0x00aaff : 0xff4c26; const accentColor = new THREE.Color(accentHex); const unreachableColor = new THREE.Color(0xff2c2c);
+    for(let i=0;i<colAttr.count;i++){
+      const sys = visibleSystemsRef.current[i]; if(!sys) continue;
+      const dx = sys.position.x-origin.x, dy = sys.position.y-origin.y, dz = sys.position.z-origin.z; const d2 = dx*dx+dy*dy+dz*dz;
+      if(d2 <= r2){
+        inRangeSetRef.current.add(sys.id);
+        accentColor.toArray(arr, i*3);
+      }
+    }
+    if(reachDim && reachableSetRef.current){
+      const rSet = reachableSetRef.current; for(let i=0;i<colAttr.count;i++){ const sys = visibleSystemsRef.current[i]; if(!sys) continue; if(!rSet.has(sys.id) && !inRangeSetRef.current.has(sys.id)){ unreachableColor.toArray(arr, i*3); } }
+    }
+    colAttr.needsUpdate = true;
+  };
+  // Reapply when dependencies change
+  useEffect(()=>{ if(reachInRangeHighlight && reachBubble){ applyInRangeHighlight(); } }, [reachInRangeHighlight, reachBubble, reachRange, highlightedSystem, accentIsBlue, reachDim]);
+
 
   // Initialize and manage the routing worker
   useEffect(() => {
@@ -1318,7 +1610,7 @@ function App() {
        } catch (e) { /* ignore */ }
   // (Selection halo pulse removed – only hover ring retained)
        // Baseline micro‑twinkle and parallax rotation (non-cinematic)
-       if(!cinematicModeRef.current){
+  if(!cinematicModeRef.current){
          const tNow = performance.now()/1000;
          // Star field now static: guard in case legacy uniform lingers
          if(starFieldRef.current){ const mat:any = starFieldRef.current.material; const sh = mat.userData?.shader; if(sh && sh.uniforms.uTime){ sh.uniforms.uTime.value = tNow; } }
@@ -1344,6 +1636,35 @@ function App() {
           } catch {}
         // Allow enabling debug gradient in console: window.__efGateDebug = true
   try { if((window as any).__efGateDebug !== undefined && stargateLinesRef.current){ const m:any = stargateLinesRef.current.material; if(m.uniforms?.uDebug){ m.uniforms.uDebug.value = (window as any).__efGateDebug ? 1.0 : 0.0; } } } catch {}
+       }
+       // Jump range bubble: animate iridescence & interpolate position if active
+       if(rangeBubbleRef.current){
+         try {
+           // Position interpolation (bubbleAnimRef managed on selection)
+           if(bubbleAnimRef.current.active){
+             const tNow = performance.now();
+             const t = (tNow - bubbleAnimRef.current.startTime) / bubbleAnimRef.current.duration;
+             if(t >= 1){
+               rangeBubbleRef.current.group.position.copy(bubbleAnimRef.current.end);
+               bubbleAnimRef.current.active = false;
+             } else {
+               const tt = t*t*(3-2*t); // smoothstep ease
+               rangeBubbleRef.current.group.position.lerpVectors(bubbleAnimRef.current.start, bubbleAnimRef.current.end, tt);
+             }
+           }
+           const tNowMs = performance.now();
+           rangeBubbleRef.current.tick(tNowMs);
+           if((window as any).__efBubbleDebug){
+             const child = rangeBubbleRef.current.group.children?.[1];
+             const mat:any = (child && (child as any).material) ? (child as any).material : undefined;
+             if(mat && mat.uniforms && mat.uniforms.uTime){
+               if(!(window as any).__efBubbleLastLog || tNowMs - (window as any).__efBubbleLastLog > 1000){
+                 (window as any).__efBubbleLastLog = tNowMs;
+                 console.log('[bubble]', 'uTime', mat.uniforms.uTime.value, 'rotationY', rangeBubbleRef.current.group.rotation.y.toFixed(2));
+               }
+             }
+           }
+         } catch {/* ignore */}
        }
   controls.update();
   if (cinematicModeRef.current || cinematicMode) {
@@ -1560,6 +1881,7 @@ function App() {
              const rpChildren = [...rippleGroupRef.current.children];
              for(const rMesh of rpChildren){ const ttl=(rMesh as any).ttl; const age = now - (rMesh as any).birth; if(age>ttl){ rippleGroupRef.current.remove(rMesh); ripplePoolRef.current.push(rMesh as any); continue; } const t = age/ttl; const scl = 1 + t*60; rMesh.scale.set(scl,scl,scl); const mat:any = (rMesh as any).material; mat.opacity = (1-t)*0.7; }
            }
+            // (bubble tick moved to always-on section above)
              // Aurora animate (time + re-tint if star palette changed)
              if(auroraMeshRef.current && auroraMatRef.current){
                auroraMatRef.current.uniforms.uTime.value = now/1000;
@@ -3097,9 +3419,27 @@ function App() {
         initialOptimizeFor={persistedOptimize}
         initialAlgorithm={persistedAlgo}
         onRoutingParamChange={(jump,opt,algo)=> { setRoutingPrefs(jump,opt,algo); lastP2PParamsRef.current.jump=jump; lastP2PParamsRef.current.optimize=opt; lastP2PParamsRef.current.algo=algo; setPersistedJump(jump); setPersistedOptimize(opt); setPersistedAlgo(algo); }}
-  planetBinsActive={planetBinsActive}
-  minPlanets={minPlanets}
-  maxPlanets={maxPlanets}
+        planetBinsActive={planetBinsActive}
+        minPlanets={minPlanets}
+        maxPlanets={maxPlanets}
+        reachabilityProps={{
+          originSystemName: highlightedSystem?.name || lastSelectedSystemName,
+          range: reachRange,
+          auto: reachAuto,
+          dim: reachDim,
+          bubble: reachBubble,
+          inRange: reachInRangeHighlight,
+          stats: reachStats,
+          disabled: (isRegionHighlighterActive || isPlanetCountActive) && !(reachInRangeHighlight && reachBubble) ? 'Color mode active' : null,
+          computing: reachComputing,
+          onCompute: handleReachCompute,
+          onRangeChange: handleReachRangeChange,
+          onOriginChange: handleReachOriginChange,
+          onAutoChange: handleReachAutoChange,
+          onDimChange: handleReachDimChange,
+          onBubbleChange: handleReachBubbleChange,
+          onInRangeChange: handleReachInRangeChange
+        }}
               />
             </PanelDrawer>
           )}

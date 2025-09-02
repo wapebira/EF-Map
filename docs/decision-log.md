@@ -88,3 +88,12 @@
   - Optional bloom-specific additive pass for pulse head only if extra glow desired.
   - Expose tail parameters via a debug or settings panel for user tuning.
   - Potential batching of multiple alternate routes (if added later) into instanced ribbon draws.
+
+## 2025-09-02 – Reachability Help Section & Metrics
+- Goal: Document new Reachability feature (origin, max jump range, compute, auto, highlight unreachable, show bubble, highlight in-range) and add instrumentation for adoption & interaction.
+- Files: `HelpPanel.tsx` (new Reachability section), `usage-event.js` (EVENT_MAP additions), `App.tsx` (instrument bubble toggle, in-range toggle, range bucket debounced tracking), `RoutingPanel.tsx` (tab open tracking), `StatsPage.tsx` (new Reachability panel + range distribution), decision log update.
+- Added Events: `reachability_tab_open`, `reachability_inrange_on/off`, `reachability_range_bucket` (buckets: rng_lt_10, rng_10_25, rng_25_50, rng_50_100, rng_gt_100). Existing reachability events (enable/disable/compute/auto/bubble) already present; bubble show/hide now tracked consistently via handler.
+- Diff: ~+170 LOC across files (help content + stats panel + event wiring) / minimal modifications to existing logic.
+- Risk: Low (UI copy + additive metrics; no core algorithm changes). All new counters safely whitelisted server-side.
+- Gates: typecheck ✅ | build (pending) | smoke (pending manual: open tab, toggle each checkbox, verify counters increment after stats refresh).
+- Follow-ups: Consider timing metric for reachability compute duration distribution; potential cache for last range bucket to avoid duplicate rapid events; maybe add tooltip clarifying difference between geometric in-range vs graph reachable.
