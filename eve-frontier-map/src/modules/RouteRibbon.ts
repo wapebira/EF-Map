@@ -138,11 +138,12 @@ export function createRouteRibbon(opts: RouteRibbonOptions): THREE.Group | null 
       u_pxTarget: { value: 5.5 },
       u_viewport: { value: new THREE.Vector2(800, 600) },
       u_pulseWidth: { value: 0.012 }, // narrower pulse core for crisper head
-      u_pulseStrength: { value: 1.8 }, // brighter head
+  u_pulseStrength: { value: 2.3 }, // brighter head
       u_hopTravelTime: { value: 2.5 },
-      u_targetMax: { value: 0.58 }, // reserve more headroom for pulse
+  u_targetMax: { value: 1.0 }, // allow full accent brightness
       u_tailStrength: { value: 0.6 }, // brightness contribution of trailing tail
-      u_tailDecay: { value: 0.25 } // fraction of hop length for tail exponential decay
+  u_tailDecay: { value: 0.25 }, // fraction of hop length for tail exponential decay
+  u_baseBoost: { value: 1.35 } // brighten baseline so route matches accent theme
     },
     transparent: true,
     depthWrite: false,
@@ -150,14 +151,28 @@ export function createRouteRibbon(opts: RouteRibbonOptions): THREE.Group | null 
     side: THREE.DoubleSide,
     blending: THREE.NormalBlending,
     vertexShader: `precision highp float;\n      attribute vec3 prev;\n      attribute vec3 next;\n      attribute float side;\n      attribute float hopLocal;\n      attribute float hopLength;\n      attribute float hopIndex;\n      uniform float u_pxTarget;\n      uniform vec2 u_viewport;\n      varying float v_side;\n      varying float v_hopLocal;\n      varying float v_hopLength;\n      varying float v_hopIndex;\n      void main(){\n        vec4 prevClip = projectionMatrix * modelViewMatrix * vec4(prev,1.0);\n        vec4 nextClip = projectionMatrix * modelViewMatrix * vec4(next,1.0);\n        vec4 currClip = projectionMatrix * modelViewMatrix * vec4(position,1.0);\n        vec2 prevN = prevClip.xy / prevClip.w;\n        vec2 nextN = nextClip.xy / nextClip.w;\n        vec2 rawDir = nextN - prevN;\n        float rawLen = length(rawDir);\n        vec2 dir;\n        if(rawLen < 0.00025){\n          // Head-on fallback: inject minimal span to avoid collapse (prevents disappearing segments)\n          dir = vec2(1.0,0.0);\n          float t = hopLength > 0.0 ? hopLocal / hopLength : 0.0;\n          float minSpan = 2.0 / min(u_viewport.x, u_viewport.y); // ~2px span in NDC\n          currClip.xy += (t - 0.5) * minSpan * currClip.w * dir;\n        } else {\n          dir = rawDir / rawLen;\n        }\n        if(any(isnan(dir))) dir = vec2(1.0,0.0);\n        vec2 perp = vec2(-dir.y, dir.x);\n        vec2 offsetNdc = perp * side * u_pxTarget * 2.0 / u_viewport;\n        currClip.xy += offsetNdc * currClip.w;\n        v_side = side;\n        v_hopLocal = hopLocal;\n        v_hopLength = hopLength;\n        v_hopIndex = hopIndex;\n        gl_Position = currClip;\n      }\n    `,
-    fragmentShader: `precision highp float;\n      uniform vec3 u_color;\n      uniform float u_time;\n      uniform float u_pulseWidth;\n      uniform float u_pulseStrength;\n      uniform float u_hopTravelTime;\n      uniform float u_targetMax;\n      uniform float u_tailStrength;\n      uniform float u_tailDecay;\n      varying float v_side;\n      varying float v_hopLocal;\n      varying float v_hopLength;\n      varying float v_hopIndex;\n      void main(){\n        float edge = abs(v_side);\n        float core = smoothstep(0.85, 0.0, edge);\n        float glow = smoothstep(1.25, 0.0, edge);\n        float maxC = max(max(u_color.r, u_color.g), u_color.b);\n        float scale = maxC > u_targetMax ? (u_targetMax / maxC) : 1.0;\n        vec3 baseCol = u_color * scale;\n        float phase = fract((u_time / u_hopTravelTime) + v_hopIndex * 0.173);\n        float pulsePos = phase * v_hopLength;\n        float d = abs(v_hopLocal - pulsePos);\n        float sigma = u_pulseWidth * v_hopLength + 1e-5;\n        float pulse = exp(-pow(d / sigma, 2.0));\n        float rel = (v_hopLocal - pulsePos) / max(v_hopLength, 1e-5);\n        float tail = 0.0;\n        if(rel < 0.0){ tail = exp(rel / max(u_tailDecay, 1e-4)); }\n        float brightness = 1.0 + pulse * u_pulseStrength + tail * u_tailStrength;\n        vec3 col = baseCol * brightness;\n        float alpha = (core * 0.90 + glow * 0.40) * clamp(0.55 + pulse * 0.45 + tail * 0.30, 0.0, 1.0);\n        if(alpha < 0.02) discard;\n        gl_FragColor = vec4(col, alpha);\n      }\n    `
+    fragmentShader: `precision highp float;\n      uniform vec3 u_color;\n      uniform float u_time;\n      uniform float u_pulseWidth;\n      uniform float u_pulseStrength;\n      uniform float u_hopTravelTime;\n      uniform float u_targetMax;\n      uniform float u_tailStrength;\n      uniform float u_tailDecay;\n      uniform float u_baseBoost;\n      varying float v_side;\n      varying float v_hopLocal;\n      varying float v_hopLength;\n      varying float v_hopIndex;\n      void main(){\n        float edge = abs(v_side);\n        float core = smoothstep(0.82, 0.0, edge);\n        float glow = smoothstep(1.25, 0.0, edge);\n        float maxC = max(max(u_color.r, u_color.g), u_color.b);\n        float scale = maxC > u_targetMax ? (u_targetMax / maxC) : 1.0;\n        vec3 baseCol = u_color * scale * u_baseBoost;\n        float phase = fract((u_time / u_hopTravelTime) + v_hopIndex * 0.173);\n        float pulsePos = phase * v_hopLength;\n        float d = abs(v_hopLocal - pulsePos);\n        float sigma = u_pulseWidth * v_hopLength + 1e-5;\n        float pulse = exp(-pow(d / sigma, 2.0));\n        float rel = (v_hopLocal - pulsePos) / max(v_hopLength, 1e-5);\n        float tail = 0.0; if(rel < 0.0){ tail = exp(rel / max(u_tailDecay, 1e-4)); }\n        float brightness = 1.0 + pulse * u_pulseStrength + tail * u_tailStrength;\n        vec3 col = baseCol * brightness;\n        float alpha = (core * 0.92 + glow * 0.45) * clamp(0.55 + pulse * 0.45 + tail * 0.30, 0.0, 1.0);\n        if(alpha < 0.02) discard;\n        gl_FragColor = vec4(col, alpha);\n      }\n    `
+  });
+
+  // Additive glow mesh for bloom emphasis (focuses on bright pulse & tail)
+  const glowMaterial = new THREE.ShaderMaterial({
+    uniforms: material.uniforms,
+    transparent: true,
+    depthWrite: false,
+    depthTest: false,
+    blending: THREE.AdditiveBlending,
+    side: THREE.DoubleSide,
+    vertexShader: material.vertexShader as string,
+    fragmentShader: `precision highp float;\n      uniform vec3 u_color;\n      uniform float u_time;\n      uniform float u_pulseWidth;\n      uniform float u_pulseStrength;\n      uniform float u_hopTravelTime;\n      uniform float u_tailStrength;\n      uniform float u_tailDecay;\n      uniform float u_baseBoost;\n      varying float v_side;\n      varying float v_hopLocal;\n      varying float v_hopLength;\n      varying float v_hopIndex;\n      void main(){\n        float edge = abs(v_side);\n        float core = smoothstep(0.95, 0.0, edge);\n        float phase = fract((u_time / u_hopTravelTime) + v_hopIndex * 0.173);\n        float pulsePos = phase * v_hopLength;\n        float d = abs(v_hopLocal - pulsePos);\n        float sigma = u_pulseWidth * v_hopLength + 1e-5;\n        float pulse = exp(-pow(d / sigma, 2.0));\n        float rel = (v_hopLocal - pulsePos) / max(v_hopLength, 1e-5);\n        float tail = rel < 0.0 ? exp(rel / max(u_tailDecay, 1e-4)) : 0.0;\n        float brightness = pulse * (u_pulseStrength*1.15) + tail * (u_tailStrength*0.8);\n        vec3 col = u_color * u_baseBoost * brightness;\n        float alpha = core * clamp(brightness, 0.0, 1.0);\n        if(alpha < 0.015) discard;\n        gl_FragColor = vec4(col, alpha);\n      }\n    `
   });
 
   const mesh = new THREE.Mesh(geom, material);
   mesh.frustumCulled = false;
   const group = new THREE.Group();
   group.add(mesh);
+  const glowMesh = new THREE.Mesh(geom, glowMaterial); glowMesh.frustumCulled = false; group.add(glowMesh);
   (group as any).userData.routeMaterial = material;
+  (group as any).userData.routeGlowMaterial = glowMaterial;
   (group as any).userData.routeGeometry = geom;
 
   const updater = () => {
@@ -177,7 +192,7 @@ export function createRouteRibbon(opts: RouteRibbonOptions): THREE.Group | null 
 
   (group as any).disposeRoute = () => {
     const arr = animUpdatersRef.current; if (Array.isArray(arr)) { const idx = arr.indexOf(updater); if (idx >= 0) arr.splice(idx, 1); }
-    geom.dispose(); material.dispose();
+  geom.dispose(); material.dispose(); glowMaterial.dispose();
   };
 
   return group;
@@ -186,7 +201,11 @@ export function createRouteRibbon(opts: RouteRibbonOptions): THREE.Group | null 
 export function recolorRouteRibbon(routeGroup: THREE.Group | null, accentHex: number) {
   if (!routeGroup) return;
   const mat = (routeGroup as any).userData?.routeMaterial as THREE.RawShaderMaterial | undefined;
+  const glow = (routeGroup as any).userData?.routeGlowMaterial as THREE.RawShaderMaterial | undefined;
   if (mat && mat.uniforms.u_color) {
     (mat.uniforms.u_color.value as THREE.Color).setHex(accentHex);
+  }
+  if (glow && glow.uniforms.u_color) {
+    (glow.uniforms.u_color.value as THREE.Color).setHex(accentHex);
   }
 }
