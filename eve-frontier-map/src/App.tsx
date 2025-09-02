@@ -2219,16 +2219,30 @@ function App() {
             try { starFieldRef.current.geometry.dispose(); } catch {}
             // Do not dispose pointsMaterial (shared)
           }
-          const verts:number[] = []; const cols:number[] = [];
-          const white = new THREE.Color(0xffffff);
+          // NOTE: When rebuilding we must also restore the per-star size attribute (aSize)
+          // otherwise the shader's aSize multiplication collapses point size scaling.
+          const verts:number[] = []; const cols:number[] = []; const sizes:number[] = [];
           for(const sys of visibleSystemsRef.current){
             const pos = getTransformedPosition(sys.position);
             verts.push(pos.x,pos.y,pos.z);
-            cols.push(white.r,white.g,white.b);
+            // Recreate deterministic slight tint & brightness falloff similar to initial build
+            const dist = Math.sqrt(pos.x*pos.x + pos.y*pos.y + pos.z*pos.z);
+            const norm = dist * 0.0000022;
+            const falloff = Math.max(0.38, 1.0 - Math.pow(norm, 1.12));
+            const seed = (Math.sin(sys.id * 12.9898) * 43758.5453);
+            const hSel = seed - Math.floor(seed);
+            const tint = new THREE.Color();
+            if(hSel < 0.33) tint.setHSL(0.58, 0.08, 0.90);
+            else if(hSel < 0.66) tint.setHSL(0.10, 0.08, 0.92);
+            else tint.setHSL(0.0, 0.00, 0.92);
+            tint.r *= falloff; tint.g *= falloff; tint.b *= falloff;
+            cols.push(tint.r, tint.g, tint.b);
+            sizes.push((seed % 37) < 1 ? 1.6 : 1.0);
           }
           const g = new THREE.BufferGeometry();
           g.setAttribute('position', new THREE.Float32BufferAttribute(verts,3));
           g.setAttribute('color', new THREE.Float32BufferAttribute(cols,3));
+          g.setAttribute('aSize', new THREE.Float32BufferAttribute(sizes,1)); // critical for zoom scaling
           const basePoints = new THREE.Points(g, pointsMaterial);
           starFieldRef.current = basePoints;
           sceneRef.current.add(basePoints);
