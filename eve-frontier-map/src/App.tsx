@@ -8,6 +8,7 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import './App.css';
 import RegionHighlighterModule, { setRegionHighlightColors } from './modules/RegionHighlighter';
+import RegionStatsCard, { RegionStats } from './components/RegionStatsCard';
 import logo from './assets/logo/logo.png';
 import { openDbFromArrayBuffer } from "./lib/sql";
 import type { SystemRow, StargateRow, RegionRow, ConstellationRow } from "./types/db";
@@ -193,6 +194,12 @@ function App() {
   const destinationLockedRef = useRef<boolean>(false); // becomes true once user explicitly sets destination via context menu
   const [hoveredSystem, setHoveredSystem] = useState<SolarSystem | null>(null);
   const [isRegionHighlighterActive, setIsRegionHighlighterActive] = useState(false);
+  const [regionStatsVisible, setRegionStatsVisible] = useState(true); // show by default when region highlight active
+  const regionStatsCacheRef = useRef<Map<number, RegionStats>>(new Map());
+  const regionStatsWorkerRef = useRef<Worker | null>(null);
+  const [regionStatsLoading, setRegionStatsLoading] = useState(false);
+  const [activeRegionStats, setActiveRegionStats] = useState<RegionStats | null>(null);
+  const [activeRegionName, setActiveRegionName] = useState<string>('');
   const [isPlanetCountActive, setIsPlanetCountActive] = useState(false);
   // Five legend bins (dynamic ranges) active flags; default all true when DPC enabled
   const [planetBinsActive, setPlanetBinsActive] = useState<boolean[]>([true, true, true, true, true]);
@@ -221,13 +228,107 @@ function App() {
   useEffect(()=>{ try { (window as any).__efSetThemeAccent && (window as any).__efSetThemeAccent(accentIsBlue ? 'blue':'orange'); } catch {} }, [accentIsBlue]);
   // First UI scale per session (captures default or first user change only) & persist changes
   useEffect(()=>{
+    // Lazy init region stats worker
+    if(!regionStatsWorkerRef.current){
+      try {
+        regionStatsWorkerRef.current = new Worker(new URL('./workers/region_stats_worker.ts', import.meta.url), { type:'module' });
+        regionStatsWorkerRef.current.onmessage = (e: MessageEvent)=>{
+          const data = e.data;
+            if(data && data.type==='result'){
+              const regions: Record<number, RegionStats> = data.regions || {};
+              Object.entries(regions).forEach(([rid, stats])=>{
+                regionStatsCacheRef.current.set(Number(rid), stats as RegionStats);
+              });
+              // If we were waiting on a specific region
+              if(highlightedSystem){
+                const rid = highlightedSystem.region_id;
+                const stats = regionStatsCacheRef.current.get(rid) || null;
+                setActiveRegionStats(stats);
+                setRegionStatsLoading(false);
+              }
+            }
+        };
+      } catch {}
+    }
+    return ()=>{
+      regionStatsWorkerRef.current?.terminate();
+      regionStatsWorkerRef.current = null;
+    };
+  }, []);
+
+  // Trigger computation when region highlight toggled ON or highlighted system changes
+  useEffect(()=>{
+    if(isRegionHighlighterActive && highlightedSystem && mapData){
+      const rid = highlightedSystem.region_id;
+      setActiveRegionName(mapData.regions[String(rid)]?.name || `Region ${rid}`);
+      setRegionStatsVisible(true);
+      const existing = regionStatsCacheRef.current.get(rid) || null;
+      setActiveRegionStats(existing);
+      if(!existing && regionStatsWorkerRef.current){
+        // Prepare system + gate arrays
+        const systems: any[] = []; const gates: any[] = [];
+        // Gather systems in region
+        const regionSystems: any[] = [];
+        for (const key in mapData.solar_systems){
+          const s = (mapData.solar_systems as any)[key];
+          if(s.region_id === rid){ regionSystems.push(s); }
+        }
+        // Build degree map
+        const deg = new Map<number, number>();
+        for (const gKey in mapData.stargates){
+          const g = (mapData.stargates as any)[gKey];
+          const a = g.source_system_id; const b = g.destination_system_id;
+          if(a==null||b==null) continue;
+          deg.set(a,(deg.get(a)||0)+1); deg.set(b,(deg.get(b)||0)+1);
+        }
+        for (const s of regionSystems){
+          systems.push({ id:s.id, region_id: s.region_id, x:s.position.x, y:s.position.y, z:s.position.z, deg: deg.get(s.id)||0 });
+        }
+        for (const gKey in mapData.stargates){
+          const g = (mapData.stargates as any)[gKey];
+          const a = g.source_system_id; const b = g.destination_system_id;
+          if(!a||!b) continue;
+          // Only collect length if both endpoints in this region
+          const sa = (mapData.solar_systems as any)[String(a)];
+          const sb = (mapData.solar_systems as any)[String(b)];
+          if(sa && sb && sa.region_id===rid && sb.region_id===rid){
+            const dx = sa.position.x - sb.position.x;
+            const dy = sa.position.y - sb.position.y;
+            const dz = sa.position.z - sb.position.z;
+            const len = Math.sqrt(dx*dx+dy*dy+dz*dz);
+            gates.push({ a: sa.id, b: sb.id, len });
+          }
+        }
+        setRegionStatsLoading(true);
+        regionStatsWorkerRef.current.postMessage({ type:'compute', systems, gates });
+      }
+    } else {
+      setActiveRegionStats(null);
+    }
+  }, [isRegionHighlighterActive, highlightedSystem, mapData]);
+
+  // Track region stats view when stats first become available for a region
+  useEffect(()=>{
+    if(activeRegionStats && highlightedSystem){
+      const rid = highlightedSystem.region_id;
+      const key = 'rst:'+rid;
+      if(!(window as any).__efRSV){ (window as any).__efRSV = new Set<string>(); }
+      const s:Set<string> = (window as any).__efRSV;
+      if(!s.has(key)){
+        s.add(key);
+        try { (window as any).__efTrackRegionStatsView && (window as any).__efTrackRegionStatsView(); } catch {}
+      }
+    }
+  }, [activeRegionStats, highlightedSystem]);
+
+  // Persist + broadcast UI scale changes
+  useEffect(()=>{
     persistUiScale(uiScale);
     if(!uiScaleTrackedRef.current){ uiScaleTrackedRef.current = true; try { track({ type:'ui_scale', scale: Math.round(uiScale*100) }); } catch {} }
-  // Update global CSS variable for hybrid scaling containers
-  try {
-    document.documentElement.style.setProperty('--ui-scale', String(uiScale));
-    window.dispatchEvent(new CustomEvent('ui-scale-change', { detail:{ scale: uiScale } }));
-  } catch {/* ignore */}
+    try {
+      document.documentElement.style.setProperty('--ui-scale', String(uiScale));
+      window.dispatchEvent(new CustomEvent('ui-scale-change', { detail:{ scale: uiScale } }));
+    } catch {/* ignore */}
   }, [uiScale]);
   // Hide UI toggle – count only when enabling
   useEffect(()=>{ if(hideUI){ try { track({ type:'ui_hide' }); } catch {} } }, [hideUI]);
@@ -3812,6 +3913,13 @@ function App() {
 
   return (
     <>
+      {isRegionHighlighterActive && regionStatsVisible && (
+        <RegionStatsCard
+          regionName={activeRegionName}
+          stats={activeRegionStats}
+          onClose={()=> setRegionStatsVisible(false)}
+        />
+      )}
   <DonateCryptoModal open={cryptoModalOpen} onClose={()=> setCryptoModalOpen(false)} address="0xC1204805b018ec2Ad06e6119965134AfFa212C10" ensName="lacal.eth" />
   {/* Referral code copy state */}
   {/* ...existing code... */}
