@@ -1085,9 +1085,14 @@ function App() {
   // Bubble overlay lifecycle
   useEffect(()=>{
     if(!reachBubble){
-      if(rangeBubbleRef.current && sceneRef.current){ sceneRef.current.remove(rangeBubbleRef.current.group); rangeBubbleRef.current.dispose(); rangeBubbleRef.current=null; }
-      try { track({ type:'rangebubble_hide' }); } catch {}
-      return;
+      // Only record hide if an actual bubble existed (prevents double counting with prior toggle)
+      if(rangeBubbleRef.current && sceneRef.current){
+        sceneRef.current.remove(rangeBubbleRef.current.group);
+        rangeBubbleRef.current.dispose();
+        rangeBubbleRef.current = null;
+        try { track({ type:'rangebubble_hide' }); } catch {}
+      }
+      return; // nothing to do when disabled and no bubble present
     }
     if(!sceneRef.current || !cameraRef.current) return;
     let created = false;
@@ -1194,7 +1199,10 @@ function App() {
   }, [reachRange]);
   const handleReachAutoChange = (v:boolean)=>{ setReachAuto(v); try { track({ type: v? 'reachability_auto_on':'reachability_auto_off' }); } catch {}; if(v && highlightedSystem){ computeReachability(highlightedSystem.name, reachRange); } };
   const handleReachDimChange = (v:boolean)=>{ setReachDim(v); /* effect will apply */ };
-  const handleReachBubbleChange = (v:boolean)=>{ setReachBubble(v); try { track({ type: v? 'rangebubble_show':'rangebubble_hide' }); } catch {}; };
+  const handleReachBubbleChange = (v:boolean)=>{
+    // Tracking moved exclusively into lifecycle effect (creation/removal) to avoid double counts
+    setReachBubble(v);
+  };
   const handleReachInRangeChange = (v:boolean)=>{
     setReachInRangeHighlight(v);
     try { track({ type: v? 'reachability_inrange_on':'reachability_inrange_off' }); } catch {}
