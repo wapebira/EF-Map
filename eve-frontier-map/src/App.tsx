@@ -498,12 +498,14 @@ function App() {
         uBoost: { value: 1.0 },
   uOpacityNear: { value: 0.60 }, // almost constant opacity
   uOpacityFar: { value: 0.60 },
-        uGamma: { value: 1.35 },
-        uDebug: { value: 0.0 }
+  uGamma: { value: 1.35 },
+  uDebug: { value: 0.0 },
+  uAccentColor: { value: new THREE.Color(0x00aaff) },
+  uAccentSpan: { value: 0.66 } // fraction of segment length to show gradient
   },
   // Midpoint distance based fade (attribute 'mid') so each segment handled consistently.
-  vertexShader: `attribute vec3 mid; uniform vec3 uCamPos; varying float vDist; varying vec3 vColor; void main(){ vColor = color; vec3 worldMid = (modelMatrix * vec4(mid,1.0)).xyz; vDist = distance(uCamPos, worldMid); vec3 worldPos = (modelMatrix * vec4(position,1.0)).xyz; gl_Position = projectionMatrix * viewMatrix * vec4(worldPos,1.0); }`,
-  fragmentShader: `uniform float uNear; uniform float uFar; uniform float uMinBright; uniform float uMaxBright; uniform float uBoost; uniform float uOpacityNear; uniform float uOpacityFar; uniform float uGamma; uniform float uDebug; varying float vDist; varying vec3 vColor;\nvoid main(){\n  float t = clamp((vDist - uNear)/(uFar - uNear), 0.0, 1.0);\n  float tg = pow(t, uGamma);\n  if(uDebug > 0.5){ vec3 c1=vec3(0.2,1.0,1.0); vec3 c2=vec3(1.0,1.0,0.2); vec3 c3=vec3(1.0,0.2,1.0); vec3 colDbg = mix(mix(c1,c2,tg), c3, smoothstep(0.5,1.0,tg)); float opDbg = mix(uOpacityNear,uOpacityFar,tg); gl_FragColor = vec4(colDbg, opDbg); return; }\n  // Base pass: near-flat brightness so distant gates stay visible.\n  float bright = mix(uMaxBright, uMinBright, tg);\n  float op = mix(uOpacityNear, uOpacityFar, tg);\n  vec3 col = clamp(vColor * bright * uBoost, 0.0, 2.0);\n  gl_FragColor = vec4(col, op);\n}`
+  vertexShader: `attribute vec3 mid; attribute float sel; uniform vec3 uCamPos; varying float vDist; varying vec3 vColor; varying float vSel; void main(){ vColor = color; vSel = sel; vec3 worldMid = (modelMatrix * vec4(mid,1.0)).xyz; vDist = distance(uCamPos, worldMid); vec3 worldPos = (modelMatrix * vec4(position,1.0)).xyz; gl_Position = projectionMatrix * viewMatrix * vec4(worldPos,1.0); }`,
+  fragmentShader: `uniform float uNear; uniform float uFar; uniform float uMinBright; uniform float uMaxBright; uniform float uBoost; uniform float uOpacityNear; uniform float uOpacityFar; uniform float uGamma; uniform float uDebug; uniform vec3 uAccentColor; uniform float uAccentSpan; varying float vDist; varying vec3 vColor; varying float vSel;\nvoid main(){\n  float t = clamp((vDist - uNear)/(uFar - uNear), 0.0, 1.0);\n  float tg = pow(t, uGamma);\n  if(uDebug > 0.5){ vec3 c1=vec3(0.2,1.0,1.0); vec3 c2=vec3(1.0,1.0,0.2); vec3 c3=vec3(1.0,0.2,1.0); vec3 colDbg = mix(mix(c1,c2,tg), c3, smoothstep(0.5,1.0,tg)); float opDbg = mix(uOpacityNear,uOpacityFar,tg); gl_FragColor = vec4(colDbg, opDbg); return; }\n  float bright = mix(uMaxBright, uMinBright, tg);\n  float op = mix(uOpacityNear, uOpacityFar, tg);\n  vec3 baseCol = clamp(vColor * bright * uBoost, 0.0, 2.0);\n  float dFromSelected = 1.0 - vSel;\n  float accentT = 1.0 - clamp(dFromSelected / uAccentSpan, 0.0, 1.0);\n  accentT = smoothstep(0.0, 1.0, accentT);\n  vec3 accentCol = clamp(uAccentColor * bright * uBoost, 0.0, 2.0);\n  vec3 finalCol = mix(baseCol, accentCol, accentT);\n  gl_FragColor = vec4(finalCol, op);\n}`
     });
     return mat;
   }, []);
@@ -794,6 +796,8 @@ function App() {
         col2.needsUpdate = true;
       }
     }
+  // Reapply selection gradient now that base gate colors updated
+  try { if(highlightedSystem) { applySelectionGradient(); } } catch {/* ignore */}
   };
   const clearReachabilityDimming = () => {
     if(starBaseColorsRef.current && starFieldRef.current){
@@ -814,7 +818,53 @@ function App() {
         }
       } catch { /* ignore */ }
     }
+  // Reapply selection gradient if a system is highlighted
+  try { if(highlightedSystem) { applySelectionGradient(); } } catch {/* ignore */}
   };
+
+  // ---------- Selection Gradient (Option A) ----------
+  const applySelectionGradient = useCallback(()=>{
+    if(!stargateLinesRef.current) return;
+    const geo = stargateLinesRef.current.geometry as THREE.BufferGeometry;
+    let selAttr = geo.getAttribute('sel') as THREE.BufferAttribute | undefined;
+    const data = geo.userData?.stargateData as { source_system_id:number; destination_system_id:number }[] | undefined;
+    if(!selAttr && geo.getAttribute('position')){
+      const vertCount = (geo.getAttribute('position') as THREE.BufferAttribute).count;
+      const arr = new Float32Array(vertCount); // zeros
+      geo.setAttribute('sel', new THREE.BufferAttribute(arr, 1));
+      selAttr = geo.getAttribute('sel') as THREE.BufferAttribute;
+    }
+    if(!selAttr || !data) return;
+    // Reset all
+    const selArray = selAttr.array as Float32Array; selArray.fill(0);
+    if(!highlightedSystem || isRegionHighlighterActive) { selAttr.needsUpdate = true; return; }
+    const reachableSet = reachableSetRef.current;
+    for(let i=0;i<data.length;i++){
+      const seg = data[i];
+      const bothUnreach = reachDim && reachableSet && !reachableSet.has(seg.source_system_id) && !reachableSet.has(seg.destination_system_id);
+      if(bothUnreach) continue; // don't accent fully unreachable
+      if(seg.source_system_id === highlightedSystem.id){
+        selArray[i*2] = 1.0; // first vertex of segment
+      } else if(seg.destination_system_id === highlightedSystem.id){
+        selArray[i*2 + 1] = 1.0; // second vertex
+      }
+    }
+    selAttr.needsUpdate = true;
+    // Update accent color uniform to match current theme
+    try { (stargateMaterial.uniforms as any).uAccentColor.value.setHex(accentIsBlue ? 0x00aaff : 0xff4c26); } catch {/* ignore */}
+  }, [highlightedSystem, isRegionHighlighterActive, reachDim, accentIsBlue, stargateMaterial]);
+
+  useEffect(()=>{ applySelectionGradient(); }, [applySelectionGradient]);
+
+  // Deferred reapply one frame later to survive any later color reset effects triggered by selection
+  useEffect(()=>{
+    if(!highlightedSystem) return;
+    const frame = requestAnimationFrame(()=>{ try { applySelectionGradient(); } catch {/* ignore */} });
+    return ()=> cancelAnimationFrame(frame);
+  }, [highlightedSystem, applySelectionGradient]);
+
+  // Reapply gradient if reachability dimming changes underlying colors (clear highlight when deselected)
+  useEffect(()=>{ if(!highlightedSystem) return; }, [reachDim]);
 
   useEffect(()=>{ if(!reachDim) { clearReachabilityDimming(); try { track({ type:'reachability_disable' }); } catch {} } else { if(reachableSetRef.current) { applyReachabilityDimming(); try { track({ type:'reachability_enable' }); } catch {} } } }, [reachDim]);
   // Stations sprite management
