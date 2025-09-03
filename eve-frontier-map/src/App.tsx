@@ -8,6 +8,8 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import './App.css';
 import RegionHighlighterModule, { setRegionHighlightColors } from './modules/RegionHighlighter';
+import RegionStatsCard, { type RegionStats } from './components/RegionStatsCard';
+import CompareRegionsPanel from './components/CompareRegionsPanel';
 import logo from './assets/logo/logo.png';
 import { openDbFromArrayBuffer } from "./lib/sql";
 import type { SystemRow, StargateRow, RegionRow, ConstellationRow } from "./types/db";
@@ -193,6 +195,16 @@ function App() {
   const destinationLockedRef = useRef<boolean>(false); // becomes true once user explicitly sets destination via context menu
   const [hoveredSystem, setHoveredSystem] = useState<SolarSystem | null>(null);
   const [isRegionHighlighterActive, setIsRegionHighlighterActive] = useState(false);
+  const regionSystemsIndexRef = useRef<Map<number, any[]>|null>(null);
+  const [regionStatsVisible, setRegionStatsVisible] = useState(true); // show by default when region highlight active
+  const [regionCompareLoading, setRegionCompareLoading] = useState(false);
+  const [regionCompareStats, setRegionCompareStats] = useState<Record<number, RegionStats|null>>({});
+  const regionStatsCacheRef = useRef<Map<number, RegionStats>>(new Map());
+  const regionStatsWorkerRef = useRef<Worker | null>(null);
+  const [regionStatsLoading, setRegionStatsLoading] = useState(false);
+  const [activeRegionStats, setActiveRegionStats] = useState<RegionStats | null>(null);
+  const [activeRegionName, setActiveRegionName] = useState<string>('');
+  const regionStatsRequestedRef = useRef<number|null>(null);
   const [isPlanetCountActive, setIsPlanetCountActive] = useState(false);
   // Five legend bins (dynamic ranges) active flags; default all true when DPC enabled
   const [planetBinsActive, setPlanetBinsActive] = useState<boolean[]>([true, true, true, true, true]);
@@ -215,19 +227,218 @@ function App() {
       systemNameToIdRef.current = m;
     }
   }, [mapData]);
+
+  // Build region->systems index once mapData available
+  useEffect(()=>{
+    if(!mapData) return;
+    if(regionSystemsIndexRef.current) return;
+    const idx = new Map<number, any[]>();
+    for(const key in mapData.solar_systems){
+      const s = (mapData.solar_systems as any)[key];
+      if(!s) continue;
+      const rid = typeof s.region_id==='string'? Number(s.region_id): s.region_id;
+      if(!idx.has(rid)) idx.set(rid, []);
+      idx.get(rid)!.push(s);
+    }
+  regionSystemsIndexRef.current = idx;
+  const sampleKeys:number[] = [];
+  for(const k of idx.keys()){ sampleKeys.push(k); if(sampleKeys.length>=5) break; }
+  // Compare Regions: region->systems index built
+  }, [mapData]);
   useEffect(()=>{ stationShowRef.current = showStations; }, [showStations]);
   const [showDistance, setShowDistance] = useState(false);
   // Track theme selections (already counted once per change)
   useEffect(()=>{ try { (window as any).__efSetThemeAccent && (window as any).__efSetThemeAccent(accentIsBlue ? 'blue':'orange'); } catch {} }, [accentIsBlue]);
   // First UI scale per session (captures default or first user change only) & persist changes
   useEffect(()=>{
+    // Lazy init region stats worker
+    if(!regionStatsWorkerRef.current){
+      try {
+        regionStatsWorkerRef.current = new Worker(new URL('./workers/region_stats_worker.ts', import.meta.url), { type:'module' });
+        console.debug('[RegionStats] Worker created');
+        regionStatsWorkerRef.current.onmessage = (e: MessageEvent)=>{
+          const data = e.data;
+            if(data && data.type==='result'){
+              console.debug('[RegionStats] Worker result received', data);
+              const regions: Record<number, RegionStats> = data.regions || {};
+              Object.entries(regions).forEach(([rid, stats])=>{
+                regionStatsCacheRef.current.set(Number(rid), stats as RegionStats);
+              });
+              // Prefer explicit requested region id (works even if no highlighted system)
+              if(regionStatsRequestedRef.current!=null){
+                const stats = regionStatsCacheRef.current.get(regionStatsRequestedRef.current) || null;
+                if(stats){ setActiveRegionStats(stats); }
+              } else if(highlightedSystem){
+                const rid = highlightedSystem.region_id; const stats = regionStatsCacheRef.current.get(rid) || null; if(stats){ setActiveRegionStats(stats); }
+              } else {
+                // Fallback: if only one region in payload, use it
+                const keys = Object.keys(regions); if(keys.length===1){ const only = Number(keys[0]); const stats = regionStatsCacheRef.current.get(only) || null; if(stats){ setActiveRegionStats(stats); regionStatsRequestedRef.current = only; } }
+              }
+              setRegionStatsLoading(false);
+            }
+        };
+        regionStatsWorkerRef.current.onerror = (err)=>{
+          console.warn('[RegionStats] Worker error', err);
+          setRegionStatsLoading(false);
+        };
+      } catch {}
+    }
+    return ()=>{
+      regionStatsWorkerRef.current?.terminate();
+      regionStatsWorkerRef.current = null;
+    };
+  }, []);
+
+  // Inline fallback (single region) if worker unavailable
+  const computeRegionStatsInline = useCallback((systems: {id:number; region_id:number; x:number; y:number; z:number; deg:number; planets?:number}[], gates:{a:number;b:number;len:number}[])=>{
+    const hullArea = (pts:[number,number][])=>{ if(pts.length<3) return 0; const p=pts.slice().sort((a,b)=> a[0]===b[0]? a[1]-b[1]: a[0]-b[0]); const cross=(o:[number,number],a:[number,number],b:[number,number])=> (a[0]-o[0])*(b[1]-o[1])-(a[1]-o[1])*(b[0]-o[0]); const lower:[number,number][]=[]; for(const pt of p){ while(lower.length>=2 && cross(lower[lower.length-2], lower[lower.length-1], pt)<=0) lower.pop(); lower.push(pt);} const upper:[number,number][]=[]; for(let i=p.length-1;i>=0;i--){ const pt=p[i]; while(upper.length>=2 && cross(upper[upper.length-2], upper[upper.length-1], pt)<=0) upper.pop(); upper.push(pt);} upper.pop(); lower.pop(); const hull=lower.concat(upper); if(hull.length<3) return 0; let area=0; for(let i=0;i<hull.length;i++){ const [x1,y1]=hull[i]; const [x2,y2]=hull[(i+1)%hull.length]; area += x1*y2 - x2*y1; } return Math.abs(area)/2; };
+    const systems_total = systems.length; let total_planets=0; const gatedIds:number[]=[]; for(const s of systems){ if(s.deg>0) gatedIds.push(s.id); if(s.planets) total_planets+=s.planets; }
+    const systems_gated=gatedIds.length; const systems_isolated=systems_total - systems_gated;
+    const gate_links=gates.length; const avg_gate_distance_ly = gate_links? gates.reduce((a,g)=>a+g.len,0)/gate_links:0;
+    const footprint_area_ly2=hullArea(systems.map(s=> [s.x,s.z] as [number,number]));
+    const system_density_per_100_ly2 = footprint_area_ly2>0? (systems_total/footprint_area_ly2)*100:0;
+    const connectivity_pct = systems_total? (systems_gated/systems_total)*100:0;
+    const avg_gate_degree = systems_gated? (2*gate_links)/systems_gated:0;
+  // Simplified estimates matching worker schema (lower bounds / placeholders)
+  const est_gated_distance_ly = 0; // no MST inline fallback
+  const est_gated_gate_jumps = systems_gated>0? systems_gated-1:0;
+  const est_all_distance_ly = est_gated_distance_ly; // no isolated attachment math inline
+  const all_gate_jumps = est_gated_gate_jumps;
+  const ship_jumps = systems_isolated; // treat each isolated as one ship jump (placeholder)
+  const ship_jump_ly = 0; // not computed inline
+  const total_jumps = all_gate_jumps + ship_jumps;
+  const min_jump_range_ly = 0;
+    const avg_planets_per_system = systems_total? total_planets/systems_total:0;
+  const has_station = systems.some(s=> (s as any).has_station);
+  return { systems_total, systems_gated, systems_isolated, connectivity_pct, gate_links, avg_gate_distance_ly, avg_gate_degree, footprint_area_ly2, system_density_per_100_ly2, est_gated_distance_ly, est_gated_gate_jumps, est_all_distance_ly, all_gate_jumps, ship_jumps, ship_jump_ly, total_jumps, min_jump_range_ly, total_planets, avg_planets_per_system, has_station } as RegionStats;
+  }, []);
+
+  // Trigger computation when region highlight toggled ON or highlighted system changes
+  useEffect(()=>{
+    if(isRegionHighlighterActive && highlightedSystem && mapData){
+  // Ensure region stats panel considered open for cascade if not already
+  setOpenPanels(prev=> { if(prev.has('region-stats')) return prev; const n=new Set(prev); n.add('region-stats'); return n; });
+  setOpenPanelOrder(o=> o.includes('region-stats')? o : [...o, 'region-stats']);
+      const rid = highlightedSystem.region_id;
+      setActiveRegionName(mapData.regions[String(rid)]?.name || `Region ${rid}`);
+      setRegionStatsVisible(true);
+      const existing = regionStatsCacheRef.current.get(rid) || null;
+      setActiveRegionStats(existing);
+  if(!existing){
+        regionStatsRequestedRef.current = rid;
+        // Prepare system + gate arrays
+        const systems: any[] = []; const gates: any[] = [];
+        // Gather systems in region
+        const regionSystems: any[] = [];
+        for (const key in mapData.solar_systems){
+          const s = (mapData.solar_systems as any)[key];
+          if(s.region_id === rid){ regionSystems.push(s); }
+        }
+        // Build degree map
+        const deg = new Map<number, number>();
+        for (const gKey in mapData.stargates){
+          const g = (mapData.stargates as any)[gKey];
+          const a = g.source_system_id; const b = g.destination_system_id;
+          if(a==null||b==null) continue;
+          deg.set(a,(deg.get(a)||0)+1); deg.set(b,(deg.get(b)||0)+1);
+        }
+        const stationSet = stationSystemIdSetRef.current;
+        for (const s of regionSystems){
+          systems.push({ id:s.id, region_id: s.region_id, x:s.position.x, y:s.position.y, z:s.position.z, deg: deg.get(s.id)||0, planets: s.planets, has_station: stationSet? stationSet.has(s.id) : false });
+        }
+        for (const gKey in mapData.stargates){
+          const g = (mapData.stargates as any)[gKey];
+          const a = g.source_system_id; const b = g.destination_system_id;
+          if(!a||!b) continue;
+          // Only collect length if both endpoints in this region
+          const sa = (mapData.solar_systems as any)[String(a)];
+          const sb = (mapData.solar_systems as any)[String(b)];
+          if(sa && sb && sa.region_id===rid && sb.region_id===rid){
+            const dx = sa.position.x - sb.position.x;
+            const dy = sa.position.y - sb.position.y;
+            const dz = sa.position.z - sb.position.z;
+            const len = Math.sqrt(dx*dx+dy*dy+dz*dz);
+            gates.push({ a: sa.id, b: sb.id, len });
+          }
+        }
+        setRegionStatsLoading(true);
+        if(regionStatsWorkerRef.current){
+          console.debug('[RegionStats] Posting compute request', {rid, systems: systems.length, gates: gates.length});
+          try { regionStatsWorkerRef.current.postMessage({ type:'compute', systems, gates }); } catch (e){ console.warn('[RegionStats] postMessage failed', e); setRegionStatsLoading(false); }
+        } else {
+          // Inline fallback
+          console.debug('[RegionStats] Worker missing – computing inline');
+          try {
+            const stats = computeRegionStatsInline(systems, gates);
+            regionStatsCacheRef.current.set(rid, stats);
+            setActiveRegionStats(stats);
+          } catch(e){ console.warn('[RegionStats] Inline compute failed', e); }
+          setRegionStatsLoading(false);
+        }
+      }
+    } else {
+  setActiveRegionStats(null);
+  // When highlighter deactivates, remove panel unless user reopens later
+  setOpenPanels(prev=> { if(!prev.has('region-stats')) return prev; const n=new Set(prev); n.delete('region-stats'); return n; });
+    }
+  }, [isRegionHighlighterActive, highlightedSystem, mapData, computeRegionStatsInline]);
+
+  // If loading exceeds 2 seconds without stats, attempt inline compute fallback again
+  useEffect(()=>{
+    if(regionStatsLoading && regionStatsRequestedRef.current!=null){
+      const rid = regionStatsRequestedRef.current;
+      if(activeRegionStats) return; // already have
+      const t = setTimeout(()=>{
+        if(!activeRegionStats && regionStatsLoading){
+          try {
+            console.debug('[RegionStats] Timeout fallback inline compute for region', rid);
+            if(mapData){
+              // Rebuild systems/gates for that region
+              const systems:any[]=[]; const gates:any[]=[];
+              const deg = new Map<number, number>();
+              for (const gKey in mapData.stargates){ const g = (mapData.stargates as any)[gKey]; const a=g.source_system_id, b=g.destination_system_id; if(a==null||b==null) continue; deg.set(a,(deg.get(a)||0)+1); deg.set(b,(deg.get(b)||0)+1); }
+              const stationSet = stationSystemIdSetRef.current;
+              for (const key in mapData.solar_systems){ const s=(mapData.solar_systems as any)[key]; if(s.region_id===rid){ systems.push({ id:s.id, region_id:s.region_id, x:s.position.x, y:s.position.y, z:s.position.z, deg:deg.get(s.id)||0, planets: s.planets, has_station: stationSet? stationSet.has(s.id):false }); }}
+              for (const gKey in mapData.stargates){ const g=(mapData.stargates as any)[gKey]; const a=g.source_system_id, b=g.destination_system_id; const sa=(mapData.solar_systems as any)[String(a)]; const sb=(mapData.solar_systems as any)[String(b)]; if(sa&&sb&&sa.region_id===rid&&sb.region_id===rid){ const dx=sa.position.x-sb.position.x; const dy=sa.position.y-sb.position.y; const dz=sa.position.z-sb.position.z; const len=Math.sqrt(dx*dx+dy*dy+dz*dz); gates.push({ a:sa.id,b:sb.id,len }); }}
+              const stats = computeRegionStatsInline(systems,gates); regionStatsCacheRef.current.set(rid, stats); setActiveRegionStats(stats); setRegionStatsLoading(false);
+            }
+          } catch(e){ console.warn('[RegionStats] Timeout inline compute failed', e); setRegionStatsLoading(false); }
+        }
+      }, 2000);
+      return ()=> clearTimeout(t);
+    }
+  }, [regionStatsLoading, activeRegionStats, mapData, computeRegionStatsInline]);
+
+  // Track region stats view when stats first become available for a region
+  useEffect(()=>{
+    if(activeRegionStats && highlightedSystem){
+      const rid = highlightedSystem.region_id;
+      const key = 'rst:'+rid;
+      if(!(window as any).__efRSV){ (window as any).__efRSV = new Set<string>(); }
+      const s:Set<string> = (window as any).__efRSV;
+      if(!s.has(key)){
+        s.add(key);
+        try { (window as any).__efTrackRegionStatsView && (window as any).__efTrackRegionStatsView(); } catch {}
+      }
+  try { console.debug('[RegionStats] Active stats set', activeRegionStats); } catch {}
+      // Debug: surface station presence discrepancy quickly (can be removed later)
+      try {
+        if((window as any).console){
+          const hasStation = (activeRegionStats as any).has_station;
+          console.debug('[RegionStats][Debug] Region', rid, 'has_station =', hasStation, 'highlighted system id', highlightedSystem.id);
+        }
+      } catch {/* ignore */}
+    }
+  }, [activeRegionStats, highlightedSystem]);
+
+  // Persist + broadcast UI scale changes
+  useEffect(()=>{
     persistUiScale(uiScale);
     if(!uiScaleTrackedRef.current){ uiScaleTrackedRef.current = true; try { track({ type:'ui_scale', scale: Math.round(uiScale*100) }); } catch {} }
-  // Update global CSS variable for hybrid scaling containers
-  try {
-    document.documentElement.style.setProperty('--ui-scale', String(uiScale));
-    window.dispatchEvent(new CustomEvent('ui-scale-change', { detail:{ scale: uiScale } }));
-  } catch {/* ignore */}
+    try {
+      document.documentElement.style.setProperty('--ui-scale', String(uiScale));
+      window.dispatchEvent(new CustomEvent('ui-scale-change', { detail:{ scale: uiScale } }));
+    } catch {/* ignore */}
   }, [uiScale]);
   // Hide UI toggle – count only when enabling
   useEffect(()=>{ if(hideUI){ try { track({ type:'ui_hide' }); } catch {} } }, [hideUI]);
@@ -1332,6 +1543,7 @@ function App() {
     } else {
       next.add(id);
       setOpenPanelOrder(o=> o.includes(id)? o : [...o, id]);
+      if(id==='region-compare') { try { track({ type:'compare_regions_open' }); } catch {} }
     }
     return next;
   });
@@ -1364,6 +1576,8 @@ function App() {
   // Refs to panel drawers for programmatic (non-persisting) positioning
   const routingDrawerRef = useRef<PanelDrawerHandle|null>(null);
   const cinematicDrawerRef = useRef<PanelDrawerHandle|null>(null);
+  const regionStatsDrawerRef = useRef<PanelDrawerHandle|null>(null);
+  const regionCompareDrawerRef = useRef<PanelDrawerHandle|null>(null);
   // Maintain legend in open order when toggled
   useEffect(()=>{
     setOpenPanelOrder(prev=>{
@@ -1378,7 +1592,7 @@ function App() {
   const autoOrderRef = useRef<string[]>([]); // current left-to-right order of auto-managed panels
   useLayoutEffect(()=>{
     const BASE_X = 140, BASE_Y = 70, GAP_X = 24;
-    const managed = (id:string)=> id==='routing' || id==='cinematic' || id==='planet-legend';
+  const managed = (id:string)=> id==='routing' || id==='cinematic' || id==='planet-legend' || id==='region-stats' || id==='region-compare';
     const active = openPanelOrder.filter(id=> managed(id) && (id==='planet-legend'? isPlanetCountActive : openPanels.has(id)));
     const prevOrder = autoOrderRef.current;
     // Remove any that are no longer active
@@ -1394,9 +1608,11 @@ function App() {
     };
     const place = (id:string, x:number) => {
       const target = { x, y: BASE_Y };
-      if(id==='routing' && routingDrawerRef.current) routingDrawerRef.current.autoPosition(target);
-      else if(id==='cinematic' && cinematicDrawerRef.current) cinematicDrawerRef.current.autoPosition(target);
-      else if(id==='planet-legend') { try { window.dispatchEvent(new CustomEvent('ef:auto-pos', { detail:{ id, target, cascade:true } })); } catch {/* ignore */} }
+  if(id==='routing' && routingDrawerRef.current) routingDrawerRef.current.autoPosition(target);
+  else if(id==='cinematic' && cinematicDrawerRef.current) cinematicDrawerRef.current.autoPosition(target);
+  else if(id==='region-stats' && regionStatsDrawerRef.current) regionStatsDrawerRef.current.autoPosition(target);
+  else if(id==='region-compare' && regionCompareDrawerRef.current) regionCompareDrawerRef.current.autoPosition(target);
+  else if(id==='planet-legend') { try { window.dispatchEvent(new CustomEvent('ef:auto-pos', { detail:{ id, target, cascade:true } })); } catch {/* ignore */} }
     };
     const compactAll = () => {
       let x = BASE_X;
@@ -1906,7 +2122,15 @@ function App() {
 
         setLoadingStatus('Finalizing...');
   // NOTE: stationSet / stationCountMap stored on window temporarily until toggle feature implemented
-  try { (window as any).__efStations = { ids: stationSet, counts: stationCountMap }; if(stationSet.size && (window as any).console){ console.debug('[Stations] Loaded', stationSet.size, 'systems with stations. Example ID:', stationSet.values().next().value); } } catch {/* ignore */}
+  // Expose stations globally AND cache in ref immediately so region stats can use without requiring overlay toggle
+  try {
+    (window as any).__efStations = { ids: stationSet, counts: stationCountMap };
+    // Ensure internal ref populated early (previously only set when overlay mounted -> caused false negatives in region stats)
+    stationSystemIdSetRef.current = stationSet;
+    if(stationSet.size && (window as any).console){
+      console.debug('[Stations] Loaded', stationSet.size, 'systems with stations. Example ID:', stationSet.values().next().value);
+    }
+  } catch {/* ignore */}
   setMapData({ solar_systems, stargates, regions, constellations });
 
         // Calculate min/max planets once data is loaded
@@ -3775,7 +3999,7 @@ function App() {
             // Desired left is rail right edge + small gap; fallback to base 140 if rail is very narrow (safety)
             const desiredDrawerLeft = Math.round(railRect.left + railRect.width + 6);
             const drawerTop = Math.round(railRect.top); // align to rail top (should already match base 70 after scaling)
-            const drawerIds = ['routing','cinematic'];
+            const drawerIds = ['routing','cinematic','region-stats','region-compare'];
             drawerIds.forEach(id=>{
               const storageKey = 'panel-pos:drawer-'+id;
               if(localStorage.getItem(storageKey)) return; // user customized
@@ -3812,6 +4036,115 @@ function App() {
 
   return (
     <>
+      {/* Region Stats PanelDrawer (managed cascade) */}
+      {isRegionHighlighterActive && regionStatsVisible && openPanels.has('region-stats') && (
+        <PanelDrawer
+          ref={regionStatsDrawerRef}
+          id="region-stats"
+          title={activeRegionName + (regionStatsLoading && !activeRegionStats ? ' (loading)' : '') + ' Stats'}
+          scale={uiScale}
+          zIndex={panelZ['region-stats']||1450}
+          onActivate={bringToFront}
+          onClose={(id)=> { setOpenPanels(p=> { const n=new Set(p); n.delete(id); return n; }); setRegionStatsVisible(false); }}
+          resetToken={layoutResetToken}
+        >
+          <RegionStatsCard regionName={activeRegionName} stats={regionStatsLoading && !activeRegionStats ? null : activeRegionStats} />
+        </PanelDrawer>
+      )}
+      {openPanels.has('region-compare') && (
+        <PanelDrawer
+          ref={regionCompareDrawerRef}
+          id="region-compare"
+          title={'Compare Regions'}
+          scale={uiScale}
+          zIndex={panelZ['region-compare']||1450}
+          onActivate={bringToFront}
+          onClose={(id)=> { setOpenPanels(p=> { const n=new Set(p); n.delete(id); return n; }); }}
+          resetToken={layoutResetToken}
+          resizable
+          initialSize={{ width: 900, height: 520 }}
+          minSize={{ width: 640, height: 320 }}
+        >
+          <CompareRegionsPanel
+            regions={Object.values(mapData?.regions||{}).map(r=> ({ id:r.id, name:r.name, stats: regionCompareStats[r.id]||null }))}
+            loading={regionCompareLoading}
+            onRequestStats={()=>{
+              if(!mapData) return; setRegionCompareLoading(true);
+              // Build systems + gates lists across all regions and call worker once (leveraging existing region stats worker multiple times not yet batched)
+              try {
+                const systems:any[]=[]; const gates:any[]=[];
+                // Build degree map once
+                const deg = new Map<number, number>();
+                for (const gKey in mapData.stargates){ const g=(mapData.stargates as any)[gKey]; const a=g.source_system_id, b=g.destination_system_id; if(a==null||b==null) continue; deg.set(a,(deg.get(a)||0)+1); deg.set(b,(deg.get(b)||0)+1); }
+                const stationSet = stationSystemIdSetRef.current;
+                for (const key in mapData.solar_systems){ const s=(mapData.solar_systems as any)[key]; systems.push({ id:s.id, region_id:s.region_id, x:s.position.x, y:s.position.y, z:s.position.z, deg:deg.get(s.id)||0, planets:s.planets, has_station: stationSet? stationSet.has(s.id):false }); }
+                for (const gKey in mapData.stargates){ const g=(mapData.stargates as any)[gKey]; const a=g.source_system_id, b=g.destination_system_id; const sa=(mapData.solar_systems as any)[String(a)]; const sb=(mapData.solar_systems as any)[String(b)]; if(sa&&sb){ const dx=sa.position.x-sb.position.x; const dy=sa.position.y-sb.position.y; const dz=sa.position.z-sb.position.z; const len=Math.sqrt(dx*dx+dy*dy+dz*dz); gates.push({ a:sa.id,b:sb.id,len }); }
+                }
+                if(regionStatsWorkerRef.current){
+                  regionStatsWorkerRef.current.postMessage({ type:'compute', systems, gates });
+                  // Temporarily intercept worker result to split into compare cache then restore region stats flow
+                  const origHandler = regionStatsWorkerRef.current.onmessage;
+                  regionStatsWorkerRef.current.onmessage = (e:any)=>{
+                    try {
+                      const data = e.data; if(data?.type==='result'){ const regions:Record<number,RegionStats> = data.regions||{}; const agg:Record<number,RegionStats|null>={}; Object.entries(regions).forEach(([rid,st])=> agg[Number(rid)]=st as RegionStats); setRegionCompareStats(agg); }
+                    } finally {
+                      setRegionCompareLoading(false);
+                      // Forward to original handler to not break single-region logic
+                      if(origHandler) { try { (origHandler as any)(e); } catch {/* swallow */} }
+                      // Restore original
+                      regionStatsWorkerRef.current && (regionStatsWorkerRef.current.onmessage = origHandler);
+                    }
+                  };
+                } else {
+                  // inline fallback using existing helper per region (inefficient)
+                  const byRegion:Record<number,RegionStats|null>={};
+                  // Map region id -> systems
+                  const regionSystemsMap = new Map<number, any[]>();
+                  systems.forEach(s=> { if(!regionSystemsMap.has(s.region_id)) regionSystemsMap.set(s.region_id, []); regionSystemsMap.get(s.region_id)!.push(s); });
+                  regionSystemsMap.forEach((sysList, rid)=>{
+                    const localGates = gates.filter(g=> sysList.some((s:any)=> s.id===g.a) && sysList.some((s:any)=> s.id===g.b));
+                    try { const stats = (computeRegionStatsInline as any)(sysList, localGates); byRegion[rid]=stats; } catch { byRegion[rid]=null; }
+                  });
+                  setRegionCompareStats(byRegion); setRegionCompareLoading(false);
+                }
+              } catch { setRegionCompareLoading(false); }
+            }}
+            onSelectRegion={(rid)=>{
+              // Select a representative system in the chosen region and activate region highlight.
+              if(!mapData) return;
+              const ridNum = Number(rid);
+              // Try to keep currently highlighted system if already in target region (just re-run highlighter)
+              if(highlightedSystem && Number(highlightedSystem.region_id) === ridNum){
+                if(!isRegionHighlighterActive) setIsRegionHighlighterActive(true);
+                ensurePanel('region-stats');
+                bringToFront('region-stats');
+                return;
+              }
+              // Use prebuilt region->systems index for fast selection
+              let candidate:any = null;
+              if(regionSystemsIndexRef.current){
+                const list = regionSystemsIndexRef.current.get(ridNum);
+                if(list && list.length){
+                  // Pick system with max planets else first.
+                  candidate = list.reduce((best:any, cur:any)=>{
+                    const bp = best? (best.planets||0):-1; const cp = cur.planets||0; return cp>bp? cur: best;
+                  }, null as any) || list[0];
+                }
+              }
+              if(candidate){
+                // selecting system for region
+                selectSystem(candidate as any);
+                if(!isRegionHighlighterActive) setIsRegionHighlighterActive(true);
+                setOpenPanelOrder(o=> o.includes('region-stats')? o : [...o, 'region-stats']);
+                ensurePanel('region-stats');
+                bringToFront('region-stats');
+              } else {
+                // failed to find system for region (index miss)
+              }
+            }}
+          />
+        </PanelDrawer>
+      )}
   <DonateCryptoModal open={cryptoModalOpen} onClose={()=> setCryptoModalOpen(false)} address="0xC1204805b018ec2Ad06e6119965134AfFa212C10" ensName="lacal.eth" />
   {/* Referral code copy state */}
   {/* ...existing code... */}
@@ -3934,6 +4267,8 @@ function App() {
               { id:'planets', type:'toggle', label:'Display Planet Counts', display:(<>Planet<br/>Counts</>), icon:null, active:isPlanetCountActive, onToggle:()=> setIsPlanetCountActive(v=> !v) },
               { id:'stations', type:'toggle', label:'Show Stations', display:(<>Show<br/>Stations</>), icon:null, active:showStations, onToggle:()=> setShowStations(v=> { const next=!v; try { persistShowStations(next); } catch {}; try { if(next) track({ type:'show_stations' }); } catch {}; return next; }) },
               { id:'distance', type:'toggle', label:'Show Distance', display:(<>Show<br/>Distance</>), icon:null, active:showDistance, onToggle:()=> setShowDistance(v=> !v) },
+              { id:'region-compare', type:'panel', label:'Compare Regions', display:(<>Compare<br/>Regions</>), icon:null, active:openPanels.has('region-compare'), onSelect:()=> togglePanel('region-compare') },
+              // onSelect emits compare_regions_open event in togglePanel extension below
               { id:'reset-layout', type:'panel', label:'Reset Layout', display:(<>Reset<br/>Layout</>), icon:null, active:false, onSelect:()=> { if(window.confirm('Reset panel positions and layout?')) { fullReset(); setOpenPanels(new Set()); setAccentIsBlue(false); setResetToken(t=> t+1); setLayoutResetToken(t=> t+1); } } },
             ] as any}
           />

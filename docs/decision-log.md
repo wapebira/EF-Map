@@ -132,6 +132,16 @@
 - Risk: Low (instrumentation logic only; no rendering path changes).
 - Gates: typecheck ✅ build ✅ smoke ✅ (verified bubble toggle shows 1:1 show/hide increments, no duplicate console tracking during manual test).
 - Follow-ups: Monitor post-deploy metrics to confirm hide count aligns with show count within expected abandonment variance (<5%).
+
+## 2025-09-03 – Region Stats (Phase 1)
+- Goal: Provide per-region spatial & network metrics (counts, density, MST approximations) when region highlighting is active.
+- Files: `src/workers/region_stats_worker.ts`, `src/components/RegionStatsCard.tsx`, `src/App.tsx`, `netlify/functions/usage-event.js`, `src/utils/usage.ts`.
+- Metrics: systems_total, systems_gated, systems_isolated, gates_total, avg_gate_length_ly, hull_area (convex), density_systems_per_area, mst_length_gated_ly, mst_length_all_ly (approx with isolated connect heuristic), max_span_edge_ly.
+- Implementation: Dedicated worker computes hull (monotonic chain) + MST (Kruskal) once per highlighted region (cached). UI card auto-opens with region highlight; dismissible. One instrumentation event `region_stats_view` recorded once per region per session.
+- Diff: ~+410 LOC (new worker + card + integration) / -0.
+- Risk: Medium (adds worker + UI overlay) – isolated; no mutation of existing geometry pipelines.
+- Gates: typecheck pending; build pending; smoke plan: highlight region → card appears with values; switch regions → updates; dismiss → stays hidden until next highlight toggle cycle.
+- Follow-ups: Add rankings panel; refine MST all-systems estimation (optional complete graph approximation); allow metric toggling for compact mode.
 ## 2025-09-03 – Usage Stats Graph Simplification
 
 ## 2025-09-03 – Stats Tables + Incremental Panel Cascade UI Rework

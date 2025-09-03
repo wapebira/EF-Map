@@ -43,6 +43,7 @@ const DESCRIPTIONS: Record<string,string> = {
   'Return to start':'Routes or baselines with return-to-start enabled.',
   'Gate reachable':'Scout collections restricted to gate-reachable systems.',
   'Planet-filter baselines':'Baselines built with planet-count filter active.',
+  'Compare Regions opens':'Panel opens for the Compare Regions feature (user-initiated).',
   'Blue theme':'Sessions choosing blue accent.',
   'Orange theme':'Sessions choosing orange accent.',
   'Theme switches':'Accent switches after initial load.',
@@ -248,6 +249,7 @@ const StatsPage: React.FC = () => {
             <StatRow label="Gate reachable" value={data.counters.gate_reachable||0} />
             <StatRow label="Show stations" value={data.counters.show_stations||0} />
             <StatRow label="Planet-filter baselines" value={data.counters.planet_filter_baselines||0} />
+            <StatRow label="Compare Regions opens" value={data.counters.compare_regions_opens||0} />
           </section>
           {/* UI & Theme */}
           <section style={{ background:'rgba(255,255,255,0.06)', padding:'16px 18px', border:'1px solid rgba(255,255,255,0.15)', borderRadius:10, boxShadow:'0 2px 4px rgba(0,0,0,0.45)' }}>

@@ -140,6 +140,7 @@ if(typeof window !== 'undefined'){
   (window as any).__efTrackPlanetBins = (activeBins:number)=>{ let b = activeBins===5? 'bins_5' : activeBins>=3? 'bins_3_4' : activeBins>=1? 'bins_1_2' : 'bins_0'; try { track({ type:'planet_bins_active_bucket', bucket:b }); } catch {}; };
   (window as any).__efTrackDonateModalOpen = ()=>{ try { track({ type:'donate_modal_open' }); } catch {} };
   (window as any).__efTrackDonateClick = (kind:'stripe'|'crypto')=>{ try { track({ type: kind==='stripe' ? 'donate_stripe_click':'donate_crypto_click' }); } catch {} };
+  (window as any).__efTrackRegionStatsView = ()=>{ try { track({ type:'region_stats_view' }); } catch {} };
 
   function endCinematicIfActive(){
     if(cinematicActive){
