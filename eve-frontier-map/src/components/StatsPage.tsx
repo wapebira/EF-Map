@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { LineChart, ChartLegend } from './StatsCharts';
+import { LineChart, ChartLegend, chartColors } from './StatsCharts';
 
 interface StatsSnapshot { version: number; updatedAt: string; counters: Record<string, number>; sums: Record<string, number>; date?: string }
 
@@ -126,15 +126,19 @@ const StatsPage: React.FC = () => {
   // Series builders
   // Chart 1: Core usage counts (page loads, P2P routes, scout baselines)
   const usageSeries = useMemo(()=>{
-    const mk = (key:string,label:string)=> ({ id:key, label, points: daily.map(d=>({ x:d.date, y:d.counters[key]||0 })) });
-    return [ mk('page_loads','Page Loads'), mk('p2p_routes','P2P Routes'), mk('scout_baselines','Baselines') ];
+    const mk = (key:string,label:string,color:string)=> ({ id:key, label, color, points: daily.map(d=>({ x:d.date, y:d.counters[key]||0 })) });
+    return [
+      mk('page_loads','Page Loads', chartColors[0]),
+      mk('p2p_routes','P2P Routes', chartColors[1]),
+      mk('scout_baselines','Baselines', chartColors[3]) // green for distinction
+    ];
   }, [daily]);
-  // Chart 2: Engagement rates (activation, share creation, cinematic usage) as percentages
+  // Chart 2: Engagement rates (share creation, route copy, cinematic usage) as percentages
   const engagementRateSeries = useMemo(()=>{
     return [
-      { id:'activation_rate', label:'Activation %', points: daily.map(d=>{ const pl=d.counters.page_loads||0; const fa=d.counters.first_actions||0; return { x:d.date, y: pl? (fa/pl)*100: 0 }; }) },
-      { id:'share_rate', label:'Share Creation %', points: daily.map(d=>{ const pl=d.counters.page_loads||0; const sh=d.counters.routes_shared||0; return { x:d.date, y: pl? (sh/pl)*100: 0 }; }) },
-      { id:'cinematic_rate', label:'Cinematic Usage %', points: daily.map(d=>{ const pl=d.counters.page_loads||0; const cs=d.counters.cinematic_sessions||0; return { x:d.date, y: pl? (cs/pl)*100: 0 }; }) }
+      { id:'share_rate', label:'Share Creation %', color:chartColors[0], points: daily.map(d=>{ const pl=d.counters.page_loads||0; const sh=d.counters.routes_shared||0; return { x:d.date, y: pl? (sh/pl)*100: 0 }; }) },
+      { id:'copy_rate', label:'Route Copy %', color:chartColors[1], points: daily.map(d=>{ const routes=(d.counters.p2p_routes||0)+(d.counters.scout_optimizations||0); const copies=d.counters.route_copies||0; return { x:d.date, y: routes? (copies/routes)*100: 0 }; }) },
+      { id:'cinematic_rate', label:'Cinematic Usage %', color:chartColors[2], points: daily.map(d=>{ const pl=d.counters.page_loads||0; const cs=d.counters.cinematic_sessions||0; return { x:d.date, y: pl? (cs/pl)*100: 0 }; }) }
     ];
   }, [daily]);
 
@@ -187,18 +191,18 @@ const StatsPage: React.FC = () => {
       {!data && !error && <div>Loading...</div>}
       {data && (
         <>
-        {/* Charts Section */}
+        {/* Charts Section (side-by-side) */}
         {daily.length>0 && (
-          <div style={{ display:'flex', flexDirection:'column', gap:30, margin:'0 0 40px 0' }} aria-label="Usage Trend Charts">
-            <section style={{ background:'rgba(255,255,255,0.06)', padding:'20px 22px 16px', border:'1px solid rgba(255,255,255,0.15)', borderRadius:12 }}>
+          <div style={{ display:'flex', flexWrap:'wrap', gap:24, margin:'0 0 40px 0' }} aria-label="Usage Trend Charts">
+            <section style={{ flex:'1 1 0', minWidth:600, background:'rgba(255,255,255,0.06)', padding:'20px 22px 16px', border:'1px solid rgba(255,255,255,0.15)', borderRadius:12 }}>
               <h2 style={{ margin:'0 0 12px 0', fontSize:'15px', letterSpacing:'.5px', textTransform:'uppercase', opacity:0.85 }}>Core Usage (Daily)</h2>
-              <LineChart series={usageSeries} yLabel="Count" height={220} width={1400} />
-              <ChartLegend items={usageSeries.map((s,i)=>({ label:s.label||s.id, color:`var(--chart-color-${i})` }))} />
+              <LineChart series={usageSeries} yLabel="Count" height={320} width={760} />
+              <ChartLegend items={usageSeries.map(s=>({ label:s.label||s.id, color:s.color||chartColors[0] }))} />
             </section>
-            <section style={{ background:'rgba(255,255,255,0.06)', padding:'20px 22px 16px', border:'1px solid rgba(255,255,255,0.15)', borderRadius:12 }}>
+            <section style={{ flex:'1 1 0', minWidth:600, background:'rgba(255,255,255,0.06)', padding:'20px 22px 16px', border:'1px solid rgba(255,255,255,0.15)', borderRadius:12 }}>
               <h2 style={{ margin:'0 0 12px 0', fontSize:'15px', letterSpacing:'.5px', textTransform:'uppercase', opacity:0.85 }}>Engagement Rates (Daily)</h2>
-              <LineChart series={engagementRateSeries} yLabel="Percent" height={220} width={1400} />
-              <ChartLegend items={engagementRateSeries.map((s,i)=>({ label:s.label||s.id, color:`var(--chart-color-${i})` }))} />
+              <LineChart series={engagementRateSeries} yLabel="Percent" height={320} width={760} />
+              <ChartLegend items={engagementRateSeries.map(s=>({ label:s.label||s.id, color:s.color||chartColors[0] }))} />
             </section>
           </div>
         )}
