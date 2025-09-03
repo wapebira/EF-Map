@@ -160,6 +160,17 @@ function App() {
   useEffect(()=>{ try { (window as any).__efSetThemeAccent && (window as any).__efSetThemeAccent(accentIsBlue ? 'blue':'orange'); } catch { /* ignore */ } }, [accentIsBlue]);
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [loadingStatus, setLoadingStatus] = useState('Initializing...');
+  // Hover tuning (runtime adjustable via window.__efSetHoverTuning for local testing)
+  const hoverTuningRef = useRef({
+    minDistance: 100,
+    maxDistance: 50000,
+    minThreshold: 1,
+    maxThreshold: 300,
+    allowBelowMinDistance: true,
+  floorBelowMin: 0.12,
+    curveExp: 1,
+  });
+  useEffect(()=>{ (window as any).__efSetHoverTuning = (opts: Partial<typeof hoverTuningRef.current>) => { Object.assign(hoverTuningRef.current, opts); console.log('[EF] Updated hover tuning', hoverTuningRef.current); }; }, []);
   const [isLoaded, setIsLoaded] = useState(false);
 
   const mountRef = useRef<HTMLDivElement>(null);
@@ -3203,6 +3214,7 @@ function App() {
     const DRAG_THRESHOLD = 5; // pixels
     const CLICK_TIME_THRESHOLD = 200; // milliseconds
 
+
   const onPointerMove = (event: PointerEvent) => {
       // Mark that user has moved mouse; before this we won't show hover
       if(!firstMoveRef.current){ firstMoveRef.current = true; }
@@ -3276,16 +3288,23 @@ function App() {
             }
           }
         }
-  // Dynamic threshold based on camera distance (tighter range to avoid false positives)
+  // Dynamic threshold based on camera distance with runtime tuning & optional sub-min scaling
+  const cfg = hoverTuningRef.current;
   const distance = cameraRef.current.position.distanceTo(controlsRef.current.target);
-  const minDistance = 100;
-  const maxDistance = 50000;
-  const minThreshold = 1;   // near = very precise
-  const maxThreshold = 300;  // restored max threshold for far zoom hover forgiveness
-  const clampedDistance = Math.max(minDistance, Math.min(maxDistance, distance));
-  const normalizedDistance = (clampedDistance - minDistance) / (maxDistance - minDistance);
-  const dynamicThreshold = minThreshold + (maxThreshold - minThreshold) * normalizedDistance;
-  raycaster.params.Points.threshold = dynamicThreshold;
+  if(cfg.allowBelowMinDistance && distance < cfg.minDistance){
+    // Scale linearly (or with exponent) below minDistance down to floorBelowMin * minThreshold
+    const factorRaw = distance / cfg.minDistance; // 0..1
+    const factor = Math.pow(Math.max(0, Math.min(1, factorRaw)), cfg.curveExp);
+    const floorFrac = Math.max(0.01, Math.min(1, cfg.floorBelowMin));
+    const below = cfg.minThreshold * Math.max(factor, floorFrac);
+    raycaster.params.Points.threshold = below;
+  } else {
+    const clamped = Math.max(cfg.minDistance, Math.min(cfg.maxDistance, distance));
+    const normRaw = (clamped - cfg.minDistance) / (cfg.maxDistance - cfg.minDistance);
+    const norm = Math.pow(normRaw, cfg.curveExp);
+    const dynamic = cfg.minThreshold + (cfg.maxThreshold - cfg.minThreshold) * norm;
+    raycaster.params.Points.threshold = dynamic;
+  }
   const intersects = raycaster.intersectObject(starFieldRef.current);
 
         let newHoveredSystem: SolarSystem | null = null;
@@ -3431,6 +3450,18 @@ function App() {
         contextMenuObjRef.current = null; contextMenuSystemRef.current = null;
         event.preventDefault();
         return;
+      }
+      // If a different system already has an open menu, close it before opening a new one
+      if(contextMenuObjRef.current){
+        try {
+          if(contextMenuObjRef.current.parent){
+            contextMenuObjRef.current.parent.remove(contextMenuObjRef.current);
+            if(sceneRef.current && contextMenuObjRef.current.parent instanceof THREE.Object3D){
+              sceneRef.current.remove(contextMenuObjRef.current.parent);
+            }
+          }
+        } catch {/* ignore */}
+        contextMenuObjRef.current = null; contextMenuSystemRef.current = null;
       }
       event.preventDefault();
       // Immediately suppress existing hover label for this system so it doesn't overlap menu

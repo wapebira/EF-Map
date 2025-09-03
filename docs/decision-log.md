@@ -203,3 +203,16 @@
   - Micro-performance: Precompute id→position map or pack station metadata into typed arrays if station counts grow significantly.
   - Accessibility: Provide text-only list alternative or ARIA live region for station focus changes.
 
+## 2025-09-03 – Hover Threshold Fine-Tuning (floorBelowMin=0.12 Adopted)
+
+- Goal: Improve precision system selection in dense clusters at maximum zoom by allowing smaller effective hover raycast threshold below previous runtime min (0.15 → 0.12) without increasing false hovers at normal zoom levels.
+- Context: Earlier adaptive curve (`minDistance=100`, `maxDistance=50000`, thresholds 1–300) occasionally produced near-miss hover failures when camera extremely close (< ~140 world units) to tightly packed stars. A runtime tuning facility (`window.__efSetHoverTuning`) was introduced for experimentation; value 0.12 tested and chosen (Option A) as optimal balance of precision vs. stability.
+- Change: Default `hoverTuningRef` initialization in `App.tsx` updated: `floorBelowMin: 0.12`.
+- Behavior: Only affects near-distance branch when `allowBelowMinDistance=true` and computed distance < `minDistance`. Mid/long-distance thresholds unchanged; no impact on performance (single constant subtraction in existing logic path).
+- Risk: Low (single numeric constant tweak; guarded code path). No new state, schema, or event tracking changes.
+- Gates: typecheck ✅ | build ✅ (pending full project build) | smoke: manual verification selecting adjacent systems at max zoom succeeded where occasional misses occurred pre-change.
+- Follow-ups:
+  - Optional settings exposure if more user feedback requests further granularity.
+  - Consider a smooth easing curve for below-min interpolation (e.g., use `curveExp > 1`) if future extremely dense data layers introduced.
+  - Evaluate persisting user overrides via prefs if power users commonly adjust via console.
+
