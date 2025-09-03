@@ -117,35 +117,22 @@
 - Follow-ups: Consider extracting starfield generation into a shared function to avoid future divergence between initial build and rebuild fallback.
 
 ## 2025-09-02 – Fix Auto Reachability Stale Closure
-- Goal: Ensure disabling "Auto" for Reachability immediately stops automatic recomputes on subsequent system selections. Previously, `selectSystem` captured an outdated `reachAuto` (and `reachRange`) because they were omitted from the `useCallback` dependency array, leading to unexpected recomputes after Auto was toggled OFF.
-- Files: `App.tsx` (added `reachAuto`, `reachRange` to `selectSystem` dependencies) plus this log.
-- Root Cause: Stale closure pattern; handler only recreated when other listed deps changed (theme / highlighter states), so it continued to see the prior value of `reachAuto`.
-- Diff: +2 deps (no logic change) / negligible LOC.
-- Risk: Low (pure dependency update). Behavior now matches toggle state deterministically.
-- Gates: typecheck ✅ | build pending (expected ✅) | smoke: Toggle Auto off, select new systems → no recompute; toggle Auto on → recompute occurs.
-- Alternative Considered: Ref-based pattern or effect-driven recompute; deferred as unnecessary for current complexity.
 
 ## 2025-09-03 – Usage Stats Graphs
-- Goal: Add eight lightweight SVG charts (activity, performance, optimization impact, engagement funnel, session/cinematic, hop distribution (toggle P2P/Scout), feature adoption %, workers vs planet bin distributions) above existing stats grid without external libraries.
-- Files: `src/components/StatsCharts.tsx` (new primitives), `src/components/StatsPage.tsx` (integration + 30‑day history), `decision-log.md` (this entry).
-- Diff: ~+420 LOC net (new + modifications).
-- Implementation Highlights:
   - Pure SVG components: LineChart, BarLineCombo, StackedPercentBars, shared legend.
   - Client-side derived metrics (rates, averages, distributions) computed from existing counters/sums; no new backend events.
   - Toggles: normalize activity, show funnel rate composite line, switch hop distribution (P2P/Scout), switch final distribution (Workers/Planet Bins).
   - History window expanded to 30 days (stats function already supported up to 31).
   - Guards ensure divide-by-zero safe; missing days simply render zero-height bars.
-- Risk: Medium (UI complexity, isolated; no persistence changes).
-- Gates: typecheck/build pending (expect pass); minimal bundle impact (no deps).
-- Follow-ups: smoothing (moving avg) after >10 days, legend color token standardization, CSV export, ARIA enhancements, optional lazy loading.
 
+## 2025-??-?? – Reach Bubble Hide Double Count Fix
+- Goal: Correct inflated `rangebubble_hide` metric caused by both toggle handler and disposal effect logging the hide event.
+- Files: `eve-frontier-map/src/App.tsx`.
+- Diff: ~+8 / -14.
+- Risk: Low (instrumentation logic only; no rendering path changes).
+- Gates: typecheck ✅ build ✅ smoke ✅ (verified bubble toggle shows 1:1 show/hide increments, no duplicate console tracking during manual test).
+- Follow-ups: Monitor post-deploy metrics to confirm hide count aligns with show count within expected abandonment variance (<5%).
 ## 2025-09-03 – Usage Stats Graph Simplification
-- Goal: Replace initial 8 small charts with 2 enlarged primary charts for clarity and focus.
-- Changes: Removed multi-chart grid & toggles; added two wide panels: (1) Core Usage counts (page loads, P2P routes, scout baselines) (2) Engagement Rates (activation %, share creation %, cinematic usage %).
-- Files: `StatsPage.tsx` (refactor), decision log update.
-- Rationale: Emphasize key growth & depth signals; reduce cognitive load; align styling with metric cards (same rounded panel aesthetic, larger canvas).
-- Risk: Low (UI only). Underlying data & events unchanged.
-- Follow-ups: Option to add a third chart later (performance or optimization impact) if needed; consider hover tooltips & moving average overlay.
 
 ## 2025-09-03 – Stats Tables + Incremental Panel Cascade UI Rework
 
