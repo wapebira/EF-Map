@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useRef, useState, useEffect } from 'react';
 
 // Simple color palette utilities (derive variants of accent)
 export const chartColors = [
@@ -18,8 +18,8 @@ interface LineSeries { id: string; label?: string; points: SeriesPoint[]; color?
 interface LineChartProps { width?: number; height?: number; series: LineSeries[]; yLabel?: string; normalize?: boolean; showDots?: boolean; strokeWidth?: number; headroomPct?: number; }
 
 export const LineChart: React.FC<LineChartProps> = ({ width=360, height=160, series, yLabel, normalize=false, showDots=true, strokeWidth=2, headroomPct=0.08 }) => {
-  // Further increased right padding + larger inset to ensure last point/dot fully within frame across browsers.
-  const padding = { l: 40, r: 28, t: 22, b: 26 };
+  // Symmetric left/right padding; dynamic responsive wrapper will control width externally.
+  const padding = { l: 40, r: 40, t: 22, b: 26 };
   const innerW = width - padding.l - padding.r;
   const innerH = height - padding.t - padding.b;
   const allX = series[0]?.points.map(p=>p.x) || [];
@@ -123,3 +123,23 @@ export interface DailySnapshot { date: string; counters: Record<string,number>; 
 export function deriveAvg(sumKey:string, countKey:string, s:DailySnapshot){ const sum = s.sums[sumKey]; const c = s.sums[countKey]; if(!sum || !c) return null; return sum / c; }
 
 export default {};
+
+// Responsive wrapper: auto-measures container width and renders LineChart full-width.
+export const ResponsiveLineChart: React.FC<Omit<LineChartProps,'width'>> = (props) => {
+  const ref = useRef<HTMLDivElement>(null);
+  const [w,setW] = useState<number>(600);
+  useEffect(()=>{
+    if(!ref.current) return;
+    const ro = new ResizeObserver(entries=>{
+      for(const e of entries){
+        const cw = e.contentRect.width;
+        if(cw && Math.abs(cw - w) > 4){ // slight hysteresis
+          setW(cw);
+        }
+      }
+    });
+    ro.observe(ref.current);
+    return ()=> ro.disconnect();
+  },[w]);
+  return <div ref={ref} style={{ width:'100%' }}><LineChart width={w} {...props} /></div>;
+};

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { LineChart, ChartLegend, chartColors } from './StatsCharts';
+import { ChartLegend, chartColors, ResponsiveLineChart } from './StatsCharts';
 
 interface StatsSnapshot { version: number; updatedAt: string; counters: Record<string, number>; sums: Record<string, number>; date?: string }
 
@@ -196,12 +196,12 @@ const StatsPage: React.FC = () => {
           <div style={{ display:'flex', flexWrap:'wrap', gap:24, margin:'0 0 40px 0' }} aria-label="Usage Trend Charts">
             <section style={{ flex:'1 1 0', minWidth:600, background:'rgba(255,255,255,0.06)', padding:'20px 22px 16px', border:'1px solid rgba(255,255,255,0.15)', borderRadius:12 }}>
               <h2 style={{ margin:'0 0 12px 0', fontSize:'15px', letterSpacing:'.5px', textTransform:'uppercase', opacity:0.85 }}>Core Usage (Daily)</h2>
-              <LineChart series={usageSeries} yLabel="Count" height={320} width={760} />
+              <ResponsiveLineChart series={usageSeries} yLabel="Count" height={320} />
               <ChartLegend items={usageSeries.map(s=>({ label:s.label||s.id, color:s.color||chartColors[0] }))} />
             </section>
             <section style={{ flex:'1 1 0', minWidth:600, background:'rgba(255,255,255,0.06)', padding:'20px 22px 16px', border:'1px solid rgba(255,255,255,0.15)', borderRadius:12 }}>
               <h2 style={{ margin:'0 0 12px 0', fontSize:'15px', letterSpacing:'.5px', textTransform:'uppercase', opacity:0.85 }}>Engagement Rates (Daily)</h2>
-              <LineChart series={engagementRateSeries} yLabel="Percent" height={320} width={760} />
+              <ResponsiveLineChart series={engagementRateSeries} yLabel="Percent" height={320} />
               <ChartLegend items={engagementRateSeries.map(s=>({ label:s.label||s.id, color:s.color||chartColors[0] }))} />
             </section>
           </div>
