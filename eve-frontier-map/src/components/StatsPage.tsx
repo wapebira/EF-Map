@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { LineChart, BarLineCombo, StackedPercentBars, ChartLegend, deriveAvg } from './StatsCharts';
+import { LineChart, ChartLegend } from './StatsCharts';
 
 interface StatsSnapshot { version: number; updatedAt: string; counters: Record<string, number>; sums: Record<string, number>; date?: string }
 
@@ -122,58 +122,21 @@ const StatsPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   // Daily derived snapshots
   const daily = useMemo(()=> history.map(h=>({ date: (h.date? h.date.replace(/\.json$/,''): h.updatedAt.slice(0,10)), counters: h.counters, sums: h.sums })), [history]);
-  // Toggles
-  const [normActivity, setNormActivity] = useState(false);
-  const [showRates, setShowRates] = useState(true);
-  const [hopMode, setHopMode] = useState<'p2p'|'scout'>('p2p');
-  const [featureMode, setFeatureMode] = useState<'workers'|'planetbins'>('workers');
+  // No chart toggles (simplified to two primary charts)
   // Series builders
-  const seriesActivity = useMemo(()=>{
-    const make = (key:string,label:string)=> ({ id:key, label, points: daily.map(d=>({ x:d.date, y: d.counters[key]||0 })) });
-    return [ make('page_loads','Page Loads'), make('p2p_routes','P2P Routes'), make('scout_baselines','Baselines'), make('scout_optimizations','Optimizations') ];
+  // Chart 1: Core usage counts (page loads, P2P routes, scout baselines)
+  const usageSeries = useMemo(()=>{
+    const mk = (key:string,label:string)=> ({ id:key, label, points: daily.map(d=>({ x:d.date, y:d.counters[key]||0 })) });
+    return [ mk('page_loads','Page Loads'), mk('p2p_routes','P2P Routes'), mk('scout_baselines','Baselines') ];
   }, [daily]);
-  const seriesPerformance = useMemo(()=>{
-    const mkAvg = (sumKey:string,countKey:string,label:string)=> ({ id:label, label, points: daily.map(d=>({ x:d.date, y: deriveAvg(sumKey,countKey,d) })) });
-    return [ mkAvg('db_load_time_ms_sum','db_load_time_count','DB Load'), mkAvg('p2p_route_time_ms_sum','p2p_route_time_count','P2P Route'), mkAvg('scout_baseline_time_ms_sum','scout_baseline_time_count','Baseline'), mkAvg('active_session_time_ms_sum','active_session_time_count','Active Session') ];
-  }, [daily]);
-  const optimizationImpact = useMemo(()=>{
-    const bars = daily.map(d=>({ x:d.date, v: (d.sums.scout_opt_savings_ly_sum)||0 }));
-    const line = daily.map(d=>({ x:d.date, v: (d.sums.scout_opt_savings_count? (d.sums.scout_opt_savings_ly_sum / d.sums.scout_opt_savings_count):0) }));
-    return { bars, line };
-  }, [daily]);
-  const engagementFunnel = useMemo(()=>{
-    const baseSeries = [
-      { id:'page_loads', label:'Page Loads', points: daily.map(d=>({ x:d.date, y:d.counters.page_loads||0 })) },
-      { id:'first_actions', label:'First Actions', points: daily.map(d=>({ x:d.date, y:d.counters.first_actions||0 })) },
-      { id:'routes_shared', label:'Shares', points: daily.map(d=>({ x:d.date, y:d.counters.routes_shared||0 })) },
-      { id:'shared_resolved', label:'Resolved', points: daily.map(d=>({ x:d.date, y:d.counters.shared_resolved||0 })) }
+  // Chart 2: Engagement rates (activation, share creation, cinematic usage) as percentages
+  const engagementRateSeries = useMemo(()=>{
+    return [
+      { id:'activation_rate', label:'Activation %', points: daily.map(d=>{ const pl=d.counters.page_loads||0; const fa=d.counters.first_actions||0; return { x:d.date, y: pl? (fa/pl)*100: 0 }; }) },
+      { id:'share_rate', label:'Share Creation %', points: daily.map(d=>{ const pl=d.counters.page_loads||0; const sh=d.counters.routes_shared||0; return { x:d.date, y: pl? (sh/pl)*100: 0 }; }) },
+      { id:'cinematic_rate', label:'Cinematic Usage %', points: daily.map(d=>{ const pl=d.counters.page_loads||0; const cs=d.counters.cinematic_sessions||0; return { x:d.date, y: pl? (cs/pl)*100: 0 }; }) }
     ];
-    const rateLine = daily.map(d=>{ const pl=d.counters.page_loads||0; const fa=d.counters.first_actions||0; const rs=d.counters.routes_shared||0; const rr=d.counters.shared_resolved||0; const routes=(d.counters.p2p_routes||0)+(d.counters.scout_optimizations||0); const copyRate = routes? (d.counters.route_copies||0)/routes : 0; const activation= pl? fa/pl:0; const resolution= rs? rr/rs:0; return { x:d.date, v: ((activation+resolution+copyRate)/3)*100 }; });
-    return { baseSeries, rateLine };
   }, [daily]);
-  const sessionCinematic = useMemo(()=>{
-    const openAvg = daily.map(d=>({ x:d.date, v: deriveAvg('session_time_ms_sum','session_time_count',d)||0 }));
-    const activeAvg = daily.map(d=>({ x:d.date, v: deriveAvg('active_session_time_ms_sum','active_session_time_count',d)||0 }));
-    const cinematicShare = daily.map(d=>{ const c=d.sums.cinematic_time_ms_sum; const s=d.sums.session_time_ms_sum; return { x:d.date, v: (c&&s)? (c/s)*100:0 }; });
-    return { openAvg, activeAvg, cinematicShare };
-  }, [daily]);
-  const hopDistribution = useMemo(()=>{
-    const keys = hopMode==='p2p'? ['hops_lt_10','hops_10_30','hops_30_60','hops_gt_60'] : ['scout_hops_lt_10','scout_hops_10_30','scout_hops_30_60','scout_hops_gt_60'];
-    const labelsMap:Record<string,string>={hops_lt_10:'<10',hops_10_30:'10–30',hops_30_60:'30–60',hops_gt_60:'>60',scout_hops_lt_10:'<10',scout_hops_10_30:'10–30',scout_hops_30_60:'30–60',scout_hops_gt_60:'>60'};
-    return daily.map(d=>({ x:d.date, buckets: keys.map(k=>({ label:labelsMap[k], value:d.counters[k]||0 })) }));
-  }, [daily, hopMode]);
-  const featureAdoption = useMemo(()=>{
-    return ['waypoints_used','avoid_used','waypoint_opt_used','return_to_start','gate_reachable'].map(k=>({ id:k, label:k.replace(/_/g,' ').replace('used','').trim(), points: daily.map(d=>{ const denom=(d.counters.p2p_routes||0)+(d.counters.scout_baselines||0); const raw=d.counters[k]||0; return { x:d.date, y: denom? (raw/denom)*100: null }; }) }));
-  }, [daily]);
-  const workersOrPlanet = useMemo(()=>{
-    if(featureMode==='planetbins'){
-      const keys=['bins_5','bins_3_4','bins_1_2','bins_0']; const labelMap:Record<string,string>={bins_5:'5',bins_3_4:'3–4',bins_1_2:'1–2',bins_0:'0'};
-      return daily.map(d=>({ x:d.date, buckets: keys.map(k=>({ label:labelMap[k], value:d.counters[k]||0 })) }));
-    }
-    const allWorkerKeys = Array.from(new Set(daily.flatMap(d=> Object.keys(d.counters).filter(k=> k.startsWith('opt_workers_used_')) ))).sort((a,b)=> parseInt(a.split('_').pop()||'0') - parseInt(b.split('_').pop()||'0'));
-    const topKeys = allWorkerKeys.slice(0,5);
-    return daily.map(d=>{ const bucketsArr: { label:string; value:number }[]=[]; let other=0; topKeys.forEach(k=> bucketsArr.push({ label:k.replace('opt_workers_used_',''), value:d.counters[k]||0 })); allWorkerKeys.slice(5).forEach(k=>{ other += d.counters[k]||0; }); if(other>0) bucketsArr.push({ label:'Other', value:other }); return { x:d.date, buckets: bucketsArr }; });
-  }, [daily, featureMode]);
 
   useEffect(()=>{
     let cancelled=false;
@@ -226,48 +189,17 @@ const StatsPage: React.FC = () => {
         <>
         {/* Charts Section */}
         {daily.length>0 && (
-          <div style={{ margin:'0 0 34px 0', display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(340px,1fr))', gap:24 }} aria-label="Usage Trend Charts">
-            <div>
-              <LineChart series={seriesActivity} normalize={normActivity} yLabel={normActivity? 'Activity (norm%)':'Activity'} />
-              <div style={{ display:'flex', gap:12, alignItems:'center', marginTop:4 }}>
-                <label style={{ fontSize:11, opacity:.8, display:'flex', gap:4, alignItems:'center' }}><input type="checkbox" checked={normActivity} onChange={e=> setNormActivity(e.target.checked)} /> Normalize</label>
-              </div>
-              <ChartLegend items={seriesActivity.map((s,i)=>({ label:s.label||s.id, color:`var(--chart-color-${i})` }))} />
-            </div>
-            <div>
-              <LineChart series={seriesPerformance} yLabel="Avg ms" />
-              <ChartLegend items={seriesPerformance.map((s,i)=>({ label:s.label||s.id, color:`var(--chart-color-${i})` }))} />
-            </div>
-            <div>
-              <BarLineCombo bars={optimizationImpact.bars} line={optimizationImpact.line} label="Optimization Savings (LY)" />
-            </div>
-            <div>
-              <LineChart series={engagementFunnel.baseSeries} normalize={false} yLabel="Funnel" />
-              <div style={{ display:'flex', gap:12, alignItems:'center', marginTop:4 }}>
-                <label style={{ fontSize:11, opacity:.8, display:'flex', gap:4, alignItems:'center' }}><input type="checkbox" checked={showRates} onChange={e=> setShowRates(e.target.checked)} /> Show Avg Rate Line</label>
-              </div>
-              {showRates && <BarLineCombo bars={engagementFunnel.baseSeries[0].points.map(p=>({ x:p.x, v: p.y||0 }))} line={engagementFunnel.rateLine} label="Funnel Avg Rate %" barColor="rgba(255,255,255,0.15)" lineColor="#94d82d" />}
-            </div>
-            <div>
-              <BarLineCombo bars={sessionCinematic.openAvg} line={sessionCinematic.cinematicShare} label="Session Open vs Cinematic%" barColor="#4cc9f0" lineColor="#f38ba8" />
-            </div>
-            <div>
-              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                <span style={{ fontSize:11, fontWeight:600, letterSpacing:.5, textTransform:'uppercase', opacity:.75 }}>{hopMode==='p2p'? 'P2P Hop Distribution':'Scout Hop Distribution'}</span>
-                <button style={{ fontSize:10, background:'rgba(255,255,255,0.08)', color:'#fff', border:'1px solid rgba(255,255,255,0.2)', borderRadius:4, padding:'2px 6px', cursor:'pointer' }} onClick={()=> setHopMode(hopMode==='p2p'?'scout':'p2p')}>{hopMode==='p2p'? 'Show Scout':'Show P2P'}</button>
-              </div>
-              <StackedPercentBars buckets={hopDistribution} label={hopMode==='p2p'? 'P2P Hops %':'Scout Hops %'} />
-            </div>
-            <div>
-              <LineChart series={featureAdoption} yLabel="Feature Adoption %" />
-            </div>
-            <div>
-              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                <span style={{ fontSize:11, fontWeight:600, letterSpacing:.5, textTransform:'uppercase', opacity:.75 }}>{featureMode==='workers'? 'Workers Usage':'Planet Bins'}</span>
-                <button style={{ fontSize:10, background:'rgba(255,255,255,0.08)', color:'#fff', border:'1px solid rgba(255,255,255,0.2)', borderRadius:4, padding:'2px 6px', cursor:'pointer' }} onClick={()=> setFeatureMode(featureMode==='workers'?'planetbins':'workers')}>{featureMode==='workers'? 'Planet Bins':'Workers'}</button>
-              </div>
-              <StackedPercentBars buckets={workersOrPlanet} label={featureMode==='workers'? 'Workers %':'Planet Bins %'} />
-            </div>
+          <div style={{ display:'flex', flexDirection:'column', gap:30, margin:'0 0 40px 0' }} aria-label="Usage Trend Charts">
+            <section style={{ background:'rgba(255,255,255,0.06)', padding:'20px 22px 16px', border:'1px solid rgba(255,255,255,0.15)', borderRadius:12 }}>
+              <h2 style={{ margin:'0 0 12px 0', fontSize:'15px', letterSpacing:'.5px', textTransform:'uppercase', opacity:0.85 }}>Core Usage (Daily)</h2>
+              <LineChart series={usageSeries} yLabel="Count" height={220} width={1400} />
+              <ChartLegend items={usageSeries.map((s,i)=>({ label:s.label||s.id, color:`var(--chart-color-${i})` }))} />
+            </section>
+            <section style={{ background:'rgba(255,255,255,0.06)', padding:'20px 22px 16px', border:'1px solid rgba(255,255,255,0.15)', borderRadius:12 }}>
+              <h2 style={{ margin:'0 0 12px 0', fontSize:'15px', letterSpacing:'.5px', textTransform:'uppercase', opacity:0.85 }}>Engagement Rates (Daily)</h2>
+              <LineChart series={engagementRateSeries} yLabel="Percent" height={220} width={1400} />
+              <ChartLegend items={engagementRateSeries.map((s,i)=>({ label:s.label||s.id, color:`var(--chart-color-${i})` }))} />
+            </section>
           </div>
         )}
         <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(300px,1fr))', gap:'20px' }}>

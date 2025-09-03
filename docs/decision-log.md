@@ -130,3 +130,11 @@
 - Risk: Medium (UI complexity, isolated; no persistence changes).
 - Gates: typecheck/build pending (expect pass); minimal bundle impact (no deps).
 - Follow-ups: smoothing (moving avg) after >10 days, legend color token standardization, CSV export, ARIA enhancements, optional lazy loading.
+
+## 2025-09-03 – Usage Stats Graph Simplification
+- Goal: Replace initial 8 small charts with 2 enlarged primary charts for clarity and focus.
+- Changes: Removed multi-chart grid & toggles; added two wide panels: (1) Core Usage counts (page loads, P2P routes, scout baselines) (2) Engagement Rates (activation %, share creation %, cinematic usage %).
+- Files: `StatsPage.tsx` (refactor), decision log update.
+- Rationale: Emphasize key growth & depth signals; reduce cognitive load; align styling with metric cards (same rounded panel aesthetic, larger canvas).
+- Risk: Low (UI only). Underlying data & events unchanged.
+- Follow-ups: Option to add a third chart later (performance or optimization impact) if needed; consider hover tooltips & moving average overlay.
