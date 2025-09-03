@@ -991,7 +991,17 @@ function App() {
     };
     raf = requestAnimationFrame(tick);
     return ()=>{ if(raf) cancelAnimationFrame(raf); };
-  }, [showStations]);
+  }, [showStations, cinematicMode]);
+
+  // When exiting cinematic mode, scheduling station scaling re-baseline so sprites can grow again if baseline changed during cinematic.
+  useEffect(()=>{
+    if(!cinematicMode && showStations){
+      // Invalidate baseline & focus so next scaling tick recomputes with current camera distance
+      stationBaselineDistRef.current = null;
+      stationFocusIdRef.current = null;
+      stationFocusDistRef.current = Infinity;
+    }
+  }, [cinematicMode, showStations]);
 
   // Prioritize station sprite click selection: if user clicks on icon, select its system before star raycast fallback
   useEffect(()=>{
