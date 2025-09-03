@@ -3418,6 +3418,20 @@ function App() {
     // Right-click context menu for setting destination
   const onContextMenu = (event: MouseEvent) => {
       if(!hoveredSystem) return; // only active when a star is hovered
+      // If a menu for this same system already open, treat second right-click as close
+      if(contextMenuObjRef.current && contextMenuSystemRef.current && contextMenuSystemRef.current.name === hoveredSystem.name){
+        try {
+          if(contextMenuObjRef.current.parent){
+            contextMenuObjRef.current.parent.remove(contextMenuObjRef.current);
+            if(sceneRef.current && contextMenuObjRef.current.parent instanceof THREE.Object3D){
+              sceneRef.current.remove(contextMenuObjRef.current.parent);
+            }
+          }
+        } catch {/* ignore */}
+        contextMenuObjRef.current = null; contextMenuSystemRef.current = null;
+        event.preventDefault();
+        return;
+      }
       event.preventDefault();
       // Immediately suppress existing hover label for this system so it doesn't overlap menu
       if(hoverLabelObj.current){
@@ -3553,9 +3567,13 @@ function App() {
       el.appendChild(inner);
       const menuObj = new CSS2DObject(el);
       contextMenuObjRef.current = menuObj;
-      const parentObj = sceneRef.current;
-      if(parentObj && (parentObj as any).add){
-        (parentObj as any).add(menuObj);
+      // Anchor the menu to the system's 3D position so it appears adjacent to the star.
+      // (Previous regression added the label directly to the scene at (0,0,0) causing it to appear far away.)
+      if(sceneRef.current){
+        const anchor = new THREE.Object3D();
+        anchor.position.set(hoveredSystem.position.x, hoveredSystem.position.y, hoveredSystem.position.z);
+        anchor.add(menuObj);
+        sceneRef.current.add(anchor);
       }
     };
     currentRenderer.domElement.addEventListener('contextmenu', onContextMenu);
@@ -3576,6 +3594,21 @@ function App() {
       contextMenuObjRef.current = null; contextMenuSystemRef.current = null;
     };
     window.addEventListener('mousedown', closeOnLeftClick);
+    // Close on Escape for accessibility / stuck states
+    const escHandler = (ev: KeyboardEvent) => {
+      if(ev.key === 'Escape' && contextMenuObjRef.current){
+        try {
+          if(contextMenuObjRef.current.parent){
+            contextMenuObjRef.current.parent.remove(contextMenuObjRef.current);
+            if(sceneRef.current && contextMenuObjRef.current.parent instanceof THREE.Object3D){
+              sceneRef.current.remove(contextMenuObjRef.current.parent);
+            }
+          }
+        } catch {/* ignore */}
+        contextMenuObjRef.current = null; contextMenuSystemRef.current = null;
+      }
+    };
+    window.addEventListener('keydown', escHandler);
 
     return () => {
       currentRenderer.domElement.removeEventListener('pointermove', onPointerMove);
@@ -3584,6 +3617,7 @@ function App() {
   currentRenderer.domElement.removeEventListener('pointerleave', onPointerLeave);
   currentRenderer.domElement.removeEventListener('contextmenu', onContextMenu);
   window.removeEventListener('mousedown', closeOnLeftClick);
+  window.removeEventListener('keydown', escHandler);
     };
   }, [isLoaded, hoveredSystem, isDraggingRef, mouseDownPosRef, mouseDownTimeRef, createSystemLabelElement, selectSystem, isPlanetCountActive, showDistance, highlightedSystem, cinematicMode, cinematicLabels, openPanels, ensurePanel, lastSelectedSystemName]);
 
