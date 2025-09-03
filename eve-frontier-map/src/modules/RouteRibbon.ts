@@ -149,7 +149,7 @@ export function createRouteRibbon(opts: RouteRibbonOptions): THREE.Group | null 
   u_baseBoost: { value: 1.35 }, // brighten baseline so route matches accent theme
   u_dashRepeat: { value: 14.0 }, // dashes per ship hop
   u_dashDuty: { value: 0.55 },  // fraction of dash 'on'
-  u_dashFade: { value: 0.40 },  // off brightness floor (lower = higher contrast)
+  u_dashFade: { value: 0.25 },  // off brightness floor (lower = higher contrast)
   u_headStrength: { value: 1.4 }, // additional strength for rounded head bloom
   u_headAspect: { value: 1.15 } // longitudinal stretch ( >1 elongates along route )
     },
