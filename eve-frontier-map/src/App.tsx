@@ -3574,6 +3574,27 @@ function App() {
         anchor.position.set(hoveredSystem.position.x, hoveredSystem.position.y, hoveredSystem.position.z);
         anchor.add(menuObj);
         sceneRef.current.add(anchor);
+        // Offset the menu slightly to the right (and a touch upward) of the star in screen space.
+        try {
+          const cam = cameraRef.current as THREE.PerspectiveCamera | null;
+          const rend = rendererRef.current as THREE.WebGLRenderer | null;
+          if(cam && rend){
+            const distance = cam.position.distanceTo(anchor.position);
+            const vFov = THREE.MathUtils.degToRad(cam.fov); // vertical fov in radians
+            const viewportHeight = rend.domElement.clientHeight || 1;
+            const worldPerPixelY = (2 * Math.tan(vFov/2) * distance) / viewportHeight;
+            const worldPerPixelX = worldPerPixelY * cam.aspect;
+            const desiredPxRight = 14; // horizontal gap to right of star
+            const desiredPxUp = 2;     // slight upward nudge
+            // Camera basis vectors
+            const forward = new THREE.Vector3(); cam.getWorldDirection(forward); // -Z forward
+            const upDir = cam.up.clone().normalize();
+            const rightDir = new THREE.Vector3().crossVectors(forward, upDir).normalize();
+            // Apply offset to menuObj local position so subsequent star transforms still correct
+            menuObj.position.addScaledVector(rightDir, worldPerPixelX * desiredPxRight);
+            menuObj.position.addScaledVector(upDir, worldPerPixelY * desiredPxUp);
+          }
+        } catch {/* non-fatal */}
       }
     };
     currentRenderer.domElement.addEventListener('contextmenu', onContextMenu);
