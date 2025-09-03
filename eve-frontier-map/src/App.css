@@ -42,6 +42,8 @@ button:focus-visible,
   /* default to orange */
   --accent: var(--selection-orange);
     --accent-rgb: 255,76,38;
+  /* Global UI scale factor (hybrid scaling: toolbar + left cluster) */
+  --ui-scale: 1;
  }
 
 #root {
@@ -193,6 +195,15 @@ button:focus-visible,
   box-shadow:0 6px 24px -6px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.05) inset;
   /* Smoothly expand leftward when help panel opens so shifted buttons stay enclosed */
   transition: padding-left 0.45s cubic-bezier(.25,.8,.25,1);
+  transform: scale(var(--ui-scale));
+  transform-origin: top right;
+}
+:root.help-open .ef-top-toolbar { padding-left: calc(12px + (var(--help-panel-width, 33vw) - var(--help-toggle-width, 0px)) + 8px); }
+
+/* Left cluster scaling wrapper (search box + rail + drawers anchored) */
+.ef-left-cluster {
+  transform: scale(var(--ui-scale));
+  transform-origin: top left;
 }
 
 /* Standardized checkbox label spacing */

@@ -189,6 +189,8 @@ function App() {
   useEffect(()=>{
     persistUiScale(uiScale);
     if(!uiScaleTrackedRef.current){ uiScaleTrackedRef.current = true; try { track({ type:'ui_scale', scale: Math.round(uiScale*100) }); } catch {} }
+  // Update global CSS variable for hybrid scaling containers
+  try { document.documentElement.style.setProperty('--ui-scale', String(uiScale)); } catch {/* ignore */}
   }, [uiScale]);
   // Hide UI toggle – count only when enabling
   useEffect(()=>{ if(hideUI){ try { track({ type:'ui_hide' }); } catch {} } }, [hideUI]);
@@ -3256,11 +3258,36 @@ function App() {
     return <LoadingScreen progress={loadingProgress} status={loadingStatus} />;
   }
 
-  // Compose a style wrapper scaler for UI (exclude the 3D canvas)
-  // Scale applied ONLY to primary UI panels (not the persistent bottom-left quick controls)
-  // Scale origin top-right so toolbar shrinks toward the corner; left panel still from top-left
-  const scaleStyle: React.CSSProperties = { transform:`scale(${uiScale})`, transformOrigin:'top left' };
-  const topRightScaleStyle: React.CSSProperties = { transform:`scale(${uiScale})`, transformOrigin:'top right', display:'flex', alignItems:'stretch', gap:'8px' };
+  // Hybrid scaling now driven by CSS var --ui-scale applied to grouped containers.
+  // Left cluster: search box + rail + drawers (PanelDrawer/Secondary panels) wrapped in ef-left-cluster.
+  // Toolbar: scale applied directly to .ef-top-toolbar root (not inner content) for consistent background sizing.
+
+  // Layout effect: when uiScale changes, adjust default drawer positions if user hasn't moved them manually.
+  useLayoutEffect(()=>{
+    // For each drawer (routing, cinematic) if no stored panel-pos:* then reposition relative to scaled rail width.
+    try {
+      const scale = uiScale; // already applied to CSS var; used for computation of left offset
+      const railBaseLeft = 10; // from CSS .ef-rail left
+      const railBaseWidth = 74 + 12 + 12; // button width (74) + horizontal padding (approx) left/right (10+10 but allow gap) -> using 98; keep explicit to avoid DOM query
+      const gap = 6; // visual gap between rail and drawer (original left 76 vs rail left 10 -> diff 66; we recompute)
+      const computedRailWidth = railBaseWidth * scale;
+      // Original drawer left was 76px: 10 (rail left) + 74 (button width) - 8 margin fudge.
+      const desiredDrawerLeft = Math.round(railBaseLeft * scale + computedRailWidth + gap);
+      const drawerIds = ['routing','cinematic'];
+      drawerIds.forEach(id=>{
+        const storageKey = 'panel-pos:drawer-'+id;
+        if(localStorage.getItem(storageKey)) return; // user moved; skip
+        const el = document.querySelector(`.ef-drawer[data-panel-id="${id}"]`) as HTMLElement | null;
+        if(el){ el.style.left = desiredDrawerLeft + 'px'; }
+      });
+      // Planet legend secondary panel
+      const legendKey = 'panel-pos:planet-legend';
+      if(!localStorage.getItem(legendKey)){
+        const legend = document.querySelector('.ef-secondary-panel') as HTMLElement | null;
+        if(legend){ legend.style.left = desiredDrawerLeft + 'px'; }
+      }
+    } catch {/* ignore positioning errors */}
+  }, [uiScale, openPanels, isPlanetCountActive]);
 
   return (
     <>
@@ -3268,7 +3295,7 @@ function App() {
   {/* Referral code copy state */}
   {/* ...existing code... */}
   <div className="ef-top-toolbar" style={hideUI?{display:'none'}:{}}>
-    <div style={topRightScaleStyle} className="ef-top-toolbar-inner">
+    <div className="ef-top-toolbar-inner">
       <div className="ef-toolbar-shifting">
       {/* Support button placed at start so it shifts with referral/share when Help panel opens */}
       <button
@@ -3324,7 +3351,7 @@ function App() {
   <HelpPanel accentIsBlue={accentIsBlue} supportExpandRequestId={supportExpandRequestId} supportContent={supportContent} />
     </div>
   </div>
-  <div style={hideUI?{display:'none'}:{ position: 'absolute', top: 10, left: 10, zIndex: 1405, color: 'white', padding: '10px 12px 12px', borderRadius: '14px', border:'1px solid rgba(255,255,255,0.22)', background: 'linear-gradient(180deg, rgba(30,30,32,0.78) 0%, rgba(18,18,20,0.78) 55%, rgba(12,12,14,0.78) 100%)', backdropFilter:'blur(9px) saturate(140%)', boxShadow:'0 6px 24px -6px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.05) inset', ...scaleStyle }}>
+  <div className="ef-left-cluster" style={hideUI?{display:'none'}:{ position: 'absolute', top: 10, left: 10, zIndex: 1405, color: 'white', padding: '10px 12px 12px', borderRadius: '14px', border:'1px solid rgba(255,255,255,0.22)', background: 'linear-gradient(180deg, rgba(30,30,32,0.78) 0%, rgba(18,18,20,0.78) 55%, rgba(12,12,14,0.78) 100%)', backdropFilter:'blur(9px) saturate(140%)', boxShadow:'0 6px 24px -6px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.05) inset' }}>
         <div style={{ display:'flex', alignItems:'stretch', gap:'6px', minWidth:340 }}>
           <div style={{ flex:1 }}>
             <AutoCompleteInput
@@ -3375,9 +3402,7 @@ function App() {
       </div>
       {!hideUI && (
         <>
-      <PanelRail
-            // @ts-ignore style prop for scaling; compensate slight position shift when scaling up
-            style={{ transform:`scale(${uiScale})`, transformOrigin:'top left' }}
+  <PanelRail
             items={[
               { id:'routing', type:'panel', label:'Routing', display:(<>{'Routing'}</>), icon:null, active:openPanels.has('routing'), onSelect:()=> togglePanel('routing') },
               { id:'cinematic', type:'panel', label:'Cinematic Mode', display:(<>Cinematic<br/>Mode</>), icon:null, active:openPanels.has('cinematic'), onSelect:()=> { if(openPanels.has('cinematic')) { setCinematicMode(false); } else { setCinematicMode(true); } togglePanel('cinematic'); } },
