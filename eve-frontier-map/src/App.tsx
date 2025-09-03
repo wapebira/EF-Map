@@ -816,6 +816,45 @@ function App() {
     }
   };
 
+  // ---------- Selection Gradient (Option A) ----------
+  useEffect(()=>{
+    if(!highlightedSystem) return;                // nothing selected
+    if(isRegionHighlighterActive) return;         // region coloring takes precedence
+    if(!stargateLinesRef.current) return;
+    try {
+      const geo = stargateLinesRef.current.geometry as THREE.BufferGeometry;
+      const colorAttr = geo.getAttribute('color') as THREE.BufferAttribute | undefined;
+      const data = geo.userData?.stargateData as { source_system_id:number; destination_system_id:number }[] | undefined;
+      if(!(colorAttr && data && colorAttr.count === data.length*2)) return;
+      // Base grey reset first so we don't accumulate previous selections
+      const baseGrey = new THREE.Color(0x444444);
+      for(let i=0;i<colorAttr.count;i++){ baseGrey.toArray(colorAttr.array as Float32Array, i*3); }
+      // Accent at selected endpoint vertex only
+      const accent = new THREE.Color(accentIsBlue ? 0x00aaff : 0xff4c26);
+      // Unreachable override (deep burgundy already applied by dimming when both ends unreachable). We keep current unreachable coloring.
+      const reachableSet = reachableSetRef.current; // may be null if dimming not run yet
+      for(let i=0;i<data.length;i++){
+        const seg = data[i];
+        const aIdx = i*2; const bIdx = i*2+1;
+        if(seg.source_system_id === highlightedSystem.id){
+          accent.toArray(colorAttr.array as Float32Array, aIdx*3);
+        } else if(seg.destination_system_id === highlightedSystem.id){
+          accent.toArray(colorAttr.array as Float32Array, bIdx*3);
+        }
+        // If reachDim active and both endpoints unreachable we let earlier dimming stand (no change needed)
+        if(reachDim && reachableSet){
+          const aReach = reachableSet.has(seg.source_system_id);
+          const bReach = reachableSet.has(seg.destination_system_id);
+          if(!aReach && !bReach) continue; // leave dimmed color
+        }
+      }
+      colorAttr.needsUpdate = true;
+    } catch {/* ignore */}
+  }, [highlightedSystem, accentIsBlue, isRegionHighlighterActive, reachDim]);
+
+  // Reapply gradient if reachability dimming changes underlying colors (clear highlight when deselected)
+  useEffect(()=>{ if(!highlightedSystem) return; }, [reachDim]);
+
   useEffect(()=>{ if(!reachDim) { clearReachabilityDimming(); try { track({ type:'reachability_disable' }); } catch {} } else { if(reachableSetRef.current) { applyReachabilityDimming(); try { track({ type:'reachability_enable' }); } catch {} } } }, [reachDim]);
   // Stations sprite management
   useEffect(()=>{
