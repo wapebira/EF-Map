@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useCallback, useRef, useEffect, useMemo, useLayoutEffect } from 'react';
 import { track } from '../../utils/usage';
 import './HelpPanel.css';
 
@@ -670,6 +670,30 @@ const HelpPanel: React.FC<HelpPanelProps> = ({ accentIsBlue, supportExpandReques
     setWidth();
     window.addEventListener('resize', setWidth);
     return ()=> window.removeEventListener('resize', setWidth);
+  }, [open]);
+
+  // Align help header bottom border with bottom of first toolbar button (consistent horizontal line)
+  useLayoutEffect(()=>{
+    if(!open) return;
+    const header = document.querySelector('.help-panel-header') as HTMLElement | null;
+    const firstBtn = document.querySelector('.ef-top-toolbar .ef-support-btn') as HTMLElement | null;
+    if(!header || !firstBtn) return;
+    const adjust = ()=>{
+      // Reset any prior override
+      header.style.paddingBottom = '';
+      const btnRect = firstBtn.getBoundingClientRect();
+      const headerRect = header.getBoundingClientRect();
+  const EXTRA_OFFSET = 13; // total downward shift (was 12, lowered 1px more per request)
+  const delta = (btnRect.bottom + EXTRA_OFFSET) - headerRect.bottom;
+      if(Math.abs(delta) > 0.5){
+        const padBottom = parseFloat(getComputedStyle(header).paddingBottom||'0');
+        header.style.paddingBottom = Math.max(0, padBottom + delta) + 'px';
+      }
+    };
+    adjust();
+    window.addEventListener('resize', adjust);
+    window.addEventListener('ui-scale-change', adjust as any);
+    return ()=>{ window.removeEventListener('resize', adjust); window.removeEventListener('ui-scale-change', adjust as any); };
   }, [open]);
 
   // Derive final sections list with Support section appended last (always)

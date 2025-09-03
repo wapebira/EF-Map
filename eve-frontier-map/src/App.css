@@ -85,24 +85,25 @@ button:focus-visible,
   border-radius: 6px;
   padding: 2px 6px;
   background: #000;
-  text-shadow: 0 1px 0 #000, 0 0 6px rgba(255,255,255,.12);
+  /* Removed: container no longer expands; only .ef-toolbar-shifting translates when help is open */
+  /* :root.help-open .ef-top-toolbar { padding-left: calc(12px + (var(--help-panel-width, 33vw) - var(--help-toggle-width, 0px)) + 8px); } */
   white-space: nowrap;
   user-select: none;
 }
 
 /* Context menu options inside persistent system label */
 .system-label .context-menu-options {
-  display: flex;
+  /* @media (max-width: 1200px){ :root.help-open .ef-top-toolbar { padding-left: calc(12px + (var(--help-panel-width, 40vw) - var(--help-toggle-width, 0px)) + 8px); } } */
   flex-direction: column;
   margin-top: 4px;
-  gap: 2px;
+  /* @media (max-width: 900px){ :root.help-open .ef-top-toolbar { padding-left: calc(12px + (var(--help-panel-width, 50vw) - var(--help-toggle-width, 0px)) + 8px); } } */
   pointer-events: auto;
 }
 .system-label .context-menu-item {
   font-family: inherit;
   font-size: 14px;
   font-weight: 600;
-  padding: 3px 6px;
+  /* @media (max-width: 700px){ :root.help-open .ef-top-toolbar { padding-left: calc(12px + (var(--help-panel-width, 100vw) - var(--help-toggle-width, 0px)) - 8px); } } */
   border-radius: 4px;
   background: rgba(255,255,255,0.04);
   border: 1px solid rgba(255,255,255,0.15);
