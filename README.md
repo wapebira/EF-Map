@@ -1,138 +1,160 @@
-# EVE Frontier Map Data Processing
+<div align="center">
+    <h1>EVE Frontier Interactive Map</h1>
+    <p><strong>Client‑side 3D starmap, routing & optimization tools, reachability analysis and usage stats for EVE Frontier.</strong></p>
+    <sub>React + TypeScript + Vite • Three.js custom shaders • Web Workers • Lightweight serverless (Netlify Functions) • Zero PII instrumentation</sub>
+</div>
 
-This document outlines the steps to process the raw EVE Frontier map data, which is extracted from the game's JSON files. The process involves consolidating multiple JSON files into a single file and then filtering out specific regions that are not visible in-game.
+---
 
-## Step 1: Consolidate Raw Data
+## Contents
+1. Overview  
+2. Feature Highlights  
+3. Architecture  
+4. Directory Map  
+5. Quick Start (Frontend)  
+6. Data Generation Pipeline  
+7. Reachability & Routing  
+8. Usage Metrics & Privacy  
+9. Development Workflow  
+10. Deployment Notes  
+11. Contributing  
+12. License / Attribution
 
-The first step is to consolidate the various JSON files into a single `map_data.json` file.
+---
 
-1.  **Create the consolidation script:**
-    Create a Python script named `create_map_data.py` with the following content:
+## 1. Overview
+This repository contains two loosely coupled parts:
 
-    '''python
-    import json
+* **Map / App Frontend (`eve-frontier-map/`)** – A performant WebGL (Three.js) visualization with routing (A*/Dijkstra), ship jump vs. gate differentiation, scout optimization, reachability bubble + dimming, cinematic mode, shareable routes, usage stats and optional station overlays.
+* **Data Preparation Scripts (root)** – Python utilities to transform raw universe exports into a compact SQLite + auxiliary JSON assets consumed only at build/runtime load by the frontend.
 
-    def create_map_data():
-        # Load all the raw data files
-        with open('all_solarsystems.json', 'r') as f:
-            all_solarsystems = json.load(f)
-        with open('constellation_labels.json', 'r') as f:
-            constellation_labels = {item['id']: item['label'] for item in json.load(f)}
-        with open('starmapcache.json', 'r') as f:
-            starmapcache = json.load(f)
-        with open('stellar_constellations.json', 'r') as f:
-            stellar_constellations = json.load(f)
-        with open('stellar_regions.json', 'r') as f:
-            stellar_regions = json.load(f)
-        with open('stellar_systems.json', 'r') as f:
-            stellar_systems = json.load(f)
-        with open('system_labels.json', 'r') as f:
-            system_labels = {item['id']: item['label'] for item in json.load(f)}
+Raw extraction of game files is performed by a separate toolkit:  
+➡ https://github.com/VULTUR-EveFrontier/eve-frontier-tools  
+This repo focuses on *transforming* + *serving* that data and implementing interactive features.
 
-        # Create a dictionary to hold the map data
-        map_data = {
-            'regions': {},
-            'constellations': {},
-            'solarsystems': {}
-        }
+## 2. Feature Highlights
+* Fast point‑to‑point routing (A* or Dijkstra) with waypoint chaining & optional order heuristic.
+* Ship jump vs. stargate hop visual differentiation (dashed inner core on ship arcs).
+* Scout baseline & multi‑worker optimization with savings metrics (lightyears saved & distributions).
+* Reachability analysis: unreachable dimming, in‑range highlighting, animated range bubble with camera framing.
+* Stargate selection gradient shader (accent fade ~2/3 length) with precedence rules (region highlight > selection > unreachable override).
+* Cinematic mode (global toggle) tracking entry/time independent of normal mode visuals.
+* Station overlay (optional) with intelligent scaling, focus hysteresis & depth‑correct sprites.
+* Rich anonymous usage statistics & trend charts (activation funnel, share/copy rates, optimization impact, distributions).
+* Share links (compressed route state) via short IDs stored in serverless key‑value blob storage.
+* Theme accent variants (orange / blue) – all shaders normalize brightness to keep visual balance.
 
-        # Populate regions
-        for region_id, region_data in stellar_regions.items():
-            map_data['regions'][region_id] = {
-                'name': region_data['name'],
-                'constellations': []
-            }
+## 3. Architecture
+| Layer | Purpose | Key Tech |
+|-------|---------|----------|
+| Frontend | 3D rendering, UI state, routing orchestration | React, TypeScript, Three.js, custom GLSL shaders |
+| Workers | Heavy algorithms off main thread | Web Workers (`routing_worker.ts`, `scout_optimizer_worker.ts`, others) |
+| Data Access | Lazy open + query prebuilt SQLite in-browser | `sql.js` (WASM) wrapped by `lib/sql.ts` |
+| Serverless | Shares & usage metrics | Netlify Functions using `@netlify/blobs` abstraction via `_store.js` |
+| Instrumentation | Anonymous event batching | `src/utils/usage.ts` batching + server whitelist in `usage-event.js` |
 
-        # Populate constellations
-        for const_id, const_data in stellar_constellations.items():
-            region_id = const_data['region']
-            map_data['constellations'][const_id] = {
-                'name': constellation_labels.get(const_id, f"Constellation {const_id}"),
-                'region': region_id,
-                'systems': []
-            }
-            if str(region_id) in map_data['regions']:
-                map_data['regions'][str(region_id)]['constellations'].append(const_id)
+Provider portability: Persistence access is isolated; future Cloudflare KV/D1 migration only needs swapping internals of `_store.js`.
 
-        # Populate solar systems
-        for system_id, system_data in stellar_systems.items():
-            const_id = system_data['constellation']
-            map_data['solarsystems'][system_id] = {
-                'name': system_labels.get(system_id, f"System {system_id}"),
-                'constellation': const_id,
-                'neighbours': all_solarsystems.get(str(system_id), {}).get('neighbours', [])
-            }
-            if str(const_id) in map_data['constellations']:
-                map_data['constellations'][str(const_id)]['systems'].append(system_id)
+## 4. Directory Map
+```
+root/
+    create_map_data.py        # Consolidate & transform raw exports -> SQLite/JSON inputs
+    filter_map_data.py        # Post-process filters (hiding regions, etc.)
+    verify_db.py              # Sanity checks for generated DB
+    docs/decision-log.md      # Running architectural / feature decisions
+    eve-frontier-map/         # Frontend app (see below)
+        src/
+            App.tsx               # Core scene + global state + instrumentation bridges
+            components/           # Panels & UI modules (Routing, Scout, Reachability, Stats, etc.)
+            modules/RouteRibbon.ts# Custom ribbon geometry + shaders
+            utils/usage.ts        # Client event batching (sole origin of usage events)
+            workers/              # Optimization / routing workers
+            netlify/functions/    # Serverless endpoints (share, usage, stats)
+        public/map_data.db      # Generated SQLite universe data (do not edit manually)
+```
 
-        # Write the consolidated data to a file
-        with open('map_data.json', 'w') as f:
-            json.dump(map_data, f, indent=4)
+## 5. Quick Start (Frontend)
+Prereqs: Node 18+ (LTS recommended), npm.
 
-    if __name__ == '__main__':
-        create_map_data()
-    '''
+```bash
+cd eve-frontier-map
+npm install
+npm run dev   # Vite dev server
+# open http://localhost:5173 (default) in a modern Chromium / Firefox browser
+```
 
-2.  **Run the script:**
-    Execute the script from your terminal:
-    '''bash
-    python create_map_data.py
-    '''
-    This will generate the `map_data.json` file.
+Production build:
+```bash
+npm run build   # Outputs to dist/
+```
 
-## Step 2: Filter Map Data
+## 6. Data Generation Pipeline
+Raw extraction lives elsewhere (➡ `eve-frontier-tools`). Once you have updated raw JSONs, run:
 
-The next step is to add a `"hidden": true` flag to regions, constellations, and solar systems that should not be displayed.
+```bash
+python create_map_data.py   # Build consolidated structures / relational fields
+python filter_map_data.py   # Apply hide / pruning rules
+python verify_db.py         # Optional validations
+```
 
-1.  **Create the filtering script:**
-    Create a Python script named `filter_map_data.py` with the following content:
+Outputs: A new / updated `map_data.db` (or versioned `map_data_v2.db` when schema additions like stations are introduced). If schema changes, bump the filename to bust caches & keep backward compatibility.
 
-    '''python
-    import json
+Station data: When `map_data_v2.db` contains `stations` table `{ system_id TEXT PRIMARY KEY, station_count INTEGER }`, the frontend auto-enables the toggle (default off) without needing code changes.
 
-    def filter_map_data():
-        with open('map_data.json', 'r') as f:
-            map_data = json.load(f)
+## 7. Reachability & Routing
+* Pathfinding: Gate network + optional ship jump arcs (cost model switchable: distance (fuel) vs. hops).
+* Large ship jumps are rendered as smoothly sampled quadratic curves (adaptive sampling) with dashed ship-only core.
+* Caches: Spatial grids & neighbor cache cleared when jump distance cell size changes (see `routing_worker.ts`).
+* Reachability Modes: unreachable dimming, in-range accenting, animated bubble. Precedence order ensures region highlighting & planet count modes supersede selection gradient & in-range coloring safely.
 
-        # Regions to hide
-        hidden_regions = [
-            "14000001", "14000002", "14000003", "14000004", "14000005",
-            "12000001", "12000002", "12000003", "12000004", "12000005",
-            "10000004"
-        ]
+## 8. Usage Metrics & Privacy
+* All events emitted only via `usage.ts` (no ad-hoc tracking elsewhere) → prevents double counting.
+* Server (`usage-event.js`) whitelists types; unknown events rejected (HTTP 400) and logged in dev.
+* Time metrics: client sends sums (e.g., `session_time`, `cinematic_time`, `first_route_delay`) – server aggregates sum + count keys enabling averages in UI.
+* No PII / no user identifiers; only aggregate counters & coarse bucket labels.
+* Aggregates served via `stats` function; UI (`StatsPage.tsx`) renders charts + derived rates.
 
-        # Add "hidden": true to the specified regions
-        for region_id in hidden_regions:
-            if region_id in map_data['regions']:
-                map_data['regions'][region_id]['hidden'] = True
-                # Also hide the constellations and systems in this region
-                for const_id in map_data['regions'][region_id]['constellations']:
-                    if str(const_id) in map_data['constellations']:
-                        map_data['constellations'][str(const_id)]['hidden'] = True
-                        for system_id in map_data['constellations'][str(const_id)]['systems']:
-                            if str(system_id) in map_data['solarsystems']:
-                                map_data['solarsystems'][str(system_id)]['hidden'] = True
+## 9. Development Workflow
+1. Implement feature in isolated module (shader / worker / panel).  
+2. Add instrumentation only if a new behavior needs measurement – extend `EVENT_MAP` accordingly.  
+3. Run `npm run build` before committing to catch type or bundling issues.  
+4. Update `docs/decision-log.md` for non-trivial architectural or UX decisions.  
+5. Keep public APIs (helpers, global setters like `__efSetCinematic`) stable unless log documents change & consumers updated.
 
-        with open('map_data.json', 'w') as f:
-            json.dump(map_data, f, indent=4)
+### Common Scripts
+| Command | Description |
+|---------|-------------|
+| `npm run dev` | Vite dev server with HMR. |
+| `npm run build` | Type check + production build. |
+| `npm run preview` | (If added) Preview dist output locally. |
 
-    if __name__ == '__main__':
-        filter_map_data()
-    '''
+## 10. Deployment Notes
+Current: Netlify (Functions + Blobs).  
+Future (planned): Cloudflare Workers + KV (helper abstraction already present – avoid direct provider APIs in new code).  
+Serverless functions are stateless and small (<150 LoC). Any state persistence uses `_store.js` which selects credential strategy or memory fallback locally.
 
-2.  **Run the script:**
-    Execute the script from your terminal:
-    '''bash
-    python filter_map_data.py
-    '''
-    This will update `map_data.json` with the `"hidden": true` flags.
+Cache Busting: When DB schema changes, increment filename (e.g., `map_data_v2.db`) and document in decision log. Frontend lazily loads whichever name it expects; avoid breaking existing deployed bundles.
 
-## Step 3: Cleanup (Optional)
+## 11. Contributing
+Lightweight guidelines:
+* Open an issue (or add to decision log) for substantial feature proposals.
+* Keep diffs minimal & localized; avoid broad refactors piggy-backing on feature PRs.
+* Maintain shader performance: throttle progress messages in workers (≤5Hz).  
+* Add comments for any new global (`window.__efSomething`) and mirror established naming.
 
-After successfully generating the filtered `map_data.json`, you can delete the intermediate files:
+## 12. License / Attribution
+Project license: See `LICENSE` (MIT unless otherwise specified).  
+Raw game data / universe structure is derived from EVE Frontier assets (CCP Games) – this repository redistributes only transformed, non-proprietary derivative metadata suitable for visualization and does not include original proprietary binaries.  
+Original extraction tools: https://github.com/VULTUR-EveFrontier/eve-frontier-tools (credit & thanks).  
 
-*   `create_map_data.py`
-*   `filter_map_data.py`
-*   The original raw JSON files (`all_solarsystems.json`, etc.)
+---
+### Quick FAQ
+**Why SQLite in the browser?** Fast relational lookups (`sql.js` WASM) + single fetch; avoids large JSON parse overhead & retains schema evolution flexibility.  
+**Why separate workers?** Keeps routing / optimization responsive and prevents animation hitching.  
+**Is any personal data collected?** No. Only aggregate usage counters and coarse bucket metrics; no IDs or IP storage.  
+**Can I regenerate the DB later?** Yes – re-run the Python scripts with updated raw exports; bump DB filename if schema changes.
 
-This will leave you with the final `map_data.json` file.
+---
+Feel free to open issues for feature requests, visual polish ideas, or performance concerns.
+
+Happy mapping o7
