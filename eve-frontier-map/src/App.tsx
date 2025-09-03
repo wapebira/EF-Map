@@ -3254,6 +3254,32 @@ function App() {
     }
   };
 
+  // Layout effect: when uiScale changes, adjust default drawer positions if user hasn't moved them manually.
+  // Placed BEFORE any conditional early return to preserve stable hook order.
+  useLayoutEffect(()=>{
+    if(!isLoaded) return; // do nothing until loaded
+    try {
+      const scale = uiScale; // used for computation of left offset
+      const railBaseLeft = 10; // from CSS .ef-rail left
+      const railBaseWidth = 74 + 12 + 12; // approximate rail width incl padding
+      const gap = 6; // gap between rail and drawer
+      const computedRailWidth = railBaseWidth * scale;
+      const desiredDrawerLeft = Math.round(railBaseLeft * scale + computedRailWidth + gap);
+      const drawerIds = ['routing','cinematic'];
+      drawerIds.forEach(id=>{
+        const storageKey = 'panel-pos:drawer-'+id;
+        if(localStorage.getItem(storageKey)) return; // user moved; skip auto adjust
+        const el = document.querySelector(`.ef-drawer[data-panel-id="${id}"]`) as HTMLElement | null;
+        if(el){ el.style.left = desiredDrawerLeft + 'px'; }
+      });
+      const legendKey = 'panel-pos:planet-legend';
+      if(!localStorage.getItem(legendKey)){
+        const legend = document.querySelector('.ef-secondary-panel') as HTMLElement | null;
+        if(legend){ legend.style.left = desiredDrawerLeft + 'px'; }
+      }
+    } catch {/* ignore positioning errors */}
+  }, [uiScale, openPanels, isPlanetCountActive, isLoaded]);
+
   if (!isLoaded) {
     return <LoadingScreen progress={loadingProgress} status={loadingStatus} />;
   }
@@ -3262,32 +3288,6 @@ function App() {
   // Left cluster: search box + rail + drawers (PanelDrawer/Secondary panels) wrapped in ef-left-cluster.
   // Toolbar: scale applied directly to .ef-top-toolbar root (not inner content) for consistent background sizing.
 
-  // Layout effect: when uiScale changes, adjust default drawer positions if user hasn't moved them manually.
-  useLayoutEffect(()=>{
-    // For each drawer (routing, cinematic) if no stored panel-pos:* then reposition relative to scaled rail width.
-    try {
-      const scale = uiScale; // already applied to CSS var; used for computation of left offset
-      const railBaseLeft = 10; // from CSS .ef-rail left
-      const railBaseWidth = 74 + 12 + 12; // button width (74) + horizontal padding (approx) left/right (10+10 but allow gap) -> using 98; keep explicit to avoid DOM query
-      const gap = 6; // visual gap between rail and drawer (original left 76 vs rail left 10 -> diff 66; we recompute)
-      const computedRailWidth = railBaseWidth * scale;
-      // Original drawer left was 76px: 10 (rail left) + 74 (button width) - 8 margin fudge.
-      const desiredDrawerLeft = Math.round(railBaseLeft * scale + computedRailWidth + gap);
-      const drawerIds = ['routing','cinematic'];
-      drawerIds.forEach(id=>{
-        const storageKey = 'panel-pos:drawer-'+id;
-        if(localStorage.getItem(storageKey)) return; // user moved; skip
-        const el = document.querySelector(`.ef-drawer[data-panel-id="${id}"]`) as HTMLElement | null;
-        if(el){ el.style.left = desiredDrawerLeft + 'px'; }
-      });
-      // Planet legend secondary panel
-      const legendKey = 'panel-pos:planet-legend';
-      if(!localStorage.getItem(legendKey)){
-        const legend = document.querySelector('.ef-secondary-panel') as HTMLElement | null;
-        if(legend){ legend.style.left = desiredDrawerLeft + 'px'; }
-      }
-    } catch {/* ignore positioning errors */}
-  }, [uiScale, openPanels, isPlanetCountActive]);
 
   return (
     <>
