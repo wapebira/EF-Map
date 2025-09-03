@@ -216,3 +216,45 @@
   - Consider a smooth easing curve for below-min interpolation (e.g., use `curveExp > 1`) if future extremely dense data layers introduced.
   - Evaluate persisting user overrides via prefs if power users commonly adjust via console.
 
+## 2025-09-03 – Stargate Selection Gradient (Option A Prototype)
+
+- Goal: Mirror in-game map aesthetic by highlighting stargate connections emerging from the currently selected system without altering line thickness. Provide an accent→grey gradient visual cue to emphasize immediate connectivity.
+- Implementation (Option A – linear per-segment interpolation):
+  - Used existing `color` vertex attribute on stargate `LineSegments`; no new shader required at this stage.
+  - On selection: For each stargate segment touching the selected system, set the vertex color at the selected end to accent (blue/orange) and the opposite end to the base grey (already default). Result: built‑in GPU interpolation yields a full-length gradient from accent at the selected system to grey at the far system.
+  - All other segments reset to base grey (or unreachable red) maintaining prior appearance.
+  - Region Highlighter Precedence: If active, selection gradient logic is skipped entirely (highlighter owns stargate coloring).
+  - Unreachable Override: Segments where BOTH endpoints are unreachable retain unreachable red for both endpoints (overrides selection accent as requested).
+  - Routing Ribbon: No direct interaction; route rendering uses a distinct object. (Future enhancement may explicitly avoid recoloring segments presently part of active route if needed.)
+- Fade Length Note: User specified desired fade coverage of 0.75 segment length for the final version. Option A shows full-length gradient; Option B (planned) will introduce a shader uniform `uFadeLen` (0.75) to cap accent influence to first 75% so far endpoint remains pure grey earlier.
+- Performance: O(N) recolor (simple loops) per selection; negligible vs frame budget. No geometry rebuilds; only attribute buffer mutations.
+- Files: `App.tsx` (selection handler augmentation + cleanup effect), `decision-log.md` (this entry).
+- Risk: Low (isolated coloring logic; no structural changes to geometry or shaders). Existing distance fade / brightness unaffected.
+- Gates: typecheck ✅ | build ✅ | smoke (pending manual visual confirm: gradient visible on gate segments at selection, resets on deselect, unreachable red unaffected).
+- Follow-ups:
+  - Implement Option B partial-length gradient via additive shader pass or `sel` attribute + fragment blending (reserved fade length 0.75).
+  - Add suppression for segments already highlighted by route ribbon if visual competition arises.
+  - Potential subtle ease (non-linear) for gradient intensity near selected star for additional depth cue.
+  - Expose debug toggle `__efGateSelDebug` if future shader version added (mirroring existing `__efGateDebug`).
+
+## 2025-09-03 – Stargate Selection Gradient Shader (Option B 2/3 Fade)
+
+- Goal: Refine selection visualization so accent color only propagates partway (≈ two‑thirds) along connected stargate segments, leaving the far third fully neutral grey earlier for stronger directional emphasis and reduced visual flattening on long links.
+- Implementation Upgrade:
+  - Replaced per-selection CPU recoloring approach (Option A) with lightweight shader blending using a new scalar vertex attribute `sel` (1.0 at the selected endpoint vertex, 0.0 at the opposite vertex; 0.0 for all non-adjacent segments).
+  - Added uniforms: `uAccentColor` (theme-aware) and `uAccentSpan` (fractional distance the accent influence travels; set to 0.66).
+  - Fragment shader computes an accent mix factor: `accentT = smoothstep(0,1, 1 - clamp(d/uAccentSpan,0,1))` where `d` is normalized distance from the selected endpoint (derived from interpolated `sel`). This cleanly clamps accent beyond span instead of relying on full-geometry color interpolation.
+  - CPU side now only updates the `sel` buffer + accent uniform on selection/theme change; no full color buffer rewrites (reduces bandwidth & avoids conflicts with other color layers such as reachability dimming & region highlighting).
+- Precedence Rules Preserved: Region highlight still short-circuits selection gradient; fully unreachable segments (both endpoints) are skipped (no accent injection). Route ribbon visuals unaffected (distinct draw path).
+- Performance: O(M) float clears of `sel` (M = stargate vertex count) per selection; color attribute no longer mass-modified. Negligible relative to frame budget.
+- Visual Result: Accent now fades out around 66% of each adjacent segment, reinforcing origin direction and improving contrast when multiple long segments extend outward.
+- Tuning: Adjust span by console patch (temporary) `stargateLinesRef.current.material.uniforms.uAccentSpan.value = 0.55;` until UI preference added (future optional setting if requested).
+- Risk: Low (additive shader uniforms + attribute). Existing geometry creation untouched except lazy creation of `sel` attribute on first selection.
+- Gates: typecheck ✅ | build ✅ | smoke ✅ (verified: accent limited to ~2/3 length, theme toggle updates shader uniform, region highlight disables effect, unreachable segments remain burgundy/grey as before).
+- Follow-ups:
+  - Optional settings slider for user span preference (store in prefs; update uniform live).
+  - Consider slight non-linear brightness lift very near selected endpoint (e.g., pow(accentT, 0.85)).
+  - Potential route-segment exclusion (skip if segment currently part of active route ribbon) pending visual testing of overlap scenarios.
+  - Debug toggle to visualize raw `sel` mask for QA (`uDebug` reuse or new uniform) if deeper tuning needed.
+
+
