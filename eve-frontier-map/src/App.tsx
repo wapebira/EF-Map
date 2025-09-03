@@ -3571,30 +3571,27 @@ function App() {
       // (Previous regression added the label directly to the scene at (0,0,0) causing it to appear far away.)
       if(sceneRef.current){
         const anchor = new THREE.Object3D();
-        anchor.position.set(hoveredSystem.position.x, hoveredSystem.position.y, hoveredSystem.position.z);
+        const tPos = getTransformedPosition(hoveredSystem.position as any);
+        anchor.position.set(tPos.x, tPos.y, tPos.z);
         anchor.add(menuObj);
         sceneRef.current.add(anchor);
-        // Offset the menu slightly to the right (and a touch upward) of the star in screen space.
+        // Screen-space offset (right of star). Compute in world units using camera distance & FOV.
         try {
           const cam = cameraRef.current as THREE.PerspectiveCamera | null;
           const rend = rendererRef.current as THREE.WebGLRenderer | null;
           if(cam && rend){
-            const distance = cam.position.distanceTo(anchor.position);
-            const vFov = THREE.MathUtils.degToRad(cam.fov); // vertical fov in radians
-            const viewportHeight = rend.domElement.clientHeight || 1;
-            const worldPerPixelY = (2 * Math.tan(vFov/2) * distance) / viewportHeight;
+            const viewportH = rend.domElement.clientHeight || window.innerHeight || 1;
+            const dist = cam.position.distanceTo(anchor.position);
+            const vFov = THREE.MathUtils.degToRad(cam.fov);
+            const worldPerPixelY = (2 * Math.tan(vFov/2) * dist) / viewportH;
             const worldPerPixelX = worldPerPixelY * cam.aspect;
-            const desiredPxRight = 14; // horizontal gap to right of star
-            const desiredPxUp = 2;     // slight upward nudge
-            // Camera basis vectors
-            const forward = new THREE.Vector3(); cam.getWorldDirection(forward); // -Z forward
+            const pxRight = 8; // tuned gap
+            const forward = new THREE.Vector3(); cam.getWorldDirection(forward);
             const upDir = cam.up.clone().normalize();
             const rightDir = new THREE.Vector3().crossVectors(forward, upDir).normalize();
-            // Apply offset to menuObj local position so subsequent star transforms still correct
-            menuObj.position.addScaledVector(rightDir, worldPerPixelX * desiredPxRight);
-            menuObj.position.addScaledVector(upDir, worldPerPixelY * desiredPxUp);
+            menuObj.position.addScaledVector(rightDir, worldPerPixelX * pxRight);
           }
-        } catch {/* non-fatal */}
+        } catch {/* ignore offset errors */}
       }
     };
     currentRenderer.domElement.addEventListener('contextmenu', onContextMenu);
