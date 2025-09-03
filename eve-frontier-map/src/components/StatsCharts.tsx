@@ -15,25 +15,31 @@ export const chartColors = [
 interface SeriesPoint { x: string; y: number | null; }
 interface LineSeries { id: string; label?: string; points: SeriesPoint[]; color?: string; }
 
-interface LineChartProps { width?: number; height?: number; series: LineSeries[]; yLabel?: string; normalize?: boolean; showDots?: boolean; strokeWidth?: number; }
+interface LineChartProps { width?: number; height?: number; series: LineSeries[]; yLabel?: string; normalize?: boolean; showDots?: boolean; strokeWidth?: number; headroomPct?: number; }
 
-export const LineChart: React.FC<LineChartProps> = ({ width=360, height=160, series, yLabel, normalize=false, showDots=true, strokeWidth=2 }) => {
-  const padding = { l: 36, r: 8, t: 10, b: 22 };
+export const LineChart: React.FC<LineChartProps> = ({ width=360, height=160, series, yLabel, normalize=false, showDots=true, strokeWidth=2, headroomPct=0.08 }) => {
+  // Increased right/top padding to avoid clipping final point & yLabel overlapping first data point
+  const padding = { l: 40, r: 16, t: 22, b: 26 };
   const innerW = width - padding.l - padding.r;
   const innerH = height - padding.t - padding.b;
   const allX = series[0]?.points.map(p=>p.x) || [];
   const valueMax = useMemo(()=>{
     if(normalize) return 1;
     let m = 0; series.forEach(s=> s.points.forEach(p=>{ if(p.y!==null && p.y>m) m=p.y; }));
-    return m || 1;
+    // Add configurable headroom so top-most line doesn't collide with y-axis label or border
+    return (m || 1) * (1 + headroomPct);
   }, [series, normalize]);
   const pathFor = (s:LineSeries) => {
     const pts = s.points;
     return pts.map((p,i)=>{
-      const x = padding.l + (i/(Math.max(pts.length-1,1)))*innerW;
+      // Slightly inset first & last points (2px) to guarantee stroke + dot fully visible
+  const spanCount = Math.max(pts.length-1,1);
+      const inset = 2; // px
+      const usableW = innerW - inset*2;
+      const adjX = padding.l + inset + (i/spanCount)*usableW;
       const rawY = p.y===null? null : (normalize? (p.y! / (Math.max(...s.points.map(pp=>pp.y||0))||1)) : p.y!);
       const y = rawY===null? null : (padding.t + innerH - (rawY/valueMax)*innerH);
-      return (i===0? `M ${x} ${y??0}`: (y===null? '': ` L ${x} ${y}`));
+      return (i===0? `M ${adjX} ${y??0}`: (y===null? '': ` L ${adjX} ${y}`));
     }).join('');
   };
   // Y axis ticks (5)
@@ -49,15 +55,15 @@ export const LineChart: React.FC<LineChartProps> = ({ width=360, height=160, ser
         </g>
       ); })}
       {/* X labels */}
-      {allX.map((x,i)=>{ const posX= padding.l + (i/(Math.max(allX.length-1,1)))*innerW; return (
+      {allX.map((x,i)=>{ const inset=2; const spanCount=Math.max(allX.length-1,1); const usableW= innerW - inset*2; const posX= padding.l + inset + (i/spanCount)*usableW; return (
         <text key={x} x={posX} y={height-6} fontSize={10} textAnchor="middle" fill="rgba(255,255,255,0.55)">{x.slice(5)}</text>
       ); })}
       {series.map((s,si)=>{
         const color = s.color || chartColors[si % chartColors.length];
   return <path key={s.id} d={pathFor(s)} fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinejoin="round" strokeLinecap="round" />;
       })}
-      {showDots && series.map((s,si)=>{ const color = s.color || chartColors[si % chartColors.length]; return s.points.map((p,i)=>{ if(p.y===null) return null; const seriesMax = normalize? Math.max(...s.points.map(pp=>pp.y||0))||1 : valueMax; const val = normalize? (p.y! / seriesMax) * valueMax : p.y!; const x= padding.l + (i/(Math.max(s.points.length-1,1)))*innerW; const y = padding.t + innerH - (val/valueMax)*innerH; return <circle key={s.id+'_'+i} cx={x} cy={y} r={2.5} fill={color} />; }); })}
-      {yLabel && <text x={padding.l} y={12} fontSize={11} fill="rgba(255,255,255,0.75)" fontWeight={600}>{yLabel}</text>}
+      {showDots && series.map((s,si)=>{ const color = s.color || chartColors[si % chartColors.length]; return s.points.map((p,i)=>{ if(p.y===null) return null; const seriesMax = normalize? Math.max(...s.points.map(pp=>pp.y||0))||1 : valueMax; const val = normalize? (p.y! / seriesMax) * valueMax : p.y!; const inset=2; const spanCount=Math.max(s.points.length-1,1); const usableW= innerW - inset*2; const x= padding.l + inset + (i/spanCount)*usableW; const y = padding.t + innerH - (val/valueMax)*innerH; return <circle key={s.id+'_'+i} cx={x} cy={y} r={2.5} fill={color} />; }); })}
+      {yLabel && <text x={padding.l} y={14} fontSize={11} fill="rgba(255,255,255,0.75)" fontWeight={600}>{yLabel}</text>}
     </svg>
   );
 };

@@ -130,7 +130,7 @@ const StatsPage: React.FC = () => {
     return [
       mk('page_loads','Page Loads', chartColors[0]),
       mk('p2p_routes','P2P Routes', chartColors[1]),
-      mk('scout_baselines','Baselines', chartColors[3]) // green for distinction
+      mk('scout_baselines','ScoutOptimizer Baselines', chartColors[3]) // renamed label only for legend clarity
     ];
   }, [daily]);
   // Chart 2: Engagement rates (share creation, route copy, cinematic usage) as percentages
