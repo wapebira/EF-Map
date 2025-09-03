@@ -1,59 +1,72 @@
 import React from 'react';
+// Converted to use shared PanelDrawer in App; this component now only renders inner body.
 
 export interface RegionStats {
   systems_total: number;
   systems_gated: number;
   systems_isolated: number;
-  gates_total: number;
-  avg_gate_length_ly: number;
-  hull_area: number;
-  density_systems_per_area: number;
-  mst_length_gated_ly: number;
-  mst_length_all_ly: number;
-  max_span_edge_ly: number;
+  connectivity_pct: number;
+  gate_links: number;
+  avg_gate_distance_ly: number;
+  avg_gate_degree: number;
+  footprint_area_ly2: number;
+  system_density_per_100_ly2: number;
+  est_gated_distance_ly: number;
+  est_gated_gate_jumps: number;
+  est_all_distance_ly: number;
+  all_gate_jumps: number;
+  ship_jumps: number;
+  ship_jump_ly: number;
+  total_jumps: number;
+  min_jump_range_ly: number;
+  total_planets: number;
+  avg_planets_per_system: number;
+  has_station: boolean;
 }
 
-interface Props {
-  regionName: string;
-  stats: RegionStats | null;
-  onClose: ()=>void;
-}
+interface Props { regionName:string; stats:RegionStats|null; }
 
-// Light styled card matching existing panel aesthetic (reuse panel class names if present)
-const RegionStatsCard: React.FC<Props> = ({ regionName, stats, onClose }) => {
+// Body content (wrapped by PanelDrawer in App)
+const RegionStatsCard: React.FC<Props> = ({ regionName, stats }) => {
   return (
-    <div className="ef-panel" style={{ position:'absolute', top: 90, left: 12, minWidth:260, zIndex:40, pointerEvents:'auto'}}>
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:4 }}>
-        <h3 style={{ fontSize: '14px', margin:0 }}>{regionName || 'Region'} Stats</h3>
-        <button onClick={onClose} style={{ background:'none', border:'none', color:'inherit', cursor:'pointer', fontSize:12 }}>✕</button>
-      </div>
-      {!stats && <div style={{ fontSize:12, opacity:0.7 }}>Computing…</div>}
+    <div style={{ paddingTop:4 }}>
+      {!stats && <div style={{ fontSize:12, opacity:0.75, padding:'2px 0 6px' }}>Computing…</div>}
       {stats && (
         <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
           <tbody>
-            <StatRow label="Systems" value={stats.systems_total} />
-            <StatRow label="Gated" value={stats.systems_gated} />
-            <StatRow label="Isolated" value={stats.systems_isolated} />
-            <StatRow label="Gates" value={stats.gates_total} />
-            <StatRow label="Avg Gate LY" value={fmt(stats.avg_gate_length_ly)} />
-            <StatRow label="Hull Area" value={fmt(stats.hull_area)} />
-            <StatRow label="Density" value={fmt(stats.density_systems_per_area)} />
-            <StatRow label="MST Gated LY" value={fmt(stats.mst_length_gated_ly)} />
-            <StatRow label="MST All LY" value={fmt(stats.mst_length_all_ly)} />
-            <StatRow label="Max Span LY" value={fmt(stats.max_span_edge_ly)} />
+              <StatRow label="Systems" value={stats.systems_total} />
+              <StatRow label="Gated Systems" value={stats.systems_gated} />
+              <StatRow label="Isolated Systems" value={stats.systems_isolated} />
+              <StatRow label="Connectivity %" value={fmt(stats.connectivity_pct)} />
+              <StatRow label="Gate Links" value={stats.gate_links} />
+              <StatRow label="Avg Gate Dist (ly)" value={fmt(stats.avg_gate_distance_ly)} />
+              <StatRow label="Avg Gate Links/System" value={fmt(stats.avg_gate_degree)} />
+              <StatRow label="Footprint (ly²)" title="Convex hull area (x,z) enclosing all systems." value={fmt(stats.footprint_area_ly2)} />
+              <StatRow label="Systems /100 ly²" title="Scaled density: systems per 100 square light‑years." value={fmt(stats.system_density_per_100_ly2)} />
+              <StatRow label="Gated Distance (ly)" title="Approx gated traversal distance (MST lower bound)." value={fmt(stats.est_gated_distance_ly)} />
+              <StatRow label="Gated Gate Jumps" title="Gate hops across gated systems (lower bound n_gated-1)." value={stats.est_gated_gate_jumps} />
+              <StatRow label="All Distance (ly)" title="Gated distance plus isolated attachments (approx)." value={fmt(stats.est_all_distance_ly)} />
+              <StatRow label="Gate Jumps" title="Gate jumps portion within all systems (lower bound)." value={stats.all_gate_jumps} />
+              <StatRow label="Ship Jumps" title="Ship jumps (isolated attachments counted once each)." value={stats.ship_jumps} />
+              <StatRow label="Ship Jump LY" title="Sum of ship jump distances (attachments)." value={fmt(stats.ship_jump_ly)} />
+              <StatRow label="Total Jumps" title="Gate + ship jumps (lower bound)." value={stats.total_jumps} />
+              <StatRow label="Min Jump Range (ly)" title="Minimum ship jump range to ensure reachability (multi‑hop allowed)." value={fmt(stats.min_jump_range_ly)} />
+              <StatRow label="Total Planets" value={stats.total_planets} />
+              <StatRow label="Avg Planets / Sys" value={fmt(stats.avg_planets_per_system)} />
+              <StatRow label="Has Station" title="At least one station present in region." value={stats.has_station ? 'Yes':'No'} />
           </tbody>
         </table>
       )}
-      <div style={{ marginTop:6, fontSize:10, opacity:0.55, lineHeight:1.3 }}>
-        MST lengths approximate minimum coverage; full optimal path (TSP) will be longer. Area from convex hull (x,z projection).
+      <div style={{ marginTop:8, fontSize:10, opacity:0.55, lineHeight:1.35 }}>
+        {regionName || 'Region'}: connectivity lengths are approximate lower bounds (gate MST + greedy isolated attachments). Area from convex hull (x,z projection).
       </div>
     </div>
   );
 };
 
-const StatRow: React.FC<{label:string; value: number|string}> = ({ label, value }) => (
+const StatRow: React.FC<{label:string; value: number|string; title?:string}> = ({ label, value, title }) => (
   <tr>
-    <td style={{ padding:'2px 4px', opacity:0.75 }}>{label}</td>
+  <td style={{ padding:'2px 4px', opacity:0.75 }} title={title}>{label}</td>
     <td style={{ padding:'2px 4px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{value}</td>
   </tr>
 );

@@ -88,6 +88,7 @@ const EVENT_MAP = {
   reachability_inrange_off: { counters: ['reachability_inrange_off'] },
   reachability_range_bucket: { countersDynamic: (b)=> { const v=b.bucket; const allowed=['rng_lt_10','rng_10_25','rng_25_50','rng_50_100','rng_gt_100']; return allowed.includes(v)? [v]: []; } }
   , region_stats_view: { counters: ['region_stats_views'] }
+  , compare_regions_open: { counters: ['compare_regions_opens'] }
 };
 
 // Schema versioning for aggregate snapshots.

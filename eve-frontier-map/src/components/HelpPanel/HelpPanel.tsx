@@ -159,6 +159,22 @@ const baseSections: SectionDef[] = [
           <p>When planet counts are ON, only the highlighted region gets the planet-count color gradient; other regions desaturate to a neutral white so you can focus on intra-region variance. Turn region highlight OFF to view the planet gradient globally.</p>
         ),
       },
+      {
+        id: 'region-stats-window',
+        title: 'Region Stats Window',
+        content: (
+          <div>
+            <p>When you click a system (or a region name in the Compare Regions table) a compact Region Stats window can appear showing a snapshot of metrics for that single region: system counts, gated vs isolated distribution, connectivity %, representative distance aggregates, jump estimates, planet totals and averages, and station presence. Tooltips on most labels provide precise definitions or formulas—hover (desktop) or long‑press/focus (touch) for details.</p>
+            <ul style={{ paddingLeft:'18px', margin:'6px 0' }}>
+              <li><strong>Purpose:</strong> Quick at‑a‑glance health & structure summary of the current highlighted region without leaving the map context.</li>
+              <li><strong>Auto‑update:</strong> Selecting a system in a different region (or choosing a region via the comparison table) refreshes the snapshot instantly.</li>
+              <li><strong>Complement to Highlight:</strong> Region highlight gives spatial outline; the stats window supplies quantitative context.</li>
+              <li><strong>Low overhead:</strong> Values come from a cached computation—opening it repeatedly is inexpensive.</li>
+            </ul>
+            <p style={{ marginTop:'6px' }}>Use Region Stats for a focused inspection; use Compare Regions (below) when you want to rank or scan multiple regions across the same metrics.</p>
+          </div>
+        )
+      },
     ],
   },
   {
@@ -226,7 +242,12 @@ const baseSections: SectionDef[] = [
         id: 'p2p-algorithms',
         title: 'Algorithms (A* vs Dijkstra)',
         content: (
-          <p><span className="code-inline">A*</span> uses a heuristic to more quickly converge on the target. <span className="code-inline">Dijkstra</span> explores uniformly and can be slower on large graphs. Choose A* for most cases unless validating path optimality under unusual constraints.</p>
+          <div>
+            <p><span className="code-inline">A*</span> uses a heuristic to more quickly converge on the target. <span className="code-inline">Dijkstra</span> explores uniformly and can be slower on large graphs.</p>
+            <p><strong>Quick / Basic (A*):</strong> Gives you a solid route fast—ideal for short trips, experimentation, or when you just need a workable path immediately.</p>
+            <p><strong>Advanced / Thorough (Dijkstra):</strong> Systematically expands every cheaper partial path without directional bias. That exhaustive ordering often surfaces a route with lower total lightyears (fuel) and/or fewer or shorter ship jumps than the quicker A* result—most noticeable on longer or branching routes.</p>
+            <p><strong>Trade‑off:</strong> Dijkstra takes longer (the “wandering” is deliberate exploration) but can yield meaningful fuel savings. Mental model: A* says “head roughly that way and refine”; Dijkstra says “exhaustively check by true cost so nothing cheaper is skipped.” Use A* for speed; switch to Dijkstra when squeezing out minimum fuel matters.</p>
+          </div>
         ),
       },
       {
@@ -523,6 +544,44 @@ const baseSections: SectionDef[] = [
               <li><strong>Performance:</strong> Lightweight sprite layer; safe to leave enabled—icons auto hide when zoomed far out.</li>
             </ul>
             <p style={{marginTop:'6px'}}><em>Note:</em> If the newer station-enabled database isn't available yet, toggling does nothing until it loads (fails gracefully).</p>
+          </div>
+        )
+      }
+    ]
+  },
+  {
+    id: 'compare-regions',
+    title: 'Compare Regions',
+    subsections: [
+      {
+        id: 'compare-overview',
+        title: 'Overview & Workflow',
+        content: (
+          <div>
+            <p>The Compare Regions panel lets you scan and rank all regions across a shared metrics set (system counts, isolation, connectivity %, distances, jump estimates, planets, stations). It is <strong>resizable</strong>; drag its edges or corners to enlarge for wide multi‑column viewing.</p>
+            <ul style={{ paddingLeft:'18px', margin:'6px 0' }}>
+              <li><strong>Load / Refresh:</strong> Click the button to compute or recompute metrics (cached; incremental refresh is fast).</li>
+              <li><strong>Sorting:</strong> Click any header to sort. Clicking again toggles ascending / descending.</li>
+              <li><strong>Tooltips:</strong> Hover headers or values for precise definitions (mirrors Region Stats tooltips where applicable).</li>
+              <li><strong>Row Highlight:</strong> Click any cell to visually highlight that entire row (helps track the region name when scanning wide tables).</li>
+              <li><strong>Select Region:</strong> Click the region name cell to also highlight that region on the map and open/refresh the Region Stats window.</li>
+              <li><strong>Responsive Layout:</strong> Panel remembers its last size; reopening restores your preferred dimensions.</li>
+            </ul>
+            <p style={{ marginTop:'6px' }}>Use this table to identify candidates (e.g., lowest min jump range, highest planet density) then click the name to pivot into focused spatial + detailed stat inspection.</p>
+          </div>
+        )
+      },
+      {
+        id: 'compare-tips',
+        title: 'Practical Tips',
+        content: (
+          <div>
+            <ul style={{ paddingLeft:'18px', margin:'6px 0' }}>
+              <li>After sorting by a derived metric (e.g. connectivity %) click the value itself to lock the row highlight, then move horizontally to locate its name without visual drift.</li>
+              <li>Combine with planet legend filters to visually corroborate high planet density regions surfaced by the table.</li>
+              <li>Resize wider to reduce horizontal scrolling when comparing several related metrics (distance columns).</li>
+              <li>Refreshing after data/schema updates ensures new metrics appear without reloading the entire app.</li>
+            </ul>
           </div>
         )
       }

@@ -1,19 +1,34 @@
-// Region Stats Worker
-// Computes per-region spatial + network metrics off main thread.
+// Region Stats Worker (Phase 2)
+// Computes per‑region network + spatial + resource summary metrics off main thread.
 // Message Protocol:
-// Incoming: { type: 'compute', systems: Array<SystemLite>, gates: Array<GateLite> }
-// SystemLite: { id:number, region_id:number, x:number, y:number, z:number, deg:number }
-// GateLite: { a:number, b:number, len:number, region_id:number } (region_id only if both endpoints share one)
-// Outgoing: { type:'result', regions: { [regionId:number]: RegionStats } }
-// RegionStats fields (Phase 1):
-// systems_total, systems_gated, systems_isolated, gates_total, avg_gate_length_ly,
-// hull_area, density_systems_per_area, mst_length_gated_ly, mst_length_all_ly, max_span_edge_ly
+//   Incoming: { type: 'compute', systems: SystemLite[], gates: GateLite[] }
+//   Outgoing: { type:'result', regions: Record<regionId, RegionStats> }
+// SystemLite minimal shape now includes planets for planet aggregation.
+// Metric Naming (human‑friendly intent):
+//   gate_links: internal stargate edges (previously gates_total)
+//   avg_gate_distance_ly: average gate edge length
+//   footprint_area_ly2: convex hull area (x,z projection)
+//   system_density_per_100_ly2: systems per 100 square light‑years (scaled for readability)
+//   connectivity_pct: (gated / total)*100 (0 if total=0)
+//   (Simplified set exposed to UI now)
+//   est_gated_distance_ly: MST lower bound distance through gated systems
+//   est_gated_gate_jumps: gate hops across gated systems (n_gated - 1)
+//   est_all_distance_ly: gated distance + isolated attachments distance
+//   all_gate_jumps: gate hops portion within all systems (lower bound)
+//   ship_jumps: count of ship jumps (isolated attachments) lower bound
+//   ship_jump_ly: sum of isolated attachment distances
+//   total_jumps: gate + ship (lower bound)
+//   total_planets: sum(planets)
+//   avg_planets_per_system: total_planets / systems_total
+//   avg_gate_degree: (2*gate_links)/systems_gated (0 if systems_gated=0)
 
 export interface SystemLite {
   id: number;
   region_id: number;
   x: number; y: number; z: number;
   deg: number; // gate degree (can be 0)
+  planets?: number; // optional planet count
+  has_station?: boolean; // optional station presence flag
 }
 export interface GateLite {
   a: number; b: number; len: number; // len already in LY units
@@ -23,13 +38,24 @@ interface RegionStats {
   systems_total: number;
   systems_gated: number;
   systems_isolated: number;
-  gates_total: number;
-  avg_gate_length_ly: number;
-  hull_area: number; // planar area using projection (x,z)
-  density_systems_per_area: number;
-  mst_length_gated_ly: number;
-  mst_length_all_ly: number;
-  max_span_edge_ly: number;
+  connectivity_pct: number;
+  gate_links: number;
+  avg_gate_distance_ly: number;
+  avg_gate_degree: number;
+  footprint_area_ly2: number;
+  system_density_per_100_ly2: number;
+  // Simplified coverage metrics (approximate – baseline style placeholders)
+  est_gated_distance_ly: number;   // Approx gated traversal distance (MST lower bound for now)
+  est_gated_gate_jumps: number;    // Gate hops across gated systems (n_gated - 1 as lower bound)
+  est_all_distance_ly: number;     // Gated distance + attachments for isolated systems
+  all_gate_jumps: number;          // Gate jumps portion within all systems (>= est_gated_gate_jumps)
+  ship_jumps: number;              // Ship jump count (attachments treated as single ship jumps)
+  ship_jump_ly: number;            // Sum of ship jump distances (attachments sum)
+  total_jumps: number;             // all_gate_jumps + ship_jumps (lower bound)
+  min_jump_range_ly: number;       // Minimum ship jump range required to connect components
+  total_planets: number;
+  avg_planets_per_system: number;
+  has_station: boolean; // any station present in region
 }
 
 type Incoming = { type:'compute'; systems: SystemLite[]; gates: GateLite[] };
@@ -64,27 +90,6 @@ function convexHullArea(points: [number, number][]): number {
   return Math.abs(area)/2;
 }
 
-// --- MST (Kruskal) ---
-function mstTotalLength(nodes: number[], edges: {a:number,b:number,len:number}[]): { total:number, maxEdge:number } {
-  if (nodes.length === 0) return { total:0, maxEdge:0 };
-  // Union Find
-  const parent = new Map<number, number>();
-  const rank = new Map<number, number>();
-  for (const n of nodes) { parent.set(n,n); rank.set(n,0); }
-  const find = (x:number):number => {
-    const p = parent.get(x)!; if (p!==x){ const r=find(p); parent.set(x,r); return r;} return p;
-  };
-  const union = (a:number,b:number):boolean => {
-    let ra=find(a), rb=find(b); if(ra===rb) return false; let rka=rank.get(ra)!, rkb=rank.get(rb)!;
-    if (rka<rkb) parent.set(ra,rb); else if (rkb<rka) parent.set(rb,ra); else { parent.set(rb,ra); rank.set(ra,rka+1);} return true;
-  };
-  const sorted = edges.slice().sort((e1,e2)=> e1.len - e2.len);
-  let total=0; let added=0; let maxEdge=0; const need = nodes.length-1;
-  for (const e of sorted) {
-    if (union(e.a,e.b)) { total += e.len; added++; if (e.len>maxEdge) maxEdge=e.len; if (added===need) break; }
-  }
-  return { total, maxEdge };
-}
 
 // Group systems by region.
 function computeRegionStats(systems:SystemLite[], gates:GateLite[]): Record<number, RegionStats> {
@@ -111,56 +116,148 @@ function computeRegionStats(systems:SystemLite[], gates:GateLite[]): Record<numb
   const result: Record<number, RegionStats> = {};
   for (const [rid, list] of byRegion) {
     const systems_total = list.length;
-    const gatedIds: number[] = []; const allIds: number[] = []; const idSet = new Set<number>();
-    for (const s of list) { allIds.push(s.id); idSet.add(s.id); if (s.deg>0) gatedIds.push(s.id); }
+    const gatedIds: number[] = []; const idSet = new Set<number>();
+    let total_planets = 0;
+    for (const s of list) { idSet.add(s.id); if (s.deg>0) gatedIds.push(s.id); if (s.planets) total_planets += s.planets; }
     const systems_gated = gatedIds.length;
     const systems_isolated = systems_total - systems_gated;
     const regionGates = gatesByRegion.get(rid) || [];
-    const gates_total = regionGates.length;
-    const avg_gate_length_ly = gates_total ? regionGates.reduce((a,g)=>a+g.len,0)/gates_total : 0;
-    // Hull area (project x,z)
+    const gate_links = regionGates.length;
+    const avg_gate_distance_ly = gate_links ? regionGates.reduce((a,g)=>a+g.len,0)/gate_links : 0;
+    // Area & density scaling (per 100 ly^2)
     const points: [number,number][] = list.map(s=> [s.x, s.z]);
-    const hull_area = convexHullArea(points);
-    const density_systems_per_area = hull_area>0 ? systems_total / hull_area : 0;
-    // MST over gated systems: build edges subset
-    let mst_length_gated_ly = 0; let max_gate_span=0;
-    if (gatedIds.length>1) {
-      const edges = regionGates.filter(g=> idSet.has(g.a) && idSet.has(g.b));
-      const { total, maxEdge } = mstTotalLength(gatedIds, edges);
-      mst_length_gated_ly = total; max_gate_span = maxEdge;
+    const footprint_area_ly2 = convexHullArea(points);
+    const system_density_per_100_ly2 = footprint_area_ly2>0 ? (systems_total / footprint_area_ly2)*100 : 0;
+    const connectivity_pct = systems_total>0 ? (systems_gated / systems_total)*100 : 0;
+    const avg_gate_degree = systems_gated>0 ? (2*gate_links)/systems_gated : 0;
+
+    // --- Baseline style distance & jump metrics (nearest-neighbor heuristic) ---
+    // Build gate adjacency for BFS path discovery
+    const gateAdj = new Map<number, number[]>();
+    for (const g of regionGates){
+      if(!gateAdj.has(g.a)) gateAdj.set(g.a, []); gateAdj.get(g.a)!.push(g.b);
+      if(!gateAdj.has(g.b)) gateAdj.set(g.b, []); gateAdj.get(g.b)!.push(g.a);
     }
-    // MST over all systems: approximate connectivity by adding synthetic edges? We'll reuse regionGates only; isolated systems (deg=0) treated as singletons (no edges). For a better bound we could compute complete graph MST (O(n^2)); we skip for performance.
-    let mst_length_all_ly = mst_length_gated_ly; let max_span_edge_ly = max_gate_span;
-    // Optional enhancement: if many isolated nodes, estimate additional ship jump edges to connect them by nearest neighbor:
-    if (systems_isolated>0 && systems_total>1) {
-      // Connect isolated systems to nearest gated or isolated; greedy add.
-      const isolated = list.filter(s=> s.deg===0);
-      const active: SystemLite[] = list.filter(s=> s.deg>0);
-      if (active.length===0 && isolated.length>0) { active.push(isolated[0]); }
-      for (const iso of isolated) {
-        let bestDist = Infinity;
-        for (const a of active) {
-          const dx = iso.x - a.x, dz = iso.z - a.z, dy = iso.y - a.y;
-            const d = Math.sqrt(dx*dx+dy*dy+dz*dz);
-            if (d<bestDist) { bestDist=d; }
+    interface EdgeEval { gateDistance:number|null; gateHops:number|null; shipDistance:number; chooseShip:boolean }
+    const dist3d = (a:SystemLite,b:SystemLite)=>{ const dx=a.x-b.x, dy=a.y-b.y, dz=a.z-b.z; return Math.sqrt(dx*dx+dy*dy+dz*dz); };
+    // BFS gate path; returns distance & hops or null if disconnected
+    const bfsGate = (a:SystemLite,b:SystemLite): {d:number;h:number}|null => {
+      if(a.id===b.id) return {d:0,h:0};
+      const q:number[][]=[[a.id]]; const seen=new Set<number>([a.id]);
+      while(q.length){ const path=q.shift()!; const last=path[path.length-1]; if(last===b.id){
+        let total=0; for(let i=0;i<path.length-1;i++){ const n1=path[i], n2=path[i+1]; const s1=list.find(x=>x.id===n1)!; const s2=list.find(x=>x.id===n2)!; total+=dist3d(s1,s2); }
+        return { d: total, h: path.length-1 };
+      }
+        for(const nxt of gateAdj.get(last)||[]){ if(!seen.has(nxt)){ seen.add(nxt); q.push([...path,nxt]); } }
+      }
+      return null;
+    };
+    const edgeCache = new Map<string, EdgeEval>();
+    const evalEdge = (a:SystemLite,b:SystemLite): EdgeEval => {
+      const key = a.id<b.id? a.id+"|"+b.id : b.id+"|"+a.id;
+      const cached = edgeCache.get(key); if(cached) return cached;
+      const gateInfo = bfsGate(a,b);
+      if(gateInfo){ const ev={ gateDistance: gateInfo.d, gateHops: gateInfo.h, shipDistance: dist3d(a,b), chooseShip:false }; edgeCache.set(key,ev); return ev; }
+      // No gate path – treat as ship jump
+      const shipD = dist3d(a,b);
+      const ev={ gateDistance:null, gateHops:null, shipDistance: shipD, chooseShip:true };
+      edgeCache.set(key, ev); return ev;
+    };
+    interface PathStats { distance:number; gateJumps:number; shipJumps:number; shipDistance:number }
+    const nearestNeighborRoute = (systemsList:SystemLite[]): PathStats => {
+      if(systemsList.length<=1) return { distance:0, gateJumps:0, shipJumps:0, shipDistance:0 };
+      // pick start = highest gate degree else first
+      let start = systemsList[0];
+      for(const s of systemsList){ if(s.deg > start.deg) start = s; }
+      const remaining = new Set(systemsList.filter(s=> s.id!==start.id).map(s=> s.id));
+      let cur = start; let distance=0, gateJumps=0, shipJumps=0, shipDistance=0;
+      while(remaining.size){
+        let best: { sys:SystemLite; ev:EdgeEval } | null = null;
+        for(const id of remaining){ const candidate = systemsList.find(s=> s.id===id)!; const ev = evalEdge(cur, candidate); if(!best){ best={sys:candidate, ev}; continue; }
+          const b=best.ev;
+          // Priority: prefer gate over ship, then lower total distance
+          const better = (!ev.chooseShip && b.chooseShip) ||
+            (ev.chooseShip===b.chooseShip && ((ev.chooseShip? ev.shipDistance : ev.gateDistance!) < (b.chooseShip? b.shipDistance : b.gateDistance!)));
+          if(better) best={sys:candidate, ev};
         }
-        mst_length_all_ly += bestDist;
-        if (bestDist>max_span_edge_ly) max_span_edge_ly = bestDist;
-        active.push(iso);
+        if(!best){ break; }
+        // apply edge
+        if(best.ev.chooseShip){ distance += best.ev.shipDistance; shipDistance += best.ev.shipDistance; shipJumps += 1; }
+        else { distance += best.ev.gateDistance!; gateJumps += best.ev.gateHops!; }
+        remaining.delete(best.sys.id); cur = best.sys;
+      }
+      return { distance, gateJumps, shipJumps, shipDistance };
+    };
+    // Gated subset baseline
+    let est_gated_distance_ly = 0; let est_gated_gate_jumps = 0;
+    if(systems_gated>0){
+      const gatedSystems = list.filter(s=> s.deg>0);
+      const gatedStats = nearestNeighborRoute(gatedSystems);
+      est_gated_distance_ly = gatedStats.distance;
+      est_gated_gate_jumps = gatedStats.gateJumps; // gate hops across route
+    }
+    // All systems baseline (includes isolated ship jumps)
+    let est_all_distance_final = 0; let all_gate_jumps = 0; let ship_jumps = 0; let ship_jump_ly = 0;
+    if(systems_total>0){
+      const allStats = nearestNeighborRoute(list);
+      est_all_distance_final = allStats.distance;
+      all_gate_jumps = allStats.gateJumps;
+      ship_jumps = allStats.shipJumps;
+      ship_jump_ly = allStats.shipDistance;
+    }
+    const total_jumps = all_gate_jumps + ship_jumps;
+
+    // Min jump range: union gate components then add shortest ship edges to connect components
+  let min_jump_range_ly = 0;
+    if (systems_total>1){
+      // Union-Find initial via gates (build adjacency from regionGates)
+      const parent = new Map<number, number>(); const rank = new Map<number, number>();
+      for (const s of list){ parent.set(s.id, s.id); rank.set(s.id,0);} const find=(x:number):number=>{ const p=parent.get(x)!; if(p!==x){ const r=find(p); parent.set(x,r); return r;} return p; }; const union=(a:number,b:number)=>{ let ra=find(a), rb=find(b); if(ra===rb) return false; let rka=rank.get(ra)!, rkb=rank.get(rb)!; if(rka<rkb) parent.set(ra,rb); else if(rkb<rka) parent.set(rb,ra); else { parent.set(rb,ra); rank.set(ra,rka+1);} return true; };
+      for (const gEdge of regionGates){ union(gEdge.a, gEdge.b); }
+      // Count components
+      const compSet = new Set(list.map(s=> find(s.id)));
+      if (compSet.size>1){
+        // Generate all candidate ship edges across different components
+        const candidates: {a:number;b:number;len:number}[] = [];
+        for (let i=0;i<list.length;i++){
+          for (let j=i+1;j<list.length;j++){
+            const si=list[i], sj=list[j]; if(find(si.id)===find(sj.id)) continue;
+            const dx=si.x - sj.x, dy=si.y - sj.y, dz=si.z - sj.z; const d=Math.sqrt(dx*dx+dy*dy+dz*dz);
+            candidates.push({a:si.id,b:sj.id,len:d});
+          }
+        }
+        candidates.sort((a,b)=> a.len - b.len);
+        for (const c of candidates){ if(union(c.a,c.b)){ min_jump_range_ly = c.len; if (compSet.size===1) break; } }
+      } else {
+        min_jump_range_ly = 0; // already fully reachable via gates
       }
     }
+
+    const avg_planets_per_system = systems_total>0 ? total_planets / systems_total : 0;
+  let has_station = false; for(const s of list){ if(s.has_station){ has_station = true; break; } }
+
     result[rid] = {
       systems_total,
       systems_gated,
       systems_isolated,
-      gates_total,
-      avg_gate_length_ly,
-      hull_area,
-      density_systems_per_area,
-      mst_length_gated_ly,
-      mst_length_all_ly,
-      max_span_edge_ly
-    };
+      connectivity_pct,
+      gate_links,
+      avg_gate_distance_ly,
+      avg_gate_degree,
+      footprint_area_ly2,
+      system_density_per_100_ly2,
+      est_gated_distance_ly,
+      est_gated_gate_jumps,
+      est_all_distance_ly: est_all_distance_final,
+      all_gate_jumps,
+      ship_jumps,
+      ship_jump_ly,
+      total_jumps,
+      min_jump_range_ly,
+      total_planets,
+  avg_planets_per_system,
+  has_station
+    } as RegionStats;
   }
   return result;
 }
