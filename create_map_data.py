@@ -100,6 +100,13 @@ def create_database_schema(cursor):
             show_on_zoom BOOLEAN
         )
     """)
+    # New table for stations (optional population step later)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS stations (
+            system_id TEXT PRIMARY KEY,
+            station_count INTEGER NOT NULL
+        )
+    """)
     print("Database schema created successfully.")
 
 def create_map_data():
@@ -111,7 +118,7 @@ def create_map_data():
 
     # Define file paths
     output_dir = "eve-frontier-map/public"
-    db_file = os.path.join(output_dir, "map_data.db")
+    db_file = os.path.join(output_dir, "map_data_v2.db")
 
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -267,8 +274,64 @@ def create_map_data():
         cursor.execute("UPDATE constellations SET hidden = ? WHERE region_id = ?", (True, region_id))
 
 
-    # --- 4. Save final file ---
-    print(f"Saving the final map_data.db to {db_file}")
+    # --- 4. Optional: integrate stations from external mapobjects.db ---
+    try:
+        source_db_path = 'mapobjects.db'  # Expected placement: project root (not committed if large/proprietary)
+        if os.path.exists(source_db_path):
+            print("Integrating stations from mapobjects.db ...")
+            src_conn = sqlite3.connect(f"file:{source_db_path}?mode=ro", uri=True)
+            src_cur = src_conn.cursor()
+            # Discover candidate station tables dynamically (any table name containing 'station')
+            src_cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND lower(name) LIKE '%station%'")
+            table_rows = src_cur.fetchall()
+            candidate_tables = [r[0] for r in table_rows]
+            chosen = None
+            system_col = None
+            # Heuristic: find first table with a column resembling system id
+            for tbl in candidate_tables:
+                try:
+                    src_cur.execute(f"PRAGMA table_info({tbl})")
+                    cols = src_cur.fetchall()  # cid, name, type, notnull, dflt, pk
+                    col_names = [c[1].lower() for c in cols]
+                    possible = None
+                    for probe in ('system_id', 'solar_system_id', 'solarsystemid', 'solarsystem_id', 'solarsystem'):
+                        if probe in col_names:
+                            possible = probe
+                            break
+                    if possible:
+                        chosen = tbl
+                        system_col = possible
+                        break
+                except Exception:
+                    continue
+            if chosen and system_col:
+                print(f"Found station table '{chosen}' with system column '{system_col}'. Aggregating counts...")
+                agg_query = f"SELECT {system_col} as sid, COUNT(*) as c FROM {chosen} GROUP BY {system_col}"
+                src_cur.execute(agg_query)
+                rows = src_cur.fetchall()
+                inserted = 0
+                for sid, count in rows:
+                    if sid is None or count is None:
+                        continue
+                    try:
+                        cursor.execute("INSERT OR REPLACE INTO stations (system_id, station_count) VALUES (?, ?)", (str(sid), int(count)))
+                        inserted += 1
+                    except Exception as e:
+                        print(f"Warning: failed inserting station row for system {sid}: {e}")
+                print(f"Inserted/updated {inserted} station rows.")
+            else:
+                print("No station table discovered in mapobjects.db (looked for table names containing 'station'). Skipping station integration.")
+            try:
+                src_conn.close()
+            except Exception:
+                pass
+        else:
+            print("mapobjects.db not found – skipping station integration (this is expected for environments without station source DB).")
+    except Exception as e:
+        print(f"Non-fatal error during station integration: {e}")
+
+    # --- 5. Save final file ---
+    print(f"Saving the final map_data_v2.db to {db_file}")
     conn.commit()
     conn.close()
 

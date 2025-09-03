@@ -22,13 +22,16 @@ import PlanetLegendPanel from './components/Planets/PlanetLegendPanel';
 import './components/layout/panelLayout.css';
 import AutoCompleteInput from './components/AutoCompleteInput/AutoCompleteInput';
 import HelpPanel from './components/HelpPanel/HelpPanel';
-import { loadPrefs, setAccent, setOpenPanels as persistOpenPanels, setRoutingPrefs, fullReset, getPrefs, softReset, setUiScale as persistUiScale } from './utils/prefs';
+import { loadPrefs, setAccent, setOpenPanels as persistOpenPanels, setRoutingPrefs, fullReset, getPrefs, softReset, setUiScale as persistUiScale, setShowStations as persistShowStations } from './utils/prefs';
+import { track } from './utils/usage';
 import { encodeShare, decodeShare } from './utils/share';
 import { createShortShare, fetchShortShare } from './utils/shortShare';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import DonateCryptoModal from './components/DonateCryptoModal';
 import StatsPage from './components/StatsPage';
-import { track } from './utils/usage';
+// Station icon (ensure file added at assets/icons/station.png)
+// Will be lazy loaded via TextureLoader when toggle active
+import stationIconUrl from './assets/icons/station.png';
 
 // Small referral badge component with copy-to-clipboard
 const ReferralBadge: React.FC = () => {
@@ -157,6 +160,17 @@ function App() {
   useEffect(()=>{ try { (window as any).__efSetThemeAccent && (window as any).__efSetThemeAccent(accentIsBlue ? 'blue':'orange'); } catch { /* ignore */ } }, [accentIsBlue]);
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [loadingStatus, setLoadingStatus] = useState('Initializing...');
+  // Hover tuning (runtime adjustable via window.__efSetHoverTuning for local testing)
+  const hoverTuningRef = useRef({
+    minDistance: 100,
+    maxDistance: 50000,
+    minThreshold: 1,
+    maxThreshold: 300,
+    allowBelowMinDistance: true,
+  floorBelowMin: 0.12,
+    curveExp: 1,
+  });
+  useEffect(()=>{ (window as any).__efSetHoverTuning = (opts: Partial<typeof hoverTuningRef.current>) => { Object.assign(hoverTuningRef.current, opts); console.log('[EF] Updated hover tuning', hoverTuningRef.current); }; }, []);
   const [isLoaded, setIsLoaded] = useState(false);
 
   const mountRef = useRef<HTMLDivElement>(null);
@@ -182,6 +196,26 @@ function App() {
   const [isPlanetCountActive, setIsPlanetCountActive] = useState(false);
   // Five legend bins (dynamic ranges) active flags; default all true when DPC enabled
   const [planetBinsActive, setPlanetBinsActive] = useState<boolean[]>([true, true, true, true, true]);
+  // Stations visibility (persisted preference)
+  const [showStations, setShowStations] = useState<boolean>(()=>{ try { return !!(getPrefs() as any).showStations; } catch { return false; } });
+  const [stationsRetryToken, setStationsRetryToken] = useState(0); // forces re-run until station global available
+  const stationsRetryTimeoutRef = useRef<number|undefined>(undefined);
+  const stationSpriteGroupRef = useRef<THREE.Group|null>(null);
+  const stationIconTexRef = useRef<THREE.Texture|null>(null);
+  const stationSystemIdSetRef = useRef<Set<number>|null>(null);
+  const stationShowRef = useRef<boolean>(false); // mirror showStations for animate loop
+  const stationBaselineDistRef = useRef<number|null>(null); // baseline distance for sizing
+  const stationFocusIdRef = useRef<number|null>(null); // current focus station system id
+  const stationFocusDistRef = useRef<number>(Infinity); // distance of current focus
+  const systemNameToIdRef = useRef<Map<string, number>|null>(null);
+  useEffect(()=>{ // build name->id map once map data loaded
+    if(mapData){
+      const m = new Map<string, number>();
+      for(const s of Object.values(mapData.solar_systems)) m.set(s.name, s.id);
+      systemNameToIdRef.current = m;
+    }
+  }, [mapData]);
+  useEffect(()=>{ stationShowRef.current = showStations; }, [showStations]);
   const [showDistance, setShowDistance] = useState(false);
   // Track theme selections (already counted once per change)
   useEffect(()=>{ try { (window as any).__efSetThemeAccent && (window as any).__efSetThemeAccent(accentIsBlue ? 'blue':'orange'); } catch {} }, [accentIsBlue]);
@@ -783,6 +817,207 @@ function App() {
   };
 
   useEffect(()=>{ if(!reachDim) { clearReachabilityDimming(); try { track({ type:'reachability_disable' }); } catch {} } else { if(reachableSetRef.current) { applyReachabilityDimming(); try { track({ type:'reachability_enable' }); } catch {} } } }, [reachDim]);
+  // Stations sprite management
+  useEffect(()=>{
+    // Cleanup helper
+    const clearRetry = () => { if(stationsRetryTimeoutRef.current){ clearTimeout(stationsRetryTimeoutRef.current); stationsRetryTimeoutRef.current = undefined; } };
+    if(!showStations){
+      clearRetry();
+      if(stationSpriteGroupRef.current && sceneRef.current){ sceneRef.current.remove(stationSpriteGroupRef.current); }
+      stationSpriteGroupRef.current = null; return;
+    }
+    // Already created -> nothing else to do
+    if(stationSpriteGroupRef.current){ return; }
+    // Populate set from global (loaded at DB init)
+    if(!stationSystemIdSetRef.current){
+      try { const g = (window as any).__efStations; if(g && g.ids) stationSystemIdSetRef.current = g.ids as Set<number>; } catch {/* ignore */}
+    }
+    // If still not ready, schedule retry (single outstanding)
+    if(!stationSystemIdSetRef.current || !mapData || !sceneRef.current){
+      if(showStations && !stationsRetryTimeoutRef.current){
+        stationsRetryTimeoutRef.current = window.setTimeout(()=> setStationsRetryToken(t=> t+1), 160);
+      }
+      return;
+    }
+    clearRetry();
+    // Ensure texture
+    if(!stationIconTexRef.current){
+      try {
+        const loader = new THREE.TextureLoader();
+        stationIconTexRef.current = loader.load(stationIconUrl + '?v=3', (tex)=>{
+          try { const srgb = (THREE as any).SRGBColorSpace || (THREE as any).sRGBEncoding; (tex as any).colorSpace = srgb; tex.needsUpdate = true; } catch {/* ignore */}
+        });
+      } catch {/* ignore */}
+    }
+    // Build group once
+    const group = new THREE.Group();
+    const systems = Object.values(mapData.solar_systems);
+    const set = stationSystemIdSetRef.current;
+    let added = 0;
+    for(const sys of systems){
+      if(!set.has(sys.id)) continue;
+      const mat = new THREE.SpriteMaterial({
+        map: stationIconTexRef.current || undefined,
+        color: 0xffffff,
+        transparent: true,
+        depthWrite: true, // write depth so stars behind do NOT show through solid parts
+        depthTest: true,
+        alphaTest: 0.02, // keep only fully transparent background pixels transparent
+        toneMapped: false
+      });
+      const sprite = new THREE.Sprite(mat);
+      const pos = getTransformedPosition(sys.position);
+      sprite.center.set(0.5, 0);
+      sprite.position.set(pos.x, pos.y, pos.z);
+      sprite.scale.set(1,1,1);
+      (sprite as any).userData = { systemId: sys.id, aspect: (()=>{ try { const img:any = stationIconTexRef.current?.image; if(img && img.width && img.height){ return img.width / img.height; } } catch{} return 1; })(), basePos: new THREE.Vector3(pos.x, pos.y, pos.z) };
+      group.add(sprite); added++;
+    }
+    stationSpriteGroupRef.current = group;
+    sceneRef.current.add(group);
+    try { if((window as any).console){ console.debug('[Stations] Sprites created. Systems with stations:', set.size, 'Sprites added:', added); } } catch {/* ignore */}
+    return () => { clearRetry(); };
+  }, [showStations, mapData, getTransformedPosition, stationsRetryToken]);
+  // Station scaling: 24px min at baseline/far, only nearest station to camera grows significantly; others remain near min.
+  useEffect(()=>{
+    let raf:number|undefined;
+    const minPx = 24; // requested baseline / minimum
+    const maxPx = 340; // maximum when extremely close (nearest only)
+    const nonFocusMaxPx = 30; // slight growth allowance for non-focused stations
+    const gapMinPx = 1;  // minimal gap when far
+    const gapMaxPx = 8;  // gap when very close (focused)
+    const tick = () => {
+      if(stationShowRef.current && stationSpriteGroupRef.current && cameraRef.current){
+        const cam = cameraRef.current; const hPx = window.innerHeight||1; const fov = cam.fov*Math.PI/180; const tanHalf=Math.tan(fov/2);
+        // Initialize baseline distance once (average distance to first N sprites)
+        if(stationBaselineDistRef.current == null){
+          let sum=0,count=0; for(const child of stationSpriteGroupRef.current.children){ sum += cam.position.distanceTo(child.position); count++; if(count>250) break; }
+          stationBaselineDistRef.current = count? (sum/count) : 15000;
+        }
+        const baseline = stationBaselineDistRef.current || 15000;
+  const nearDist = baseline * 0.015; // extremely close for max size (~1.5% baseline)
+  const growthStartDist = baseline * 0.10; // no growth until within 10% of baseline distance
+        // Determine selected station focus override (if selected system has a station)
+        let selectedFocusId: number | null = null;
+        if(lastSelectedSystemName && systemNameToIdRef.current && stationSystemIdSetRef.current){
+          const selId = systemNameToIdRef.current.get(lastSelectedSystemName) ?? null;
+          if(selId != null && stationSystemIdSetRef.current.has(selId)) selectedFocusId = selId;
+        }
+        // Fallback nearest (only if no selected focus)
+  let nearestId: number | null = null; let nearestDist = Infinity;
+        if(selectedFocusId == null){
+          for(const child of stationSpriteGroupRef.current.children){
+            const d = cam.position.distanceTo(child.position);
+            const sysId = (child as any).userData?.systemId;
+            if(d < nearestDist){ nearestDist = d; nearestId = sysId; }
+          }
+        }
+        // Hysteresis: only switch nearest focus if substantially closer (15%) to avoid flicker
+        if(selectedFocusId == null){
+          if(stationFocusIdRef.current != null && nearestId != null && stationFocusIdRef.current !== nearestId){
+            // find distance to current focus (recompute)
+            let currentFocusDist = stationFocusDistRef.current;
+            if(!isFinite(currentFocusDist)){
+              // recompute by scanning once
+              for(const child of stationSpriteGroupRef.current.children){
+                const sysId = (child as any).userData?.systemId;
+                if(sysId === stationFocusIdRef.current){ currentFocusDist = cam.position.distanceTo(child.position); break; }
+              }
+            }
+            if(!(nearestDist < currentFocusDist * 0.85)){
+              // keep old focus
+              nearestId = stationFocusIdRef.current;
+              nearestDist = currentFocusDist;
+            }
+          }
+        }
+        // Decide final focus id
+        let focusId: number | null = selectedFocusId != null ? selectedFocusId : nearestId;
+        if(focusId !== stationFocusIdRef.current){
+          stationFocusIdRef.current = focusId;
+          stationFocusDistRef.current = (focusId === (selectedFocusId ?? nearestId)) ? (selectedFocusId != null ? nearestDist : nearestDist) : nearestDist;
+        }
+        for(const child of stationSpriteGroupRef.current.children){
+          const dist = cam.position.distanceTo(child.position);
+          const sysId = (child as any).userData?.systemId;
+          const isFocus = (sysId != null && sysId === stationFocusIdRef.current);
+          let targetPx:number;
+          if(isFocus){
+            // Growth only starts once inside growthStartDist
+            if(dist > growthStartDist){
+              targetPx = minPx;
+            } else {
+              let raw = (growthStartDist - dist) / (growthStartDist - nearDist);
+              if(raw < 0) raw = 0; if(raw > 1) raw = 1;
+              // Strong suppression until very close (power 4.5)
+              const eased = Math.pow(raw, 4.5);
+              targetPx = minPx + (maxPx - minPx) * eased;
+            }
+          } else {
+            // Non-focused: minimal growth only very close; otherwise locked at min
+            if(dist > growthStartDist){
+              targetPx = minPx;
+            } else {
+              let raw = (growthStartDist - dist) / (growthStartDist - nearDist);
+              if(raw < 0) raw = 0; if(raw > 1) raw = 1;
+              const eased = Math.pow(raw, 3.5);
+              targetPx = minPx + (nonFocusMaxPx - minPx) * eased;
+            }
+          }
+          const worldPerPixel = 2 * dist * tanHalf / hPx;
+          const worldH = worldPerPixel * targetPx;
+          // Aspect ratio update (once texture loaded)
+          let aspect = (child as any).userData?.aspect || 1;
+          if(stationIconTexRef.current?.image){ const img:any = stationIconTexRef.current.image; if(img.width && img.height){ aspect = img.width/img.height; (child as any).userData.aspect = aspect; } }
+          const sy = worldH; const sx = worldH * aspect;
+          if(Math.abs(child.scale.x - sx) > 0.01 || Math.abs(child.scale.y - sy) > 0.01){ child.scale.set(sx, sy, Math.max(sx,sy)); }
+          // Gap scaling: for focus, grow up to gapMaxPx; others stay near gapMinPx with slight easing
+          let gapPx:number;
+          if(isFocus){
+            let gapRaw = (baseline - dist) / (baseline - nearDist);
+            if(gapRaw < 0) gapRaw = 0; if(gapRaw > 1) gapRaw = 1;
+            const gapEased = Math.pow(gapRaw, 0.5); // sqrt easing
+            gapPx = gapMinPx + (gapMaxPx - gapMinPx) * gapEased;
+          } else {
+            gapPx = gapMinPx; // keep very close to star for non-focused
+          }
+          const basePos = (child as any).userData?.basePos; if(basePos){
+            const gapWorld = worldPerPixel * gapPx;
+            child.position.set(basePos.x, basePos.y + gapWorld, basePos.z);
+          }
+        }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return ()=>{ if(raf) cancelAnimationFrame(raf); };
+  }, [showStations]);
+
+  // Prioritize station sprite click selection: if user clicks on icon, select its system before star raycast fallback
+  useEffect(()=>{
+    if(!rendererRef.current) return;
+    const dom = rendererRef.current.domElement;
+    const handleClick = (e: MouseEvent) => {
+      if(!showStations || !stationSpriteGroupRef.current || !cameraRef.current) return;
+  const mouse = new THREE.Vector2();
+      const rect = dom.getBoundingClientRect();
+      mouse.x = ((e.clientX - rect.left)/rect.width)*2 - 1;
+      mouse.y = -((e.clientY - rect.top)/rect.height)*2 + 1;
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera(mouse, cameraRef.current as THREE.Camera);
+      const hits = raycaster.intersectObjects(stationSpriteGroupRef.current.children, false);
+      if(hits.length && mapData){
+        const hit = hits[0].object as THREE.Sprite & { userData?: any };
+        const id = hit.userData?.systemId;
+        if(id!=null){
+          const sys = Object.values(mapData.solar_systems).find(s=> s.id === id);
+          if(sys){ selectSystem(sys); setHoveredSystem(sys); }
+        }
+      }
+    };
+    dom.addEventListener('click', handleClick, true); // capture early
+    return ()=>{ dom.removeEventListener('click', handleClick, true); };
+  }, [showStations, mapData, selectSystem]);
   useEffect(()=>{ // if region/planet mode toggled while dim active, reapply or clear
     if(reachDim){ applyReachabilityDimming(); }
   }, [isRegionHighlighterActive, isPlanetCountActive]);
@@ -1453,7 +1688,11 @@ function App() {
     const loadDatabase = async () => {
       try {
         setLoadingStatus('Downloading map data...');
-        const response = await fetch('/map_data.db');
+        // Attempt new v2 DB (stations); fallback to legacy name if not found
+        let response = await fetch('/map_data_v2.db').catch(()=> null as any);
+        if(!response || !response.ok){
+          try { response = await fetch('/map_data.db'); } catch {/* ignore */}
+        }
         if (!response.body) {
           throw new Error("Failed to get readable stream from response");
         }
@@ -1491,19 +1730,39 @@ function App() {
 
         setLoadingStatus('Processing systems...');
         // Query the database
-        const systemsRes = db.exec("SELECT * FROM systems WHERE hidden = 0");
-        const stargatesRes = db.exec("SELECT * FROM stargates");
+  const systemsRes = db.exec("SELECT * FROM systems WHERE hidden = 0");
+  const stargatesRes = db.exec("SELECT * FROM stargates");
         const regionsRes = db.exec("SELECT * FROM regions");
+        // Stations (optional table)
+        let stationSet: Set<number> = new Set();
+        let stationCountMap: Record<number, number> = {};
+        try {
+          const stationsRes = db.exec("SELECT system_id, station_count FROM stations");
+          if(stationsRes.length>0){
+            stationsRes[0].values.forEach((row:any[])=>{
+              // row[0] may be stored as text; coerce to number safely
+              const sidRaw = row[0];
+              const sid = typeof sidRaw === 'number' ? sidRaw : Number(String(sidRaw).trim());
+              const cnt = Number(row[1]);
+              if(!Number.isNaN(sid) && !Number.isNaN(cnt)){
+                stationSet.add(sid);
+                stationCountMap[sid] = cnt;
+              }
+            });
+          }
+        } catch {/* table absent in legacy DB */}
         const constellationsRes = db.exec("SELECT * FROM constellations");
 
         const solar_systems: { [key: string]: SolarSystem } = {};
-        if (systemsRes.length > 0) {
-            systemsRes[0].values.forEach((row: SqlValue[]) => {
-                const system: SystemRow = {
-                    id: row[0] as number,
-                    name: row[1] as string,
-                    constellation_id: row[2] as number,
-                    region_id: row[3] as number,
+    if (systemsRes.length > 0) {
+      systemsRes[0].values.forEach((row: SqlValue[]) => {
+        const sysIdRaw = row[0];
+        const sysId = typeof sysIdRaw === 'number' ? sysIdRaw : Number(String(sysIdRaw));
+        const system: SystemRow = {
+          id: sysId as number,
+          name: row[1] as string,
+          constellation_id: Number(row[2] as any),
+          region_id: Number(row[3] as any),
                     x: row[7] as number,
                     y: row[8] as number,
                     z: row[9] as number,
@@ -1511,11 +1770,11 @@ function App() {
                     planet_count: row[14] as number
                 };
                 solar_systems[system.id] = {
-                    id: system.id,
+          id: Number(system.id),
                     name: system.name,
                     position: { x: system.x, y: system.y, z: system.z },
-                    region_id: system.region_id,
-                    constellation_id: system.constellation_id,
+          region_id: Number(system.region_id),
+          constellation_id: Number(system.constellation_id),
                     planets: system.planet_count,
                     hidden: system.hidden
                 };
@@ -1524,19 +1783,23 @@ function App() {
 
         setLoadingStatus('Processing stargates...');
         const stargates: { [key: string]: Stargate } = {};
-        if (stargatesRes.length > 0) {
-            stargatesRes[0].values.forEach((row: SqlValue[]) => {
-                const stargate: StargateRow = {
-                    id: row[0] as number,
-                    name: row[1] as string,
-                    source_system_id: row[2] as number,
-                    destination_system_id: row[3] as number
-                };
+    if (stargatesRes.length > 0) {
+      stargatesRes[0].values.forEach((row: SqlValue[]) => {
+        const sgIdRaw = row[0];
+        const sgId = typeof sgIdRaw === 'number' ? sgIdRaw : Number(String(sgIdRaw));
+        const srcRaw = row[2];
+        const dstRaw = row[3];
+        const stargate: StargateRow = {
+          id: sgId as number,
+          name: row[1] as string,
+          source_system_id: typeof srcRaw === 'number'? srcRaw : Number(String(srcRaw)),
+          destination_system_id: typeof dstRaw === 'number'? dstRaw : Number(String(dstRaw))
+        };
                 stargates[stargate.id] = {
-                    id: stargate.id,
+          id: Number(stargate.id),
                     name: stargate.name,
-                    source_system_id: stargate.source_system_id,
-                    destination_system_id: stargate.destination_system_id
+          source_system_id: Number(stargate.source_system_id),
+          destination_system_id: Number(stargate.destination_system_id)
                 };
             });
         }
@@ -1574,7 +1837,9 @@ function App() {
         }
 
         setLoadingStatus('Finalizing...');
-        setMapData({ solar_systems, stargates, regions, constellations });
+  // NOTE: stationSet / stationCountMap stored on window temporarily until toggle feature implemented
+  try { (window as any).__efStations = { ids: stationSet, counts: stationCountMap }; if(stationSet.size && (window as any).console){ console.debug('[Stations] Loaded', stationSet.size, 'systems with stations. Example ID:', stationSet.values().next().value); } } catch {/* ignore */}
+  setMapData({ solar_systems, stargates, regions, constellations });
 
         // Calculate min/max planets once data is loaded
         const planetCounts = Object.values(solar_systems).map(s => s.planets);
@@ -1960,6 +2225,7 @@ function App() {
              }
          }
          if(advancedPassRef.current){ advancedPassRef.current.uniforms.uTime.value = performance.now()/1000; }
+         // (Station icon scaling moved to dedicated RAF effect below for reliability)
          composerRef.current ? composerRef.current.render() : rendererRef.current?.render(sceneRef.current!, cameraRef.current!);
        } else {
         rendererRef.current?.render(sceneRef.current!, cameraRef.current!);
@@ -2948,6 +3214,7 @@ function App() {
     const DRAG_THRESHOLD = 5; // pixels
     const CLICK_TIME_THRESHOLD = 200; // milliseconds
 
+
   const onPointerMove = (event: PointerEvent) => {
       // Mark that user has moved mouse; before this we won't show hover
       if(!firstMoveRef.current){ firstMoveRef.current = true; }
@@ -2985,16 +3252,59 @@ function App() {
 
       if (!isDraggingRef.current && !anyButtonDown && firstMoveRef.current) {
         raycaster.setFromCamera(mouse, cameraRef.current);
-  // Dynamic threshold based on camera distance (tighter range to avoid false positives)
+        // Station icon hover precedence: if hovering a station sprite, show station-specific label (system name + ' Station')
+        if(showStations && stationSpriteGroupRef.current){
+          const stationHits = raycaster.intersectObjects(stationSpriteGroupRef.current.children, false);
+          if(stationHits.length){
+            const hit = stationHits[0].object as THREE.Sprite & { userData?: any };
+            const sysId = hit.userData?.systemId;
+            if(sysId != null && mapData){
+              const sys = Object.values(mapData.solar_systems).find(s=> s.id === sysId) || null;
+              if(sys){
+                // Avoid recreating label unnecessarily
+                setHoveredSystem(sys);
+                // Build/update label element
+                const labelText = sys.name + ' Station';
+                if(hoverLabelObj.current === null){
+                  const el = createSystemLabelElement(labelText, false, undefined);
+                  hoverLabelObj.current = new CSS2DObject(el);
+                  hoverLabelObj.current.position.set(0,0,0);
+                  hit.add(hoverLabelObj.current);
+                } else {
+                  if(hoverLabelObj.current.parent){
+                    hoverLabelObj.current.parent.remove(hoverLabelObj.current);
+                    if(sceneRef.current && hoverLabelObj.current.parent instanceof THREE.Object3D){ sceneRef.current.remove(hoverLabelObj.current.parent); }
+                  }
+                  // Reuse existing element; override text content directly (skip planets/distance logic)
+                  const el = hoverLabelObj.current.element as HTMLElement;
+                  const labelDiv = el.querySelector('.system-label');
+                  if(labelDiv) labelDiv.textContent = labelText;
+                  hit.add(hoverLabelObj.current);
+                }
+                if(hoverLabelObj.current) hoverLabelObj.current.visible = true;
+                // Skip star hover logic when station matched
+                return;
+              }
+            }
+          }
+        }
+  // Dynamic threshold based on camera distance with runtime tuning & optional sub-min scaling
+  const cfg = hoverTuningRef.current;
   const distance = cameraRef.current.position.distanceTo(controlsRef.current.target);
-  const minDistance = 100;
-  const maxDistance = 50000;
-  const minThreshold = 1;   // near = very precise
-  const maxThreshold = 300;  // restored max threshold for far zoom hover forgiveness
-  const clampedDistance = Math.max(minDistance, Math.min(maxDistance, distance));
-  const normalizedDistance = (clampedDistance - minDistance) / (maxDistance - minDistance);
-  const dynamicThreshold = minThreshold + (maxThreshold - minThreshold) * normalizedDistance;
-  raycaster.params.Points.threshold = dynamicThreshold;
+  if(cfg.allowBelowMinDistance && distance < cfg.minDistance){
+    // Scale linearly (or with exponent) below minDistance down to floorBelowMin * minThreshold
+    const factorRaw = distance / cfg.minDistance; // 0..1
+    const factor = Math.pow(Math.max(0, Math.min(1, factorRaw)), cfg.curveExp);
+    const floorFrac = Math.max(0.01, Math.min(1, cfg.floorBelowMin));
+    const below = cfg.minThreshold * Math.max(factor, floorFrac);
+    raycaster.params.Points.threshold = below;
+  } else {
+    const clamped = Math.max(cfg.minDistance, Math.min(cfg.maxDistance, distance));
+    const normRaw = (clamped - cfg.minDistance) / (cfg.maxDistance - cfg.minDistance);
+    const norm = Math.pow(normRaw, cfg.curveExp);
+    const dynamic = cfg.minThreshold + (cfg.maxThreshold - cfg.minThreshold) * norm;
+    raycaster.params.Points.threshold = dynamic;
+  }
   const intersects = raycaster.intersectObject(starFieldRef.current);
 
         let newHoveredSystem: SolarSystem | null = null;
@@ -3101,7 +3411,7 @@ function App() {
       mouseDownTimeRef.current = Date.now();
     };
 
-    const onPointerUp = (event: PointerEvent) => {
+  const onPointerUp = (event: PointerEvent) => {
       const timeElapsed = Date.now() - mouseDownTimeRef.current;
       // Handle left click selection only for left button, but ALWAYS reset drag state
       if (event.button === 0) {
@@ -3127,6 +3437,32 @@ function App() {
     // Right-click context menu for setting destination
   const onContextMenu = (event: MouseEvent) => {
       if(!hoveredSystem) return; // only active when a star is hovered
+      // If a menu for this same system already open, treat second right-click as close
+      if(contextMenuObjRef.current && contextMenuSystemRef.current && contextMenuSystemRef.current.name === hoveredSystem.name){
+        try {
+          if(contextMenuObjRef.current.parent){
+            contextMenuObjRef.current.parent.remove(contextMenuObjRef.current);
+            if(sceneRef.current && contextMenuObjRef.current.parent instanceof THREE.Object3D){
+              sceneRef.current.remove(contextMenuObjRef.current.parent);
+            }
+          }
+        } catch {/* ignore */}
+        contextMenuObjRef.current = null; contextMenuSystemRef.current = null;
+        event.preventDefault();
+        return;
+      }
+      // If a different system already has an open menu, close it before opening a new one
+      if(contextMenuObjRef.current){
+        try {
+          if(contextMenuObjRef.current.parent){
+            contextMenuObjRef.current.parent.remove(contextMenuObjRef.current);
+            if(sceneRef.current && contextMenuObjRef.current.parent instanceof THREE.Object3D){
+              sceneRef.current.remove(contextMenuObjRef.current.parent);
+            }
+          }
+        } catch {/* ignore */}
+        contextMenuObjRef.current = null; contextMenuSystemRef.current = null;
+      }
       event.preventDefault();
       // Immediately suppress existing hover label for this system so it doesn't overlap menu
       if(hoverLabelObj.current){
@@ -3141,29 +3477,27 @@ function App() {
         } catch { /* ignore */ }
       }
       // Remove existing context menu label
-      if(contextMenuObjRef.current){
-        try {
-          if(contextMenuObjRef.current.parent){
-            contextMenuObjRef.current.parent.remove(contextMenuObjRef.current);
-            if(sceneRef.current && contextMenuObjRef.current.parent instanceof THREE.Object3D){
-              sceneRef.current.remove(contextMenuObjRef.current.parent);
-            }
+      // Additional: raycast station icons first for higher priority
+      if (showStations && stationSpriteGroupRef.current && cameraRef.current) {
+        const raycaster = new THREE.Raycaster();
+        raycaster.setFromCamera(mouse, cameraRef.current as THREE.Camera);
+        const hits = raycaster.intersectObjects(stationSpriteGroupRef.current.children, false);
+        if (hits.length && mapData) {
+          const hit = hits[0].object as THREE.Sprite & { userData?: any };
+          const id = hit.userData?.systemId;
+          if(id!=null){
+            const systems = Object.values(mapData.solar_systems);
+            const found = systems.find(s=> s.id === id);
+            if(found) setHoveredSystem(found);
           }
-        } catch {/* ignore */}
-        contextMenuObjRef.current = null;
+        }
       }
-      contextMenuSystemRef.current = hoveredSystem;
-      // Build persistent label parent at system position
-      const parent = new THREE.Object3D();
-      const pos = getTransformedPosition(hoveredSystem.position);
-      parent.position.set(pos.x,pos.y,pos.z);
-      sceneRef.current?.add(parent);
-      // Build label element replicating hover formatting (planets, distance)
+      // Build DOM elements (previous patch lost declarations)
       const el = document.createElement('div');
       el.className = 'system-label-wrapper';
-      el.style.pointerEvents = 'auto'; // enable interaction for context menu
       const inner = document.createElement('div');
       inner.className = 'system-label system-label--selected';
+      contextMenuSystemRef.current = hoveredSystem;
       // Compose text like hover label
       let labelText = hoveredSystem.name;
       if(isPlanetCountActive){ labelText += ` (${hoveredSystem.planets} planets)`; }
@@ -3264,7 +3598,32 @@ function App() {
       el.appendChild(inner);
       const menuObj = new CSS2DObject(el);
       contextMenuObjRef.current = menuObj;
-      parent.add(menuObj);
+      // Anchor the menu to the system's 3D position so it appears adjacent to the star.
+      // (Previous regression added the label directly to the scene at (0,0,0) causing it to appear far away.)
+      if(sceneRef.current){
+        const anchor = new THREE.Object3D();
+        const tPos = getTransformedPosition(hoveredSystem.position as any);
+        anchor.position.set(tPos.x, tPos.y, tPos.z);
+        anchor.add(menuObj);
+        sceneRef.current.add(anchor);
+        // Screen-space offset (right of star). Compute in world units using camera distance & FOV.
+        try {
+          const cam = cameraRef.current as THREE.PerspectiveCamera | null;
+          const rend = rendererRef.current as THREE.WebGLRenderer | null;
+          if(cam && rend){
+            const viewportH = rend.domElement.clientHeight || window.innerHeight || 1;
+            const dist = cam.position.distanceTo(anchor.position);
+            const vFov = THREE.MathUtils.degToRad(cam.fov);
+            const worldPerPixelY = (2 * Math.tan(vFov/2) * dist) / viewportH;
+            const worldPerPixelX = worldPerPixelY * cam.aspect;
+            const pxRight = 8; // tuned gap
+            const forward = new THREE.Vector3(); cam.getWorldDirection(forward);
+            const upDir = cam.up.clone().normalize();
+            const rightDir = new THREE.Vector3().crossVectors(forward, upDir).normalize();
+            menuObj.position.addScaledVector(rightDir, worldPerPixelX * pxRight);
+          }
+        } catch {/* ignore offset errors */}
+      }
     };
     currentRenderer.domElement.addEventListener('contextmenu', onContextMenu);
     // Close context menu on left click anywhere outside menu
@@ -3284,6 +3643,21 @@ function App() {
       contextMenuObjRef.current = null; contextMenuSystemRef.current = null;
     };
     window.addEventListener('mousedown', closeOnLeftClick);
+    // Close on Escape for accessibility / stuck states
+    const escHandler = (ev: KeyboardEvent) => {
+      if(ev.key === 'Escape' && contextMenuObjRef.current){
+        try {
+          if(contextMenuObjRef.current.parent){
+            contextMenuObjRef.current.parent.remove(contextMenuObjRef.current);
+            if(sceneRef.current && contextMenuObjRef.current.parent instanceof THREE.Object3D){
+              sceneRef.current.remove(contextMenuObjRef.current.parent);
+            }
+          }
+        } catch {/* ignore */}
+        contextMenuObjRef.current = null; contextMenuSystemRef.current = null;
+      }
+    };
+    window.addEventListener('keydown', escHandler);
 
     return () => {
       currentRenderer.domElement.removeEventListener('pointermove', onPointerMove);
@@ -3292,6 +3666,7 @@ function App() {
   currentRenderer.domElement.removeEventListener('pointerleave', onPointerLeave);
   currentRenderer.domElement.removeEventListener('contextmenu', onContextMenu);
   window.removeEventListener('mousedown', closeOnLeftClick);
+  window.removeEventListener('keydown', escHandler);
     };
   }, [isLoaded, hoveredSystem, isDraggingRef, mouseDownPosRef, mouseDownTimeRef, createSystemLabelElement, selectSystem, isPlanetCountActive, showDistance, highlightedSystem, cinematicMode, cinematicLabels, openPanels, ensurePanel, lastSelectedSystemName]);
 
@@ -3489,6 +3864,7 @@ function App() {
               { id:'cinematic', type:'panel', label:'Cinematic Mode', display:(<>Cinematic<br/>Mode</>), icon:null, active:openPanels.has('cinematic'), onSelect:()=> { if(openPanels.has('cinematic')) { setCinematicMode(false); } else { setCinematicMode(true); } togglePanel('cinematic'); } },
               { id:'region', type:'toggle', label:'Highlight Region', display:(<>Highlight<br/>Region</>), icon:null, active:isRegionHighlighterActive, onToggle:()=> setIsRegionHighlighterActive(v=> !v) },
               { id:'planets', type:'toggle', label:'Display Planet Counts', display:(<>Planet<br/>Counts</>), icon:null, active:isPlanetCountActive, onToggle:()=> setIsPlanetCountActive(v=> !v) },
+              { id:'stations', type:'toggle', label:'Show Stations', display:(<>Show<br/>Stations</>), icon:null, active:showStations, onToggle:()=> setShowStations(v=> { const next=!v; try { persistShowStations(next); } catch {}; try { if(next) track({ type:'show_stations' }); } catch {}; return next; }) },
               { id:'distance', type:'toggle', label:'Show Distance', display:(<>Show<br/>Distance</>), icon:null, active:showDistance, onToggle:()=> setShowDistance(v=> !v) },
               { id:'reset-layout', type:'panel', label:'Reset Layout', display:(<>Reset<br/>Layout</>), icon:null, active:false, onSelect:()=> { if(window.confirm('Reset panel positions and layout?')) { fullReset(); setOpenPanels(new Set()); setAccentIsBlue(false); setResetToken(t=> t+1); setLayoutResetToken(t=> t+1); } } },
             ] as any}
@@ -3614,6 +3990,7 @@ function App() {
               {generatePlanetCountLegend()}
             </PlanetLegendPanel>
           )}
+          {/* StationsPanel removed: feature rail toggle directly controls icon sprites without extra popup */}
         </>
       )}
       {/* Persistent quick controls (never hidden so user can un-hide UI; not scaled for pointer stability) */}

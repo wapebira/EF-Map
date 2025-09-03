@@ -246,6 +246,7 @@ const StatsPage: React.FC = () => {
             <StatRow label="Waypoint optimize" value={data.counters.waypoint_opt_used||0} />
             <StatRow label="Return to start" value={data.counters.return_to_start||0} />
             <StatRow label="Gate reachable" value={data.counters.gate_reachable||0} />
+            <StatRow label="Show stations" value={data.counters.show_stations||0} />
             <StatRow label="Planet-filter baselines" value={data.counters.planet_filter_baselines||0} />
           </section>
           {/* UI & Theme */}

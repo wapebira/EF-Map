@@ -1,3 +1,11 @@
+## 2025-09-03 – Station Data Integration (map_data_v2)
+- Goal: Introduce optional station visibility feature by embedding per-system station counts into generated SQLite while preserving backward compatibility.
+- Change: Added `stations(system_id TEXT PRIMARY KEY, station_count INTEGER)` table in generation script and version-bumped asset to `map_data_v2.db` for cache bust.
+- Source DB: External `mapobjects.db` (root, not committed) scanned heuristically for a table name containing 'station' with a system id column variant. Counts aggregated per system.
+- Fallback: If `mapobjects.db` absent or table not found, table remains empty; frontend will treat as no stations (graceful).
+- Risk: Low (additive schema + filename bump). No existing queries altered.
+- Follow-ups: Frontend loader toggle, icon overlay, regeneration doc outlining steps to refresh universe including stations extraction (UNIVERSE_DATA_PIPELINE.md added).
+
 ## 2025-09-01 – Baseline Starfield Visual Enhancements (Items 1–9)
 
 - Goal: Enrich default (non-cinematic) map background without enabling full cinematic mode. Implement approved enhancements 1–9: gradient sky dome, radial center boost, noise dithering, light fog, distance brightness falloff, temperature tint jitter, anchor star size variance, micro twinkle, faint parallax layer.
@@ -138,3 +146,73 @@
 - Rationale: Emphasize key growth & depth signals; reduce cognitive load; align styling with metric cards (same rounded panel aesthetic, larger canvas).
 - Risk: Low (UI only). Underlying data & events unchanged.
 - Follow-ups: Option to add a third chart later (performance or optimization impact) if needed; consider hover tooltips & moving average overlay.
+
+## 2025-09-03 – Stats Tables + Incremental Panel Cascade UI Rework
+
+- Goal: (1) Reinforce simplified stats view with tabular clarity (key counters & recent history) while keeping lean two‑chart design; (2) Resolve overlapping / shifting behavior of left-side drawers (Routing, Cinematic, Planet Counts) to ensure deterministic, non-intrusive panel layout.
+- Files: `src/components/StatsPage.tsx` (table refinements already integrated in prior simplification), `src/App.tsx` (panel cascade logic rewrite), `src/components/layout/PanelDrawer.tsx` (data attribute for targeting), `src/components/HelpPanel/HelpPanel.tsx` (final underline alignment), `src/App.css`, `src/components/layout/panelLayout.css`, `decision-log.md` (this entry).
+- Diff (approx): App.tsx (~+110 / -70 for removal of old full-compaction strategy & addition of incremental cascade), minor CSS & drawer attribute additions (<20 LOC), Help underline tweak (~4 LOC).
+- Previous Behavior: Adding a third panel (Planet Counts) sometimes forced earlier panel(s) to recompute X positions, causing overlap or leftward jumps depending on open sequence. Full deterministic compaction solved overlap but introduced undesirable re-shuffling of existing panel positions when a new one opened.
+- New Behavior: Incremental cascade algorithm:
+  - Maintains an internal left→right order list (autoOrderRef).
+  - On open: newly opened panels append to the rightmost edge using measured existing panel widths; existing panels retain their X (no visual jump).
+  - On close: performs a single left-compaction pass to remove gaps.
+  - Overlap safeguard: post-layout duplicate-left detection triggers one deferred full compact.
+  - User Override: If any panel has a persisted drag position in localStorage, auto cascade skips (preserves user intent).
+- Help Panel Alignment: Final 1px adjustments (EXTRA_OFFSET=13) anchor underline flush with bottom edge of top toolbar buttons at all UI scales (50–130%).
+- Rationale: Improve spatial predictability (no reflow surprises), reduce cognitive friction when toggling tools rapidly, and polish micro-alignment for professional feel.
+- Risk: Low (UI only, no data or worker changes). Guard clauses ensure no effect when user manually repositions panels.
+- Gates: typecheck ✅ | build ✅ | smoke ✅ (manual sequences tested: all 6 permutations of opening order; no overlaps, only new panel movement). Performance impact negligible (O(n) width checks on events only).
+- Follow-ups:
+  - Optional animation (fade/slide) for panel entrance without reintroducing layout jitter.
+  - Consider storing order to restore relative arrangement after reload (currently order rebuilt from open sequence each session).
+  - Add settings toggle to re-enable legacy full-compaction for users preferring tightly packed deterministic ordering.
+  - Potential small debounced relayout if panels become resizable in future.
+
+## 2025-09-03 – Station Sprite Rendering, Scaling & Interaction Refinements
+
+- Goal: Deliver fully usable optional station overlay (toggle: showStations) with high visual fidelity, minimal clutter at normal zoom, smooth/intuitive growth when focused, correct depth compositing, stable persistence, and contextual hover/selection UX.
+- Scope Summary:
+  - Backend: `map_data_v2.db` already providing per-system station counts (prior entry). No further schema changes.
+  - Frontend Additions/Changes (all in `App.tsx` + prefs): sprite group creation, scaling loop, focus/hysteresis logic, hover precedence, selection integration, auto-load retry, depth correctness.
+- Key Implementation Details:
+  1. Data Bridge: On DB load (prefers `map_data_v2.db` → falls back) constructs `window.__efStations` (array of `{ id:number, count:number }`). System ID normalization to numbers avoids earlier mismatch.
+  2. Persistent Toggle: `showStations` stored in prefs; on page reload if enabled, a guarded effect retries sprite creation until dataset present (prevents race with async DB open).
+  3. Single Sprite Group Guard: Ref & retry token ensure only one `stationsGroup` exists; cleanup removes group when toggled off to free GPU resources.
+  4. Visual Fidelity:
+    - Texture: transparent PNG (no programmatic alpha manipulation) retains original red (#ff2b2b family) under sRGB; tone mapping left disabled for consistency with starfield.
+    - Aspect Ratio: Sprite scale uses texture width/height ratio to avoid horizontal squishing.
+    - Depth & Alpha: `depthWrite:true`, `depthTest:true`, `alphaTest:0.02` stops background stars from bleeding through semi-opaque edges (previous faint transparency artifact resolved).
+  5. Screen-Space Scaling Model:
+    - Baseline world distance captured on first frame → anchors reference scale.
+    - Below a growthStartDist threshold (~close approach) icons remain clamped to a small min pixel size (~24px) to reduce clutter at typical overview zoom.
+    - Focus Growth: Only one station (selected system; fallback: nearest) receives large growth curve (eased high-power function) up to capped max pixel size; others stay near-min.
+    - Hysteresis: Prevents rapid focus switching when cursor/camera jitter causes nearest station to alternate; only changes when distance delta exceeds tolerance (~15%).
+    - Dynamic Gap: Pixel gap above star converts to world units each frame (1–8px range) so icon appears visually anchored without overlapping star glow regardless of zoom.
+  6. Interaction:
+    - Hover Precedence: Station raycast executed before starfield; when hit, star hover suppressed and label shows "<SystemName> Station".
+    - Selection: Click selects underlying system (same pathway as clicking star) enabling route or info workflows seamlessly.
+  7. Performance: Scaling & focus computations O(nStations); current counts low. All operations in a single RAF branch; no allocations inside hot loop besides trivial comparisons. Caches (refs) avoid repeated lookups.
+  8. Resilience: If station data absent (empty table) logic short-circuits; no errors. Fallback to legacy DB preserves compatibility when updated DB not yet deployed.
+  9. No Worker / Schema Impact: Pure client visual layer—safe to deploy without backend function changes.
+- Risk: Low (isolated additive rendering path; no mutation of existing map or routing state).
+- Gates: typecheck ✅ build ✅ (local) smoke ✅ (verified: toggle persistence, single focus growth, depth occlusion, hover label precedence, selection of system via icon, no duplicate groups after multiple toggles & reloads).
+- Follow-ups (Optional):
+  - Add eased interpolation (lerp) to scale transitions for even smoother growth onset.
+  - Expose user-adjustable scaling preferences (min size, max focus size, growth threshold) in settings panel.
+  - Micro-performance: Precompute id→position map or pack station metadata into typed arrays if station counts grow significantly.
+  - Accessibility: Provide text-only list alternative or ARIA live region for station focus changes.
+
+## 2025-09-03 – Hover Threshold Fine-Tuning (floorBelowMin=0.12 Adopted)
+
+- Goal: Improve precision system selection in dense clusters at maximum zoom by allowing smaller effective hover raycast threshold below previous runtime min (0.15 → 0.12) without increasing false hovers at normal zoom levels.
+- Context: Earlier adaptive curve (`minDistance=100`, `maxDistance=50000`, thresholds 1–300) occasionally produced near-miss hover failures when camera extremely close (< ~140 world units) to tightly packed stars. A runtime tuning facility (`window.__efSetHoverTuning`) was introduced for experimentation; value 0.12 tested and chosen (Option A) as optimal balance of precision vs. stability.
+- Change: Default `hoverTuningRef` initialization in `App.tsx` updated: `floorBelowMin: 0.12`.
+- Behavior: Only affects near-distance branch when `allowBelowMinDistance=true` and computed distance < `minDistance`. Mid/long-distance thresholds unchanged; no impact on performance (single constant subtraction in existing logic path).
+- Risk: Low (single numeric constant tweak; guarded code path). No new state, schema, or event tracking changes.
+- Gates: typecheck ✅ | build ✅ (pending full project build) | smoke: manual verification selecting adjacent systems at max zoom succeeded where occasional misses occurred pre-change.
+- Follow-ups:
+  - Optional settings exposure if more user feedback requests further granularity.
+  - Consider a smooth easing curve for below-min interpolation (e.g., use `curveExp > 1`) if future extremely dense data layers introduced.
+  - Evaluate persisting user overrides via prefs if power users commonly adjust via console.
+
