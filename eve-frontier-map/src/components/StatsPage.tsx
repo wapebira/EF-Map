@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { ChartLegend, chartColors, ResponsiveLineChart } from './StatsCharts';
 
 interface StatsSnapshot { version: number; updatedAt: string; counters: Record<string, number>; sums: Record<string, number>; date?: string }
 
@@ -119,12 +120,34 @@ const StatsPage: React.FC = () => {
   const [data, setData] = useState<StatsSnapshot | null>(null);
   const [history, setHistory] = useState<StatsSnapshot[]>([]);
   const [error, setError] = useState<string | null>(null);
+  // Daily derived snapshots
+  const daily = useMemo(()=> history.map(h=>({ date: (h.date? h.date.replace(/\.json$/,''): h.updatedAt.slice(0,10)), counters: h.counters, sums: h.sums })), [history]);
+  // No chart toggles (simplified to two primary charts)
+  // Series builders
+  // Chart 1: Core usage counts (page loads, P2P routes, scout baselines)
+  const usageSeries = useMemo(()=>{
+    const mk = (key:string,label:string,color:string)=> ({ id:key, label, color, points: daily.map(d=>({ x:d.date, y:d.counters[key]||0 })) });
+    return [
+      mk('page_loads','Page Loads', chartColors[0]),
+      mk('p2p_routes','P2P Routes', chartColors[1]),
+      mk('scout_baselines','ScoutOptimizer Baselines', chartColors[3]) // renamed label only for legend clarity
+    ];
+  }, [daily]);
+  // Chart 2: Engagement rates (share creation, route copy, cinematic usage) as percentages
+  const engagementRateSeries = useMemo(()=>{
+    return [
+      { id:'share_rate', label:'Share Creation %', color:chartColors[0], points: daily.map(d=>{ const pl=d.counters.page_loads||0; const sh=d.counters.routes_shared||0; return { x:d.date, y: pl? (sh/pl)*100: 0 }; }) },
+      { id:'copy_rate', label:'Route Copy %', color:chartColors[1], points: daily.map(d=>{ const routes=(d.counters.p2p_routes||0)+(d.counters.scout_optimizations||0); const copies=d.counters.route_copies||0; return { x:d.date, y: routes? (copies/routes)*100: 0 }; }) },
+      { id:'cinematic_rate', label:'Cinematic Usage %', color:chartColors[2], points: daily.map(d=>{ const pl=d.counters.page_loads||0; const cs=d.counters.cinematic_sessions||0; return { x:d.date, y: pl? (cs/pl)*100: 0 }; }) }
+    ];
+  }, [daily]);
 
   useEffect(()=>{
     let cancelled=false;
     const fetchData = async () => {
       try {
-  const res = await fetch('/.netlify/functions/stats?history=7');
+  // Request up to 30 days of history (server caps at 31). Graph section (added later) consumes this.
+  const res = await fetch('/.netlify/functions/stats?history=30');
         if(!res.ok) throw new Error('Failed');
         const json = await res.json();
         if(cancelled) return;
@@ -167,6 +190,22 @@ const StatsPage: React.FC = () => {
       {error && <div style={{ color:'#f66', marginBottom:12 }}>{error}</div>}
       {!data && !error && <div>Loading...</div>}
       {data && (
+        <>
+        {/* Charts Section (side-by-side) */}
+        {daily.length>0 && (
+          <div style={{ display:'flex', flexWrap:'wrap', gap:24, margin:'0 0 40px 0' }} aria-label="Usage Trend Charts">
+            <section style={{ flex:'1 1 0', minWidth:600, background:'rgba(255,255,255,0.06)', padding:'20px 22px 16px', border:'1px solid rgba(255,255,255,0.15)', borderRadius:12 }}>
+              <h2 style={{ margin:'0 0 12px 0', fontSize:'15px', letterSpacing:'.5px', textTransform:'uppercase', opacity:0.85 }}>Core Usage (Daily)</h2>
+              <ResponsiveLineChart series={usageSeries} yLabel="Count" height={320} />
+              <ChartLegend items={usageSeries.map(s=>({ label:s.label||s.id, color:s.color||chartColors[0] }))} />
+            </section>
+            <section style={{ flex:'1 1 0', minWidth:600, background:'rgba(255,255,255,0.06)', padding:'20px 22px 16px', border:'1px solid rgba(255,255,255,0.15)', borderRadius:12 }}>
+              <h2 style={{ margin:'0 0 12px 0', fontSize:'15px', letterSpacing:'.5px', textTransform:'uppercase', opacity:0.85 }}>Engagement Rates (Daily)</h2>
+              <ResponsiveLineChart series={engagementRateSeries} yLabel="Percent" height={320} />
+              <ChartLegend items={engagementRateSeries.map(s=>({ label:s.label||s.id, color:s.color||chartColors[0] }))} />
+            </section>
+          </div>
+        )}
         <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(300px,1fr))', gap:'20px' }}>
           {/* Activation & Load */}
           <section style={{ background:'rgba(255,255,255,0.06)', padding:'16px 18px', border:'1px solid rgba(255,255,255,0.15)', borderRadius:10, boxShadow:'0 2px 4px rgba(0,0,0,0.45)' }}>
@@ -278,7 +317,8 @@ const StatsPage: React.FC = () => {
               {(()=>{ const scaleKeys=Object.keys(data.counters).filter(k=> k.startsWith('ui_scale_')); const rows=scaleKeys.sort((a,b)=> parseInt(a.replace('ui_scale_',''))-parseInt(b.replace('ui_scale_',''))).map(k=>({k,c:data.counters[k]||0,label:k.replace('ui_scale_','')+'%'})); const tot=rows.reduce((a,b)=>a+b.c,0); return <DistTable title="UI Scale" rows={rows} total={tot} />; })()}
             </div>
           </section>
-        </div>
+  </div>
+  </>
       )}
       <div style={{ marginTop:22, fontSize:'11px', opacity:0.5 }}>Updated: {data? new Date(data.updatedAt).toLocaleString(): '—'}</div>
       {history.length>0 && (

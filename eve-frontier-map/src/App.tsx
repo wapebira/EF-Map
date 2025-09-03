@@ -189,6 +189,11 @@ function App() {
   useEffect(()=>{
     persistUiScale(uiScale);
     if(!uiScaleTrackedRef.current){ uiScaleTrackedRef.current = true; try { track({ type:'ui_scale', scale: Math.round(uiScale*100) }); } catch {} }
+  // Update global CSS variable for hybrid scaling containers
+  try {
+    document.documentElement.style.setProperty('--ui-scale', String(uiScale));
+    window.dispatchEvent(new CustomEvent('ui-scale-change', { detail:{ scale: uiScale } }));
+  } catch {/* ignore */}
   }, [uiScale]);
   // Hide UI toggle – count only when enabling
   useEffect(()=>{ if(hideUI){ try { track({ type:'ui_hide' }); } catch {} } }, [hideUI]);
@@ -1014,10 +1019,25 @@ function App() {
   // One-time hash import ref
   const initialHashAppliedRef = useRef(false);
 
-  // (legacy openPanel removed after multi-panel refactor)
-  const [openPanelOrder, setOpenPanelOrder] = useState<string[]>([]); // track open order for cascade positioning
-  const togglePanel = (id:string) => setOpenPanels(prev => { const next = new Set(prev); if(next.has(id)) { next.delete(id); setOpenPanelOrder(o=> o.filter(p=> p!==id)); } else { next.add(id); setOpenPanelOrder(o=> o.includes(id)? o : [...o, id]); } return next; });
-  const ensurePanel = (id:string) => setOpenPanels(prev => { if(prev.has(id)) return prev; const next = new Set(prev); next.add(id); setOpenPanelOrder(o=> o.includes(id)? o : [...o, id]); return next; });
+  // Track open order so cascade preserves open sequence (affects horizontal ordering)
+  const [openPanelOrder, setOpenPanelOrder] = useState<string[]>([]);
+  const togglePanel = (id:string) => setOpenPanels(prev => {
+    const next = new Set(prev);
+    if(next.has(id)) {
+      next.delete(id);
+      setOpenPanelOrder(o=> o.filter(p=> p!==id));
+    } else {
+      next.add(id);
+      setOpenPanelOrder(o=> o.includes(id)? o : [...o, id]);
+    }
+    return next;
+  });
+  const ensurePanel = (id:string) => setOpenPanels(prev => {
+    if(prev.has(id)) return prev;
+    const next = new Set(prev); next.add(id);
+    setOpenPanelOrder(o=> o.includes(id)? o : [...o, id]);
+    return next;
+  });
 
   // Load persisted prefs once
   useEffect(()=>{
@@ -1041,47 +1061,87 @@ function App() {
   // Refs to panel drawers for programmatic (non-persisting) positioning
   const routingDrawerRef = useRef<PanelDrawerHandle|null>(null);
   const cinematicDrawerRef = useRef<PanelDrawerHandle|null>(null);
-  // Track planet legend in open order when active
+  // Maintain legend in open order when toggled
   useEffect(()=>{
     setOpenPanelOrder(prev=>{
-      let next = prev;
-      const hasLegend = prev.includes('planet-legend');
-      if(isPlanetCountActive && !hasLegend){ next = [...prev, 'planet-legend']; }
-      if(!isPlanetCountActive && hasLegend){ next = prev.filter(p=> p!=='planet-legend'); }
-      return next;
+      const has = prev.includes('planet-legend');
+      if(isPlanetCountActive && !has) return [...prev, 'planet-legend'];
+      if(!isPlanetCountActive && has) return prev.filter(p=> p!=='planet-legend');
+      return prev;
     });
   }, [isPlanetCountActive]);
 
-  // Dynamic cascade: when multiple panels (routing, cinematic, planet legend) open and user has not dragged them (no stored pos), arrange side-by-side.
-  useEffect(()=>{
-    // Candidate panels & active filtered by open state
-    const candidates = ['routing','cinematic']; if(isPlanetCountActive) candidates.push('planet-legend');
-    const active = openPanelOrder.filter(id=> candidates.includes(id) && (id==='planet-legend'? isPlanetCountActive : openPanels.has(id)));
-    if(active.length===0) return;
-    const baseY = 70; const stride = 420;
-    // Determine anchor X: leftmost among panels that already have a stored position (user-moved) else default 140.
-    let anchorX = 140;
-    const resolvedPositions: Record<string,{x:number;y:number}> = {};
-    active.forEach(id=>{
-      const key = id==='planet-legend' ? 'panel-pos:planet-legend' : 'panel-pos:drawer-'+id;
-      const raw = localStorage.getItem(key);
-      if(raw){ try { const p = JSON.parse(raw); if(typeof p.x==='number') { resolvedPositions[id]={x:p.x,y:p.y}; } } catch {/* ignore */} }
-    });
-    // Choose smallest x among user-placed panels as anchor
-    Object.values(resolvedPositions).forEach(p=>{ if(p.x < anchorX) anchorX = p.x; });
-    const cascading = active.length>1;
-    active.forEach((id, idx)=>{
-      const storageKey = id==='planet-legend' ? 'panel-pos:planet-legend' : 'panel-pos:drawer-'+id;
-      if(localStorage.getItem(storageKey)) return; // Respect user positioning for this panel
-      const x = cascading ? anchorX + idx*stride : anchorX;
-      const target = { x, y: baseY };
+  // Incremental cascade (append on open, compact on close) preserving existing positions.
+  const autoOrderRef = useRef<string[]>([]); // current left-to-right order of auto-managed panels
+  useLayoutEffect(()=>{
+    const BASE_X = 140, BASE_Y = 70, GAP_X = 24;
+    const managed = (id:string)=> id==='routing' || id==='cinematic' || id==='planet-legend';
+    const active = openPanelOrder.filter(id=> managed(id) && (id==='planet-legend'? isPlanetCountActive : openPanels.has(id)));
+    const prevOrder = autoOrderRef.current;
+    // Remove any that are no longer active
+    const closed = prevOrder.filter(id=> !active.includes(id));
+    const still = prevOrder.filter(id=> active.includes(id));
+    const newlyOpened = active.filter(id=> !prevOrder.includes(id));
+    if(!active.length){ autoOrderRef.current = []; return; }
+    // Abort if any user-moved panel
+    if(active.some(id=> !!localStorage.getItem(id==='planet-legend'? 'panel-pos:planet-legend':'panel-pos:drawer-'+id))) return;
+    const widthOf = (id:string):number => {
+      const sel = id==='planet-legend'? '.ef-secondary-panel' : `.ef-drawer[data-panel-id="${id}"]`;
+      const el = document.querySelector(sel) as HTMLElement | null; return el? el.offsetWidth : 0;
+    };
+    const place = (id:string, x:number) => {
+      const target = { x, y: BASE_Y };
       if(id==='routing' && routingDrawerRef.current) routingDrawerRef.current.autoPosition(target);
       else if(id==='cinematic' && cinematicDrawerRef.current) cinematicDrawerRef.current.autoPosition(target);
-      else if(id==='planet-legend'){
-        try { window.dispatchEvent(new CustomEvent('ef:auto-pos', { detail:{ id, target, cascade: cascading } })); } catch {/* ignore */}
+      else if(id==='planet-legend') { try { window.dispatchEvent(new CustomEvent('ef:auto-pos', { detail:{ id, target, cascade:true } })); } catch {/* ignore */} }
+    };
+    const compactAll = () => {
+      let x = BASE_X;
+      autoOrderRef.current.forEach(id=>{ place(id,x); x += widthOf(id) + GAP_X; });
+    };
+    const run = () => {
+      // First update order reference
+      autoOrderRef.current = [...still, ...newlyOpened];
+      if(closed.length){
+        // Compact everything left
+        compactAll();
+        return;
       }
-    });
-  },[openPanels, openPanelOrder, isPlanetCountActive]);
+      if(newlyOpened.length){
+        // Determine rightmost edge among existing (still) panels
+        let rightEdge = BASE_X - GAP_X; // so first existing sets proper edge
+        if(still.length){
+          still.forEach(id=>{
+            const sel = id==='planet-legend'? '.ef-secondary-panel' : `.ef-drawer[data-panel-id="${id}"]`;
+            const el = document.querySelector(sel) as HTMLElement | null;
+            if(el){ const r = el.getBoundingClientRect(); const e = r.left + r.width; if(e>rightEdge) rightEdge = e; }
+          });
+        }
+        newlyOpened.forEach((id, idx)=>{
+          if(still.length===0 && idx===0){ // very first panel
+            place(id, BASE_X);
+            rightEdge = BASE_X + widthOf(id);
+          } else {
+            const x = (still.length===0 && idx===0)? BASE_X : rightEdge + GAP_X;
+            place(id, x);
+            rightEdge = x + widthOf(id);
+          }
+        });
+      }
+      // Overlap safeguard: if any overlap remains (left duplicates), force one full compact pass next frame (rare)
+      requestAnimationFrame(()=>{
+        const lefts:number[]=[]; let overlap=false;
+        autoOrderRef.current.forEach(id=>{
+          const sel = id==='planet-legend'? '.ef-secondary-panel' : `.ef-drawer[data-panel-id="${id}"]`;
+          const el = document.querySelector(sel) as HTMLElement | null;
+          if(el){ const l=parseFloat(el.style.left||'0'); if(lefts.some(v=> Math.abs(v-l)<2)) overlap=true; lefts.push(l); }
+        });
+        if(overlap){ requestAnimationFrame(compactAll); }
+      });
+    };
+    // Two-frame defer to let new panel DOM mount & width settle
+    requestAnimationFrame(()=> requestAnimationFrame(run));
+  }, [openPanels, openPanelOrder, isPlanetCountActive, uiScale]);
   // Optional debug toggle (open console and set window.DEBUG_PREFS=true)
   ;(window as any).DEBUG_PREFS = (window as any).DEBUG_PREFS || false;
 
@@ -3252,15 +3312,60 @@ function App() {
     }
   };
 
+  // Unified layout effect: position rail relative to search panel (constant gap) then place drawers/legend beside rail
+  useLayoutEffect(()=>{
+    if(!isLoaded) return;
+    const reflow = () => {
+      try {
+        const searchPanel = document.querySelector('.ef-search-panel') as HTMLElement | null;
+        const railWrapper = document.querySelector('.ef-rail-wrapper') as HTMLElement | null;
+        if(!searchPanel || !railWrapper) return;
+        const GAP = 10; // constant vertical gap
+        const spRect = searchPanel.getBoundingClientRect();
+        railWrapper.style.top = (spRect.bottom + GAP) + 'px';
+        // Defer drawer alignment to next two animation frames so layout settles after top change
+        requestAnimationFrame(()=>{
+          requestAnimationFrame(()=>{
+            const rail = railWrapper.querySelector('.ef-rail') as HTMLElement | null;
+            if(!rail) return;
+            const railRect = rail.getBoundingClientRect();
+            // Desired left is rail right edge + small gap; fallback to base 140 if rail is very narrow (safety)
+            const desiredDrawerLeft = Math.round(railRect.left + railRect.width + 6);
+            const drawerTop = Math.round(railRect.top); // align to rail top (should already match base 70 after scaling)
+            const drawerIds = ['routing','cinematic'];
+            drawerIds.forEach(id=>{
+              const storageKey = 'panel-pos:drawer-'+id;
+              if(localStorage.getItem(storageKey)) return; // user customized
+              const el = document.querySelector(`.ef-drawer[data-panel-id="${id}"]`) as HTMLElement | null;
+              if(el){
+                el.style.left = desiredDrawerLeft + 'px';
+                const elRect = el.getBoundingClientRect();
+                if(Math.abs(elRect.top - drawerTop) > 1){ el.style.top = drawerTop + 'px'; }
+              }
+            });
+            const legendKey = 'panel-pos:planet-legend';
+            if(!localStorage.getItem(legendKey)){
+              const legend = document.querySelector('.ef-secondary-panel') as HTMLElement | null;
+              if(legend){ legend.style.left = desiredDrawerLeft + 'px'; legend.style.top = drawerTop + 'px'; }
+            }
+          });
+        });
+      } catch {/* ignore */}
+    };
+    reflow();
+    window.addEventListener('resize', reflow);
+    window.addEventListener('ui-scale-change', reflow as any);
+    return ()=> { window.removeEventListener('resize', reflow); window.removeEventListener('ui-scale-change', reflow as any); };
+  }, [uiScale, openPanels, isPlanetCountActive, isLoaded]);
+
   if (!isLoaded) {
     return <LoadingScreen progress={loadingProgress} status={loadingStatus} />;
   }
 
-  // Compose a style wrapper scaler for UI (exclude the 3D canvas)
-  // Scale applied ONLY to primary UI panels (not the persistent bottom-left quick controls)
-  // Scale origin top-right so toolbar shrinks toward the corner; left panel still from top-left
-  const scaleStyle: React.CSSProperties = { transform:`scale(${uiScale})`, transformOrigin:'top left' };
-  const topRightScaleStyle: React.CSSProperties = { transform:`scale(${uiScale})`, transformOrigin:'top right', display:'flex', alignItems:'stretch', gap:'8px' };
+  // Hybrid scaling now driven by CSS var --ui-scale applied to grouped containers.
+  // Left cluster: search box + rail + drawers (PanelDrawer/Secondary panels) wrapped in ef-left-cluster.
+  // Toolbar: scale applied directly to .ef-top-toolbar root (not inner content) for consistent background sizing.
+
 
   return (
     <>
@@ -3268,17 +3373,17 @@ function App() {
   {/* Referral code copy state */}
   {/* ...existing code... */}
   <div className="ef-top-toolbar" style={hideUI?{display:'none'}:{}}>
-    <div style={topRightScaleStyle} className="ef-top-toolbar-inner">
-      <div className="ef-toolbar-shifting">
-      {/* Support button placed at start so it shifts with referral/share when Help panel opens */}
-      <button
-        className="ef-support-btn"
-        onClick={()=> setSupportExpandRequestId(id=> id+1)}
-        aria-label="Support this project (opens Help panel to Support section)"
-      >Support this project</button>
-      <button
-        className="share-route-btn"
-        onClick={async () => {
+    <div className="ef-top-toolbar-inner" style={{display:'flex', alignItems:'stretch', gap:8}}>
+      <div className="ef-toolbar-shifting" style={{display:'flex', alignItems:'stretch', gap:8}}>
+        {/* Support button placed at start so it shifts left (along with Share + Referral) when Help panel opens. */}
+        <button
+          className="ef-support-btn"
+          onClick={()=> setSupportExpandRequestId(id=> id+1)}
+          aria-label="Support this project (opens Help panel to Support section)"
+        >Support this project</button>
+        <button
+          className="share-route-btn"
+          onClick={async () => {
           if(shareFeedback==='Saving...') return;
           const path = scoutRouteResult?.path || routeResult?.path;
           if(!path || path.length < 2){ setShareFeedback('No route'); setTimeout(()=>setShareFeedback(''),1500); return; }
@@ -3317,14 +3422,15 @@ function App() {
       >
         Share Route
         {shareFeedback && <span className="share-feedback">{shareFeedback}</span>}
-      </button>
-      <ReferralBadge />
-  </div>
-  {/* Help button should remain to the right of referral always */}
-  <HelpPanel accentIsBlue={accentIsBlue} supportExpandRequestId={supportExpandRequestId} supportContent={supportContent} />
+        </button>
+        <ReferralBadge />
+      </div>
+      {/* HelpPanel (toggle + sliding panel) kept outside shifting group so only three buttons move left */}
+      <HelpPanel accentIsBlue={accentIsBlue} supportExpandRequestId={supportExpandRequestId} supportContent={supportContent} />
     </div>
   </div>
-  <div style={hideUI?{display:'none'}:{ position: 'absolute', top: 10, left: 10, zIndex: 1405, color: 'white', padding: '10px 12px 12px', borderRadius: '14px', border:'1px solid rgba(255,255,255,0.22)', background: 'linear-gradient(180deg, rgba(30,30,32,0.78) 0%, rgba(18,18,20,0.78) 55%, rgba(12,12,14,0.78) 100%)', backdropFilter:'blur(9px) saturate(140%)', boxShadow:'0 6px 24px -6px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.05) inset', ...scaleStyle }}>
+  {/* Search panel (separate bounding box) */}
+  <div className="ef-left-cluster ef-search-panel" style={hideUI?{display:'none'}:{ position: 'absolute', top: 10, left: 10, zIndex: 1405, color: 'white', padding: '10px 12px 12px', borderRadius: '14px', border:'1px solid rgba(255,255,255,0.22)', background: 'linear-gradient(180deg, rgba(30,30,32,0.78) 0%, rgba(18,18,20,0.78) 55%, rgba(12,12,14,0.78) 100%)', backdropFilter:'blur(9px) saturate(140%)', boxShadow:'0 6px 24px -6px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.05) inset' }}>
         <div style={{ display:'flex', alignItems:'stretch', gap:'6px', minWidth:340 }}>
           <div style={{ flex:1 }}>
             <AutoCompleteInput
@@ -3370,23 +3476,27 @@ function App() {
             aria-label="Reset all inputs"
           >Reset</button>
         </div>
+        {/* Rail now separate panel below (not inside this search panel) */}
   {/* ...existing controls... (accent toggle removed from here) */}
   {/* Planet legend relocated to floating overlay to avoid being obscured by rail */}
       </div>
+      {/* Feature rail bounding box */}
       {!hideUI && (
-        <>
-      <PanelRail
-            // @ts-ignore style prop for scaling; compensate slight position shift when scaling up
-            style={{ transform:`scale(${uiScale})`, transformOrigin:'top left' }}
+        <div className="ef-rail-wrapper" style={{ position:'absolute', top: 82, left:10, zIndex:1405, transform:`scale(${uiScale})`, transformOrigin:'top left' }}>
+          <PanelRail
             items={[
               { id:'routing', type:'panel', label:'Routing', display:(<>{'Routing'}</>), icon:null, active:openPanels.has('routing'), onSelect:()=> togglePanel('routing') },
               { id:'cinematic', type:'panel', label:'Cinematic Mode', display:(<>Cinematic<br/>Mode</>), icon:null, active:openPanels.has('cinematic'), onSelect:()=> { if(openPanels.has('cinematic')) { setCinematicMode(false); } else { setCinematicMode(true); } togglePanel('cinematic'); } },
               { id:'region', type:'toggle', label:'Highlight Region', display:(<>Highlight<br/>Region</>), icon:null, active:isRegionHighlighterActive, onToggle:()=> setIsRegionHighlighterActive(v=> !v) },
               { id:'planets', type:'toggle', label:'Display Planet Counts', display:(<>Planet<br/>Counts</>), icon:null, active:isPlanetCountActive, onToggle:()=> setIsPlanetCountActive(v=> !v) },
               { id:'distance', type:'toggle', label:'Show Distance', display:(<>Show<br/>Distance</>), icon:null, active:showDistance, onToggle:()=> setShowDistance(v=> !v) },
-  { id:'reset-layout', type:'panel', label:'Reset Layout', display:(<>Reset<br/>Layout</>), icon:null, active:false, onSelect:()=> { if(window.confirm('Reset panel positions and layout?')) { fullReset(); setOpenPanels(new Set()); setAccentIsBlue(false); setResetToken(t=> t+1); setLayoutResetToken(t=> t+1); } } },
+              { id:'reset-layout', type:'panel', label:'Reset Layout', display:(<>Reset<br/>Layout</>), icon:null, active:false, onSelect:()=> { if(window.confirm('Reset panel positions and layout?')) { fullReset(); setOpenPanels(new Set()); setAccentIsBlue(false); setResetToken(t=> t+1); setLayoutResetToken(t=> t+1); } } },
             ] as any}
           />
+        </div>
+      )}
+      {!hideUI && (
+        <>
           {openPanels.has('routing') && (
             <PanelDrawer ref={routingDrawerRef} id="routing" title="Routing" scale={uiScale} zIndex={panelZ['routing']||1450} onActivate={bringToFront} onClose={(id)=> setOpenPanels(p=> { const n=new Set(p); n.delete(id); return n; })} resetToken={layoutResetToken}>
               <RoutingPanel
