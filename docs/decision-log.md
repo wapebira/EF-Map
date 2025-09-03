@@ -116,3 +116,17 @@
 - Risk: Low (pure dependency update). Behavior now matches toggle state deterministically.
 - Gates: typecheck ✅ | build pending (expected ✅) | smoke: Toggle Auto off, select new systems → no recompute; toggle Auto on → recompute occurs.
 - Alternative Considered: Ref-based pattern or effect-driven recompute; deferred as unnecessary for current complexity.
+
+## 2025-09-03 – Usage Stats Graphs
+- Goal: Add eight lightweight SVG charts (activity, performance, optimization impact, engagement funnel, session/cinematic, hop distribution (toggle P2P/Scout), feature adoption %, workers vs planet bin distributions) above existing stats grid without external libraries.
+- Files: `src/components/StatsCharts.tsx` (new primitives), `src/components/StatsPage.tsx` (integration + 30‑day history), `decision-log.md` (this entry).
+- Diff: ~+420 LOC net (new + modifications).
+- Implementation Highlights:
+  - Pure SVG components: LineChart, BarLineCombo, StackedPercentBars, shared legend.
+  - Client-side derived metrics (rates, averages, distributions) computed from existing counters/sums; no new backend events.
+  - Toggles: normalize activity, show funnel rate composite line, switch hop distribution (P2P/Scout), switch final distribution (Workers/Planet Bins).
+  - History window expanded to 30 days (stats function already supported up to 31).
+  - Guards ensure divide-by-zero safe; missing days simply render zero-height bars.
+- Risk: Medium (UI complexity, isolated; no persistence changes).
+- Gates: typecheck/build pending (expect pass); minimal bundle impact (no deps).
+- Follow-ups: smoothing (moving avg) after >10 days, legend color token standardization, CSV export, ARIA enhancements, optional lazy loading.
