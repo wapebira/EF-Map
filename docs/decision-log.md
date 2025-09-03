@@ -138,3 +138,25 @@
 - Rationale: Emphasize key growth & depth signals; reduce cognitive load; align styling with metric cards (same rounded panel aesthetic, larger canvas).
 - Risk: Low (UI only). Underlying data & events unchanged.
 - Follow-ups: Option to add a third chart later (performance or optimization impact) if needed; consider hover tooltips & moving average overlay.
+
+## 2025-09-03 – Stats Tables + Incremental Panel Cascade UI Rework
+
+- Goal: (1) Reinforce simplified stats view with tabular clarity (key counters & recent history) while keeping lean two‑chart design; (2) Resolve overlapping / shifting behavior of left-side drawers (Routing, Cinematic, Planet Counts) to ensure deterministic, non-intrusive panel layout.
+- Files: `src/components/StatsPage.tsx` (table refinements already integrated in prior simplification), `src/App.tsx` (panel cascade logic rewrite), `src/components/layout/PanelDrawer.tsx` (data attribute for targeting), `src/components/HelpPanel/HelpPanel.tsx` (final underline alignment), `src/App.css`, `src/components/layout/panelLayout.css`, `decision-log.md` (this entry).
+- Diff (approx): App.tsx (~+110 / -70 for removal of old full-compaction strategy & addition of incremental cascade), minor CSS & drawer attribute additions (<20 LOC), Help underline tweak (~4 LOC).
+- Previous Behavior: Adding a third panel (Planet Counts) sometimes forced earlier panel(s) to recompute X positions, causing overlap or leftward jumps depending on open sequence. Full deterministic compaction solved overlap but introduced undesirable re-shuffling of existing panel positions when a new one opened.
+- New Behavior: Incremental cascade algorithm:
+  - Maintains an internal left→right order list (autoOrderRef).
+  - On open: newly opened panels append to the rightmost edge using measured existing panel widths; existing panels retain their X (no visual jump).
+  - On close: performs a single left-compaction pass to remove gaps.
+  - Overlap safeguard: post-layout duplicate-left detection triggers one deferred full compact.
+  - User Override: If any panel has a persisted drag position in localStorage, auto cascade skips (preserves user intent).
+- Help Panel Alignment: Final 1px adjustments (EXTRA_OFFSET=13) anchor underline flush with bottom edge of top toolbar buttons at all UI scales (50–130%).
+- Rationale: Improve spatial predictability (no reflow surprises), reduce cognitive friction when toggling tools rapidly, and polish micro-alignment for professional feel.
+- Risk: Low (UI only, no data or worker changes). Guard clauses ensure no effect when user manually repositions panels.
+- Gates: typecheck ✅ | build ✅ | smoke ✅ (manual sequences tested: all 6 permutations of opening order; no overlaps, only new panel movement). Performance impact negligible (O(n) width checks on events only).
+- Follow-ups:
+  - Optional animation (fade/slide) for panel entrance without reintroducing layout jitter.
+  - Consider storing order to restore relative arrangement after reload (currently order rebuilt from open sequence each session).
+  - Add settings toggle to re-enable legacy full-compaction for users preferring tightly packed deterministic ordering.
+  - Potential small debounced relayout if panels become resizable in future.
