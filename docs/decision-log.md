@@ -257,4 +257,23 @@
   - Potential route-segment exclusion (skip if segment currently part of active route ribbon) pending visual testing of overlap scenarios.
   - Debug toggle to visualize raw `sel` mask for QA (`uDebug` reuse or new uniform) if deeper tuning needed.
 
+## 2025-09-03 – Ship Jump Differentiation (Dashed Inner Core)
+
+- Goal: Visually distinguish ship (non‑stargate) jumps from gate hops along the active route without adding color legend complexity or thickness changes that might distract from the pulse directionality.
+- Approach: Introduced per-hop attribute `hopIsShip` and shader-based dash modulation applied only to the luminous inner core of ship jumps.
+- Implementation Details:
+  - Geometry (`RouteRibbon.ts`): Each hop now marks `isShip` when the pair of systems lacks a stargate edge. Added `hopIsShip` float attribute (0/1) parallel to existing hopLocal/Length/Index buffers.
+  - Main Fragment Shader: Inside ship hops (`v_isShip>0.5`), computes dash phase from normalized hop position (`normPos * u_dashRepeat`) then blends brightness between an "off" floor (`u_dashFade`) and full intensity according to duty cycle (`u_dashDuty`). Modulation is multiplied by `core` so only the bright center band receives the pattern; outer glow remains continuous for legibility.
+  - Glow Pass Shader: Updated to mirror dash modulation so the additive bloom reinforces the dashed perception after contrast tweak.
+  - Uniforms Added: `u_dashRepeat` (default 14), `u_dashDuty` (0.55 on-fraction), `u_dashFade` (initially 0.65 → 0.40 → 0.25 for final higher contrast). Lower `u_dashFade` increases off-gap contrast without fully extinguishing segments (prevents strobing artifacts at distance / low resolution).
+  - Contrast Iteration: First pass visually subtle (fade 0.65). Second pass lowered to 0.40; final tuning to 0.25 produced ~25% stronger perceived contrast while preserving a faint baseline to avoid aliasing gaps when the camera angle compresses segment width.
+  - Performance: Negligible; adds a few arithmetic ops per fragment only on ship hops (branch is coherent across pixels within a segment). No additional draw calls or geometry rebuilds triggered by parameter changes.
+- Rationale: Dash pattern communicates a different traversal mode while keeping animation language (pulse & tail) consistent. Avoided color swap (could conflict with theme) and thickness variation (risk of visual jitter in tight curves).
+- Risk: Low (isolated to `RouteRibbon.ts` shader & attribute build). No persistence, worker, or event tracking changes.
+- Gates: typecheck ✅ | build ✅ | smoke ✅ (verified dashed pattern present only on non‑gate hops; contrast acceptable at default zoom; route recolor still updates uniformly via existing `recolorRouteRibbon`).
+- Follow-ups:
+  - Optional user preference to tweak dash density & duty cycle.
+  - Potential subtle motion of dash pattern (phase shift over time) to further differentiate if user feedback suggests more clarity needed; currently stationary to avoid temporal noise.
+  - If future additional transport modes added, consider encoding mode enum in a single attribute (e.g., `hopMode`) instead of multiple booleans.
+
 
