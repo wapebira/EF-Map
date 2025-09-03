@@ -24,6 +24,7 @@ const EVENT_MAP = {
   // UI / interaction metrics
   ui_hide: { counters: ['ui_hide'] },
   show_distance: { counters: ['show_distance'] },
+  show_stations: { counters: ['show_stations'] },
   help_open: { counters: ['help_opens'] },
   route_copy: { counters: ['route_copies'], extraCounters: (b)=> {
     const arr=[]; if(b.source==='p2p') arr.push('route_copy_p2p'); else if(b.source==='scout') arr.push('route_copy_scout'); return arr; } },

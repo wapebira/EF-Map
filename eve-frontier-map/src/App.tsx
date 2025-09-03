@@ -23,12 +23,12 @@ import './components/layout/panelLayout.css';
 import AutoCompleteInput from './components/AutoCompleteInput/AutoCompleteInput';
 import HelpPanel from './components/HelpPanel/HelpPanel';
 import { loadPrefs, setAccent, setOpenPanels as persistOpenPanels, setRoutingPrefs, fullReset, getPrefs, softReset, setUiScale as persistUiScale, setShowStations as persistShowStations } from './utils/prefs';
+import { track } from './utils/usage';
 import { encodeShare, decodeShare } from './utils/share';
 import { createShortShare, fetchShortShare } from './utils/shortShare';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import DonateCryptoModal from './components/DonateCryptoModal';
 import StatsPage from './components/StatsPage';
-import { track } from './utils/usage';
 // Station icon (ensure file added at assets/icons/station.png)
 // Will be lazy loaded via TextureLoader when toggle active
 import stationIconUrl from './assets/icons/station.png';
@@ -3864,7 +3864,7 @@ function App() {
               { id:'cinematic', type:'panel', label:'Cinematic Mode', display:(<>Cinematic<br/>Mode</>), icon:null, active:openPanels.has('cinematic'), onSelect:()=> { if(openPanels.has('cinematic')) { setCinematicMode(false); } else { setCinematicMode(true); } togglePanel('cinematic'); } },
               { id:'region', type:'toggle', label:'Highlight Region', display:(<>Highlight<br/>Region</>), icon:null, active:isRegionHighlighterActive, onToggle:()=> setIsRegionHighlighterActive(v=> !v) },
               { id:'planets', type:'toggle', label:'Display Planet Counts', display:(<>Planet<br/>Counts</>), icon:null, active:isPlanetCountActive, onToggle:()=> setIsPlanetCountActive(v=> !v) },
-              { id:'stations', type:'toggle', label:'Show Stations', display:(<>Show<br/>Stations</>), icon:null, active:showStations, onToggle:()=> setShowStations(v=> { const next=!v; try { persistShowStations(next); } catch {}; return next; }) },
+              { id:'stations', type:'toggle', label:'Show Stations', display:(<>Show<br/>Stations</>), icon:null, active:showStations, onToggle:()=> setShowStations(v=> { const next=!v; try { persistShowStations(next); } catch {}; try { if(next) track({ type:'show_stations' }); } catch {}; return next; }) },
               { id:'distance', type:'toggle', label:'Show Distance', display:(<>Show<br/>Distance</>), icon:null, active:showDistance, onToggle:()=> setShowDistance(v=> !v) },
               { id:'reset-layout', type:'panel', label:'Reset Layout', display:(<>Reset<br/>Layout</>), icon:null, active:false, onSelect:()=> { if(window.confirm('Reset panel positions and layout?')) { fullReset(); setOpenPanels(new Set()); setAccentIsBlue(false); setResetToken(t=> t+1); setLayoutResetToken(t=> t+1); } } },
             ] as any}

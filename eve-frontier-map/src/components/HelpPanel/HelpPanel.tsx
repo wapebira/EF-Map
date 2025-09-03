@@ -508,6 +508,27 @@ const baseSections: SectionDef[] = [
         ]
       },
   {
+    id: 'show-stations',
+    title: 'Show Stations',
+    subsections: [
+      {
+        id: 'stations-overview',
+        title: 'Overview',
+        content: (
+          <div>
+            <p>Displays an icon above systems that contain stations using the generated station counts dataset. Toggle via the toolbar button (Show Stations). Icons remain minimally sized until you zoom in or focus a system to reduce clutter.</p>
+            <ul style={{ paddingLeft:'18px', margin:'6px 0' }}>
+              <li><strong>Hover & Select:</strong> Hovering the station icon highlights its underlying system; clicking the icon selects that system (same as clicking the star).</li>
+              <li><strong>Focus Scaling:</strong> The currently selected (or nearest in view) station gently enlarges to aid targeting; others stay compact.</li>
+              <li><strong>Performance:</strong> Lightweight sprite layer; safe to leave enabled—icons auto hide when zoomed far out.</li>
+            </ul>
+            <p style={{marginTop:'6px'}}><em>Note:</em> If the newer station-enabled database isn't available yet, toggling does nothing until it loads (fails gracefully).</p>
+          </div>
+        )
+      }
+    ]
+  },
+  {
     id: 'cinematic-mode',
     title: 'Cinematic Mode',
     subsections: [
