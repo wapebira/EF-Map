@@ -12,13 +12,13 @@ export interface EFMapPreferencesV1 {
 }
 
 // v2 adds uiScale (number, default 1)
-export interface EFMapPreferencesV2 extends Omit<EFMapPreferencesV1, 'v'> { v:2; uiScale?: number }
+export interface EFMapPreferencesV2 extends Omit<EFMapPreferencesV1, 'v'> { v:2; uiScale?: number; showStations?: boolean }
 
 export type EFMapPreferences = EFMapPreferencesV1 | EFMapPreferencesV2; // future union
 
 const KEY = 'efmap:prefs';
 
-const defaultPrefsV2: EFMapPreferencesV2 = { v:2, accent:'orange', openPanels:[], uiScale:1 };
+const defaultPrefsV2: EFMapPreferencesV2 = { v:2, accent:'orange', openPanels:[], uiScale:1, showStations:false };
 
 export function loadPrefs(): EFMapPreferences {
   try {
@@ -84,6 +84,7 @@ export function fullReset(){ resetAllPrefs(); clearPanelPositions(); }
 export function softReset(){ resetAllPrefs(); }
 
 export function setUiScale(scale:number){ updatePrefs(p=>{ if('uiScale' in p){ (p as EFMapPreferencesV2).uiScale = scale; } }); }
+export function setShowStations(v:boolean){ updatePrefs(p=>{ if('showStations' in p){ (p as EFMapPreferencesV2).showStations = v; } }); }
 
 // Flush on visibility change/unload for safety (in case future buffering added)
 try {

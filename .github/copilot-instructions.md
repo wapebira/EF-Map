@@ -140,6 +140,7 @@ If user asks for broad refactor, first propose smallest path to accomplish user-
 - Ensure any new counter name added to EVENT_MAP is also displayed or intentionally ignored; silent accumulation without UI is acceptable but document internally.
 - Do not directly call `track()` from multiple places for the same semantic event—centralize logic to avoid double counting.
  - For multi-step user feature requests, implement incrementally: land instrumentation first, then UI control, then worker logic, validating each step.
+ - Stations data integration: regeneration requires `mapobjects.db` present at root. Heuristic picks first table containing 'station' with a system id column variant; absence is non-fatal. Bump DB filename (currently `map_data_v2.db`) only when schema/format changes.
 
 ## When Unsure
 - Search existing patterns first (grep for similar feature names).
