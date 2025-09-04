@@ -17,6 +17,7 @@ export class UserOverlayRings {
   private mapData: any = null;
   private ringTexture: THREE.Texture;
   private baseSize: number;
+  private suppressedSystemId: number | null = null;
   constructor(scene:THREE.Scene, ringTexture:THREE.Texture, size:number=20){
     this.scene = scene; this.ringTexture = ringTexture; this.baseSize = size;
     this.group.name='UserOverlayRings';
@@ -26,13 +27,24 @@ export class UserOverlayRings {
     this.rebuild();
   }
   setMapData(mapData:any){ this.mapData = mapData; this.rebuild(); }
+  setVisible(v:boolean){ this.group.visible = v; }
+  setSuppressedSystem(systemId: number | null){
+    if(this.suppressedSystemId === systemId) return;
+    this.suppressedSystemId = systemId;
+    this.rebuild();
+  }
   private rebuild(){
     if(this.disposed) return;
     const entries = userOverlayStore.getEntries();
     const filter = getOverlayFilterColor();
     // bucket by system
     const bySystem = new Map<number, UserOverlayEntry[]>();
-    for(const e of entries){ if(filter && e.color!==filter) continue; if(!bySystem.has(e.systemId)) bySystem.set(e.systemId, []); bySystem.get(e.systemId)!.push(e); }
+    for(const e of entries){
+      if(filter && e.color!==filter) continue;
+      if(this.suppressedSystemId != null && e.systemId === this.suppressedSystemId) continue; // skip suppressed system entirely
+      if(!bySystem.has(e.systemId)) bySystem.set(e.systemId, []);
+      bySystem.get(e.systemId)!.push(e);
+    }
     this.systemIds = Array.from(bySystem.keys());
     // Sort marks in each system stable by updatedAt asc to stabilize cycle ordering
     const colorsPerSystem: string[][] = [];
@@ -71,7 +83,7 @@ export class UserOverlayRings {
     ;(this.points as any).userData.colorsPerSystem = colorsPerSystem;
   }
   update(nowMs:number){
-    if(this.disposed || !this.points) return;
+  if(this.disposed || !this.points || !this.group.visible) return;
   // Constant pixel size (mirrors hover halo behavior)
     const geom = this.points.geometry as THREE.BufferGeometry;
     const colorsPerSystem: string[][] = (this.points as any).userData.colorsPerSystem || [];

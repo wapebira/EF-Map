@@ -14,28 +14,37 @@ export interface EFMapPreferencesV1 {
 // v2 adds uiScale (number, default 1)
 export interface EFMapPreferencesV2 extends Omit<EFMapPreferencesV1, 'v'> { v:2; uiScale?: number; showStations?: boolean }
 
-export type EFMapPreferences = EFMapPreferencesV1 | EFMapPreferencesV2; // future union
+// v3 adds overlaySort (string) and overlayAgingDays (number) for User Overlay panel
+export interface EFMapPreferencesV3 extends Omit<EFMapPreferencesV2, 'v'> { v:3; overlaySort?: string; overlayAgingDays?: number }
+
+export type EFMapPreferences = EFMapPreferencesV1 | EFMapPreferencesV2 | EFMapPreferencesV3; // future union
 
 const KEY = 'efmap:prefs';
 
-const defaultPrefsV2: EFMapPreferencesV2 = { v:2, accent:'orange', openPanels:[], uiScale:1, showStations:false };
+const defaultPrefsV3: EFMapPreferencesV3 = { v:3, accent:'orange', openPanels:[], uiScale:1, showStations:false, overlaySort:'createdAt:-1', overlayAgingDays:3 };
 
 export function loadPrefs(): EFMapPreferences {
   try {
     const raw = localStorage.getItem(KEY);
-    if(!raw) return { ...defaultPrefsV2 };
+    if(!raw) return { ...defaultPrefsV3 };
     const parsed = JSON.parse(raw);
-    if(typeof parsed !== 'object' || parsed === null) return { ...defaultPrefsV2 };
+    if(typeof parsed !== 'object' || parsed === null) return { ...defaultPrefsV3 };
     if(parsed.v === 1){
       // upgrade to v2
       const upgraded: EFMapPreferencesV2 = { ...parsed, v:2, uiScale:1 };
-      return upgraded;
+      // continue upgrade chain to v3
+      const upgraded3: EFMapPreferencesV3 = { ...upgraded, v:3, overlaySort:'createdAt:-1', overlayAgingDays:3 };
+      return upgraded3;
     }
     if(parsed.v === 2){
-      return { ...defaultPrefsV2, ...parsed };
+      const upgraded3: EFMapPreferencesV3 = { ...parsed, v:3, overlaySort: parsed.overlaySort || 'createdAt:-1', overlayAgingDays: parsed.overlayAgingDays || 3 };
+      return { ...defaultPrefsV3, ...upgraded3 };
     }
-    return { ...defaultPrefsV2 };
-  } catch { return { ...defaultPrefsV2 }; }
+    if(parsed.v === 3){
+      return { ...defaultPrefsV3, ...parsed };
+    }
+    return { ...defaultPrefsV3 };
+  } catch { return { ...defaultPrefsV3 }; }
 }
 
 let currentPrefs: EFMapPreferences = loadPrefs();
@@ -55,7 +64,7 @@ export function updatePrefs(mut: (draft: EFMapPreferences)=>void){
 }
 
 export function resetAllPrefs(){
-  currentPrefs = { ...defaultPrefsV2 };
+  currentPrefs = { ...defaultPrefsV3 };
   try { localStorage.removeItem(KEY); } catch {/* ignore */}
 }
 
@@ -83,8 +92,10 @@ export function fullReset(){ resetAllPrefs(); clearPanelPositions(); }
 // Reset only input/preferences (do NOT clear panel positions)
 export function softReset(){ resetAllPrefs(); }
 
-export function setUiScale(scale:number){ updatePrefs(p=>{ if('uiScale' in p){ (p as EFMapPreferencesV2).uiScale = scale; } }); }
-export function setShowStations(v:boolean){ updatePrefs(p=>{ if('showStations' in p){ (p as EFMapPreferencesV2).showStations = v; } }); }
+export function setUiScale(scale:number){ updatePrefs(p=>{ if('uiScale' in p){ (p as any).uiScale = scale; } }); }
+export function setShowStations(v:boolean){ updatePrefs(p=>{ if('showStations' in p){ (p as any).showStations = v; } }); }
+export function setOverlaySort(v:string){ updatePrefs(p=>{ (p as any).overlaySort = v; }); }
+export function setOverlayAgingDays(days:number){ updatePrefs(p=>{ (p as any).overlayAgingDays = days; }); }
 
 // Flush on visibility change/unload for safety (in case future buffering added)
 try {
