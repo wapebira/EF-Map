@@ -92,6 +92,64 @@ if(typeof window !== 'undefined'){
   let dbLoadMarked = false; // set by App when map ready
   let firstActionSent = false; // first core action (p2p route or scout baseline)
   let firstRouteStart: number|undefined; // time from page load to first route/baseline
+  // --- Overlay panel metrics ---
+  let overlayOpen = false;
+  let overlayFirstOpenSent = false;
+  let overlayFirstAddSent = false;
+  let overlayOpenStart = 0; // perf.now when last opened/resumed
+  let overlayAccum = 0; // ms accumulated (excludes cinematic periods)
+  let overlayMarksSnapshot = 0; // last bucketed count to avoid spam
+
+  function overlayBucket(count:number){
+    if(count<=0) return 'marks_0';
+    if(count<=5) return 'marks_1_5';
+    if(count<=15) return 'marks_6_15';
+    if(count<=30) return 'marks_16_30';
+    if(count<=60) return 'marks_31_60';
+    return 'marks_61_plus';
+  }
+
+  function overlayPause(){
+    if(!overlayOpen) return;
+    const now = performance.now();
+    const delta = now - overlayOpenStart;
+    if(delta>0) overlayAccum += delta;
+    overlayOpenStart = now; // so repeated pause without resume minimal impact
+  }
+
+  (window as any).__efOverlayOpened = (markCount:number)=>{
+    try {
+      if(!overlayOpen){
+        overlayOpen = true; overlayOpenStart = performance.now();
+        track({ type:'overlay_open' });
+        if(!overlayFirstOpenSent){ overlayFirstOpenSent = true; track({ type:'overlay_open_first' }); }
+        // bucket mark count
+        const bucket = overlayBucket(markCount);
+        overlayMarksSnapshot = markCount;
+        track({ type:'overlay_marks_count_bucket', bucket });
+      }
+    } catch {/* ignore */}
+  };
+  (window as any).__efOverlayClosed = ()=>{
+    try {
+      if(overlayOpen){ overlayPause(); overlayOpen = false; }
+    } catch {/* ignore */}
+  };
+  (window as any).__efOverlayMarkAdded = (total:number)=>{
+    try {
+      track({ type:'overlay_add_mark' });
+      if(!overlayFirstAddSent){ overlayFirstAddSent = true; track({ type:'overlay_add_first' }); }
+      // Re-bucket only if crossing bucket boundary
+      const bucket = overlayBucket(total);
+      const prevBucket = overlayBucket(overlayMarksSnapshot);
+      if(bucket !== prevBucket){ track({ type:'overlay_marks_count_bucket', bucket }); }
+      overlayMarksSnapshot = total;
+    } catch {/* ignore */}
+  };
+  (window as any).__efOverlayExport = ()=>{ try { track({ type:'overlay_export' }); } catch {} };
+  (window as any).__efOverlayImport = (finalCount:number)=>{ try { track({ type:'overlay_import' }); const bucket = overlayBucket(finalCount); overlayMarksSnapshot = finalCount; track({ type:'overlay_marks_count_bucket', bucket }); } catch {} };
+
+  // Pause overlay panel accumulation during cinematic mode transitions
 
   // Mark page load
   try { track({ type:'page_load' }); } catch {}
@@ -155,12 +213,16 @@ if(typeof window !== 'undefined'){
     if(on){
       if(!cinematicActive){
         cinematicActive = true; cinematicLastStart = performance.now();
+        // also pause overlay accumulation if panel open
+        overlayPause();
         // First entry in a session? fire cinematic_first once.
         if(!(window as any).__efCinFirst){ (window as any).__efCinFirst = true; try { track({ type:'cinematic_first' }); } catch {} }
         try { track({ type:'cinematic_enter' }); } catch {}
       }
     } else {
       endCinematicIfActive();
+      // resume overlay timing if panel still open
+      if(overlayOpen){ overlayOpenStart = performance.now(); }
     }
   };
 
@@ -187,6 +249,9 @@ if(typeof window !== 'undefined'){
   else bucket='sess_gt_60m';
   track({ type:'session_bucket', bucket });
   if(cinematicAccum>0) track({ type:'cinematic_time', ms: Math.round(cinematicAccum) });
+  // Flush overlay panel time if any
+  if(overlayOpen){ overlayPause(); }
+  if(overlayAccum>0){ track({ type:'overlay_panel_time', ms: Math.round(overlayAccum) }); }
       await flush();
     } catch {}
   }

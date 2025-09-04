@@ -11,6 +11,7 @@ import RegionHighlighterModule, { setRegionHighlightColors } from './modules/Reg
 import RegionStatsCard, { type RegionStats } from './components/RegionStatsCard';
 import CompareRegionsPanel from './components/CompareRegionsPanel';
 import UserOverlayPanel from './components/UserOverlay/UserOverlayPanel';
+import { userOverlayStore } from './utils/userOverlay';
 import { OVERLAY_FEATURE_FLAG } from './utils/userOverlay.ts';
 import { UserOverlayRings } from './modules/UserOverlayRings';
 import AddOverlayMarkModal from './components/UserOverlay/AddOverlayMarkModal';
@@ -1678,6 +1679,15 @@ function App() {
       return prev;
     });
   }, [isPlanetCountActive]);
+
+  // Overlay open/close metric hook
+  useEffect(()=>{
+    try {
+      const visible = openPanels.has('user-overlay') && !cinematicMode;
+      if(visible) (window as any).__efOverlayOpened?.((window as any).userOverlayCount || userOverlayStore.getEntries().length);
+      else (window as any).__efOverlayClosed?.();
+    } catch {/* ignore */}
+  }, [openPanels, cinematicMode]);
 
   // Incremental cascade (append on open, compact on close) preserving existing positions.
   const autoOrderRef = useRef<string[]>([]); // current left-to-right order of auto-managed panels
