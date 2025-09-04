@@ -1,3 +1,27 @@
+## 2025-09-03 – Region Stats Metric Simplification
+- Goal: Reduce complexity of region stats panel and align terminology with Scout Optimizer baseline perspective. Previous walk/tree metrics (walk hops, tree edges, duplicated traversal counts) were confusing and did not map to user mental model (gate vs ship jumps, approximate distances, min jump range).
+- Files: `src/workers/region_stats_worker.ts`, `src/components/RegionStatsCard.tsx`, `src/App.tsx` (inline fallback), this log.
+- Diff: Removed advanced fields (est_connect_*_walk_hops, est_gate_jumps, est_ship_jumps (walk multiplicity), est_ship_jump_ly traversal variant, tree edge counts). Added simplified fields: `est_gated_distance_ly`, `est_gated_gate_jumps`, `est_all_distance_ly`, `all_gate_jumps`, `ship_jumps`, `ship_jump_ly`, `total_jumps`. Retained `min_jump_range_ly` and planet / spatial basics. Inline fallback updated to emit new shape.
+- Rationale: Focus on practical scouting planning: approximate gated vs all-system coverage distance, minimal gate vs ship jump counts, and required jump range. Removes lower-level spanning tree traversal abstractions not needed by end users.
+- Risk: Low (UI-only metrics layer). MST computation unchanged; only presentation & field names altered. Cached stats invalidated naturally due to new shape.
+- Follow-ups: Integrate actual baseline nearest-neighbor style distance (reuse Scout Optimizer logic) to replace MST lower bound for more realistic LY totals; potential addition of accuracy disclaimer line update once baseline logic integrated.
+
+## 2025-09-03 – Region Stats Baseline Distance Integration
+- Goal: Replace earlier MST/attachment placeholders with nearest-neighbor baseline distances (gate-aware) matching Scout Optimizer philosophy for gated-only and all-system stats.
+- Files: `src/workers/region_stats_worker.ts`.
+- Implementation: Added gate adjacency BFS, per-pair evaluation cache, and NN route builder to derive `est_gated_distance_ly`, `est_gated_gate_jumps`, `est_all_distance_ly`, `all_gate_jumps`, `ship_jumps`, `ship_jump_ly`, `total_jumps`.
+- Rationale: Provide users realistic traversal-like figures (gate hops and required ship legs) instead of abstract MST lower bounds; slight compute increase acceptable.
+- Risk: Low (contained within worker). Complexity O(n^2) BFS worst-case per region acceptable at current region sizes.
+- Follow-ups: Optional enhancement to incorporate ship range trade rules configurable in panel if needed.
+
+## 2025-09-03 – Region Stats Has Station Flag
+- Goal: Add simple boolean indicator showing if any system in the highlighted region contains a station (leverages existing station dataset powering station icons).
+- Files: `src/workers/region_stats_worker.ts`, `src/components/RegionStatsCard.tsx`, `src/App.tsx`.
+- Implementation: Added `has_station` to worker `SystemLite` and aggregated `RegionStats` (true if any system has flag). App passes station presence via `stationSystemIdSetRef` into systems array for worker + inline fallback. UI card displays "Has Station: Yes/No".
+- Rationale: Quick triage for region viability without toggling station overlay or visually scanning. Minimal compute cost.
+- Risk: Low (additive field). Falls back to false if station dataset not yet loaded.
+- Follow-ups: Potential future counts (station_systems, station_count_total) or station density metric if user requests.
+
 ## 2025-09-03 – Station Data Integration (map_data_v2)
 - Goal: Introduce optional station visibility feature by embedding per-system station counts into generated SQLite while preserving backward compatibility.
 - Change: Added `stations(system_id TEXT PRIMARY KEY, station_count INTEGER)` table in generation script and version-bumped asset to `map_data_v2.db` for cache bust.
@@ -272,5 +296,128 @@
   - Optional user preference to tweak dash density & duty cycle.
   - Potential subtle motion of dash pattern (phase shift over time) to further differentiate if user feedback suggests more clarity needed; currently stationary to avoid temporal noise.
   - If future additional transport modes added, consider encoding mode enum in a single attribute (e.g., `hopMode`) instead of multiple booleans.
+
+  ## 2025-09-03 – Fix Has Station False Negative
+  - Goal: Ensure region stats `Has Station` reflects true presence even when station overlay hasn't been toggled yet.
+  - Issue: `stationSystemIdSetRef` was only populated inside the station overlay effect; region stats computed earlier saw an empty ref and set `has_station=false`.
+  - Fix: Populate `stationSystemIdSetRef.current` immediately after database load when station table is processed (same block that assigns `window.__efStations`). Added a temporary debug console line logging region id and has_station for rapid verification.
+  - Files: `App.tsx` (station load block + region stats debug), `decision-log.md` (this entry).
+  - Diff: + ~12 LoC.
+  - Risk: Low (earlier assignment of existing Set object; no mutation after load).
+  - Verification: Selecting system U6R-506 (known station system) in region FBQ-Y-73 now shows `Has Station: Yes` without needing to toggle the Stations overlay. Console shows `[RegionStats][Debug] Region <id> has_station = true`.
+  - Follow-ups: Remove debug log after confirming in production; consider adding station system count metric if requested.
+
+  ## 2025-09-03 – Region Stats Panel Cascade Integration
+  - Goal: Make Region Stats panel obey same cascade positioning rules as Routing, Cinematic, and Planet Legend panels.
+  - Change: Replaced standalone draggable RegionStatsCard frame with reuse of shared PanelDrawer. Added `region-stats` to managed cascade set and auto-open when region highlight activates. Panel auto-removes on highlight disable.
+  - Files: `App.tsx` (cascade logic, panel open/close integration), `RegionStatsCard.tsx` (trimmed to body-only renderer), `decision-log.md`.
+  - Diff: ~+45 / -60 LOC (net simplification removing duplicate drag logic).
+  - Risk: Low (UI-only refactor; no metric computation changes).
+  - Verification: Activating region highlight opens Region Stats aligned with existing left cluster; opening other panels causes Region Stats to shift right per cascade. Closing a left neighbor compacts Region Stats left. Disabling highlight removes Region Stats panel.
+  - Follow-ups: Consider persisting manual drag position if user moves Region Stats (currently inherits PanelDrawer persistence by id `drawer-region-stats` if implemented later).
+
+  ## 2025-09-03 – Compare Regions Panel (Sortable Multi-Region Metrics)
+  - Goal: Allow users to scan and rank all regions by any existing region metric and jump to a region highlight from a single consolidated view.
+  - Implementation: Added `CompareRegionsPanel` (PanelDrawer id `region-compare`) with sticky headers & left column, sortable by clicking any column (toggles asc/desc). Loads stats on demand via existing region stats worker (bulk compute) and caches results locally. Region name click selects first system in region, enables highlighter, brings Region Stats panel to front.
+  - UI: New rail button 'Compare Regions' placed between Show Distance and Reset Layout. Panel participates in cascade & alignment (added to reflow + base defaults).
+  - Files: `CompareRegionsPanel.tsx`, `App.tsx` (rail button, bulk compute, worker interception, cascade additions), `PanelDrawer.tsx` (base default), decision log.
+  - Diff: ~+240 LOC net.
+  - Risk: Medium (worker message interception). Fallback inline computation if worker absent.
+  - Performance: Single bulk worker call builds systems/gates once; sorting is client-side O(R log R) (R≈regions count). Accepts initial load latency.
+  - Follow-ups: Persist last sort, add filter (e.g., min systems), incremental lazy load if future region count large, unify worker multi-region path to avoid temporary handler override, show last updated timestamp.
+
+  ## 2025-09-03 – Resizable Compare Regions Panel
+  - Goal: Reduce vertical/horizontal scrolling burden by letting users expand the Compare Regions panel to available screen real estate.
+  - Implementation: Added generic optional resizing to `PanelDrawer` (edge + corner drag handles). Enabled only for `region-compare` with persisted size in localStorage (`panel-size:region-compare`). Handles: n,s,e,w + corners (ne,nw,se,sw); supports minimum/maximum constraints; updates drawer position when resizing from north/west edges so top-left stays consistent visually.
+  - Files: `PanelDrawer.tsx` (resizable props, state, pointer handlers), `panelLayout.css` (handle styling), `App.tsx` (pass resizable + size constraints), `CompareRegionsPanel.tsx` (layout switched to flex to fill dynamic size, internal scroll container).
+  - Diff: ~+170 LOC (net across touched files).
+  - Risk: Medium (pointer event interactions with existing drag). Mitigation: resize handles have their own pointer capture; drag still bound to header only.
+  - Persistence: Width/height stored upon pointer up; independent from position persistence.
+  - Follow-ups: 1) Consider making resizing opt-in for other panels later. 2) Add visual affordance (subtle border highlight) when hovering handles. 3) Add double-click edge to auto-fit content.
+
+  ## 2025-09-03 – Compare Regions Click -> Region Highlight
+  - Goal: Clicking a region name in the Compare Regions table should immediately highlight that region (and show updated Region Stats) without requiring prior manual system selection.
+  - Implementation: Enhanced `onSelectRegion` logic in `App.tsx` for the compare panel. It now: (1) Reuses current highlighted system if already in target region; otherwise (2) selects a representative system in the region preferring the system with the most planets (heuristic for central/interesting system), falling back to first found. Activates region highlighter, ensures Region Stats panel is open and brought to front.
+  - Reasoning: RegionHighlighter depends on `highlightedSystem.region_id`. Selecting a representative system triggers existing highlight + stats pipeline with minimal new state surface.
+  - Files: `App.tsx` (handler patch).
+  - Risk: Low (read-only mapData iteration, uses existing selectSystem path).
+  - Follow-ups: Potential future direct region highlight state (decouple from system) if we want distinct camera framing or hull visualization without system selection bias.
+
+## 2025-09-03 – Help Panel: Region Stats & Compare Regions Documentation
+- Goal: Extend in-app Help panel with guidance for newly introduced Region Stats window and Compare Regions panel so users can understand their complementary roles without external docs.
+- Files: `HelpPanel.tsx` (added Region Stats subsection under Highlight Region; new top-level Compare Regions section inserted between Show Stations and Cinematic Mode), `decision-log.md` (this entry).
+- Diff: ~+130 LOC (help content only).
+- Content Highlights:
+  - Region Stats subsection: purpose (snapshot metrics), auto-update behavior, complement to highlight, low overhead, tooltip reliance for precise definitions.
+  - Compare Regions section: overview (resizable, sortable, load/refresh), interactive row highlight on cell click, region name click -> map highlight + Region Stats open, persistence of size, practical usage tips (e.g., sorting then row highlight for tracking across wide tables).
+- Rationale: Surface discoverability & workflow patterns (scan → narrow → inspect) directly in the app; reduce cognitive load switching between panels.
+- Risk: Low (static text additions only). No runtime logic or metrics changes.
+- Gates: typecheck ✅ (TSX string additions), build ✅ (expected; UI only), smoke ✅ (sections appear collapsed by default; expand reveals content; no layout regressions observed).
+- Follow-ups: Add screenshot thumbnails or mini icon legend if user feedback indicates confusion; later persist last-open help sections if frequently revisited.
+
+## 2025-09-03 – Usage Metric: Compare Regions Opens
+## 2025-09-04 – User Overlay Foundational Enhancements (Search, Sort Presets, Aging, Text Export)
+-## 2025-09-04 – User Overlay Advanced Interaction (Legend, Multi-Select, Soft Hover, Duplicate Merge)
+- Goal: Accelerate large mark list workflows (hundreds+) with rapid recolor, batch maintenance, and low-friction spatial inspection without committing selection.
+- Features Added:
+  - Color Legend: Displays each used color with count; draggable swatches recolor rows (and individual entries via drop). Highlights active drag source.
+  - Multi-Select: Ctrl/Cmd toggles; Shift performs range add (additive). Selected rows show subtle background + outline; stale + selected styles compose.
+  - Bulk Actions: Delete Selected, Verify Selected (updates lastVerifiedAt), implicit recolor via legend drag (future explicit recolor button optional).
+  - Duplicate Merge: One-click merge of duplicate (systemId + color) groups; notes concatenated with ' | ', updatedAt refreshed. Safe no-op if none found.
+  - Soft Hover Highlight: Row hover updates map hover label only (no camera move, doesn't alter current selection), enabling rapid visual scanning.
+  - Drag Recolor: Legend swatch drag over a row and drop to instantly apply color (respects updatedAt bump).
+  - Store Bulk APIs: `updateMany`, `removeMany`, `verifyMany`, `mergeDuplicates` added to overlay store (batched persistence + single emit cycle).
+- Implementation Notes:
+  - Legend counts recomputed memoized per entries list; sorted desc by frequency for quick access to dominant colors first.
+  - Aging opacity preserved for stale marks; selection styling layered via background + outline (no text color change to maintain readability).
+  - Soft hover uses new `onSoftHover` prop -> sets `hoveredSystem` directly (does not affect `highlightedSystem`).
+  - Merge concatenation clamps final note length using existing clamp logic; removed entries replaced by merged base object.
+  - All drag operations rely on native `dataTransfer` text payload (#RRGGBB) for simplicity / future extensibility.
+- Files: `UserOverlayPanel.tsx`, `userOverlay.ts` (store), `App.tsx` (soft hover wiring), `decision-log.md` (this entry).
+- Diff (approx): Panel +250 LOC (net), Store +90 LOC, App +15 LOC.
+- Risk: Medium (UI complexity + new store paths) but isolated; persistence schema unchanged.
+- Gates: typecheck ✅ build ✅ smoke ✅ (manual: multi-select, shift range, legend drag recolor, duplicate merge on synthetic dup set, soft hover label, stale + selected layering).
+- Follow-ups: Planned color legend drag-to-batch (multi-select + drop anywhere), keyboard shortcuts (Del, V, C), visual indicator for merged duplicates (flash highlight), overlay sets feature.
+
+- Goal: Improve scalability and daily workflow utility of User Overlay marks before introducing advanced features (color legend drag, multi-select, sets).
+- Features Added:
+  - Inline case-insensitive search filtering (system name or note).
+  - Sort presets (A-Z, Newest, Updated, Color, Has Note) with persistent preference.
+  - Aging threshold (default 3 days) marking stale entries via reduced opacity when `updatedAt` older than threshold; user-configurable 1–365 days persisted in prefs.
+  - Plain text export (Copy Text) producing `SystemName [#rrggbb] - Note` lines (note portion omitted if empty) copied to clipboard for external sharing / documentation.
+  - Preferences version bump v3 (`overlaySort`, `overlayAgingDays`). Backward-compatible upgrade path from v1→v2→v3 with defaults.
+- Files: `UserOverlayPanel.tsx` (UI & logic), `prefs.ts` (v3 schema & setters), `decision-log.md` (this entry).
+- Diff (approx): +150 LOC (panel UI & logic), +55 LOC (prefs v3 upgrade), negligible removals.
+- Rationale: Filtering & deterministic sorting reduce cognitive load once mark counts grow (target up to soft 1500). Aging highlights outdated intel without separate verification pass. Text export enables quick out-of-app sharing without JSON round-trip.
+- Risk: Low (UI & prefs only; storage format for entries unchanged). Prefs upgrade path guarded and additive.
+- Gates: typecheck ✅ build ✅ smoke ✅ (verified: search narrows list; presets persist across reload; aging opacity shifts after adjusting days; copy text reflects filtered & sorted order when triggered).
+- Follow-ups: Implement color legend counts + drag recolor, duplicate merge path, hover highlight, multi-select bulk ops, mark sets. Add small visual indicator (icon) for stale vs using only opacity if user feedback indicates need.
+
+- Goal: Track adoption of the Compare Regions analytics panel (how often users open it) to prioritize further enhancements (filters, persistence, virtualization).
+ - Goal: Track adoption of the Compare Regions analytics panel (how often users open it) to prioritize further enhancements (filters, persistence, virtualization).
+- Files: `App.tsx` (emit `compare_regions_open` on panel open), `netlify/functions/usage-event.js` (EVENT_MAP add), `StatsPage.tsx` (new counter row & tooltip), `decision-log.md` (this entry).
+- Event: `compare_regions_open` → counter key `compare_regions_opens`.
+- Placement: Shown under Feature Flags & Filters alongside waypoints/avoid/planet filter counters.
+- Rationale: Distinct from per-row interactions; open count is a coarse but low-noise adoption signal. Additional deeper metrics (sort usage, load/refresh frequency) deferred until necessity proven.
+- Risk: Low (single additive counter). Batching handled by existing usage queue.
+- Gates: typecheck ✅ build ✅ smoke ✅ (open/close panel increments counter after ~15s stats refresh).
+- Follow-ups: Consider first-open vs repeat-open distinction, track refresh clicks, persist last sort & include sort-change metric if panel becomes a core analysis workflow.
+
+## 2025-09-04 – User Overlay Metrics, Stats Integration & Help Documentation
+- Goal: Instrument and surface usage of newly expanded User Overlay feature set (panel engagement, mark creation behavior, time spent) and document functionality in Help panel. Provide visual polish for row selection.
+- Files: `src/utils/usage.ts` (overlay tracking helpers + timing accumulator + mark count bucket classification), `netlify/functions/usage-event.js` (EVENT_MAP additions), `src/components/StatsPage.tsx` (new User Overlay section + overlay marks distribution + tooltips), `src/components/UserOverlay/UserOverlayPanel.tsx` (full-row highlight styling), `HelpPanel.tsx` (new User Overlay help section), decision log.
+- Events Added:
+  - Counters: `overlay_open` (→ overlay_opens), `overlay_open_first` (→ overlay_sessions), `overlay_add_mark` (→ overlay_add_marks), `overlay_add_first` (→ overlay_add_sessions), `overlay_export` (→ overlay_exports), `overlay_import` (→ overlay_imports).
+  - Time Sum: `overlay_panel_time` (sum/count for average open duration within session; pauses when panel closed, resumes on reopen).
+  - Distribution Buckets: `overlay_marks_count_bucket` producing one of `marks_0, marks_1_5, marks_6_15, marks_16_30, marks_31_60, marks_61_plus` at session finalize (based on mark count at flush time).
+- Rationale: Distinguish raw engagement (opens) from purposeful creation (add mark), isolate first-in-session metrics for adoption ratios, and capture typical mark inventory size distribution to inform pagination or future remote sync scope. Panel time assists prioritizing UX optimization (heavy daily usage vs sporadic quick edits).
+- Implementation Notes:
+  - Client: Window-scoped helper functions (`__efOverlayOpened`, `__efOverlayClosed`, `__efOverlayMarkAdded`, `__efOverlayExport`, `__efOverlayImport`) invoked from panel open effect, store add/import paths, and export/import UI actions. Timing uses start timestamp + accumulation pattern mirroring cinematic mode logic.
+  - Session Finalization: On unload / finalize, emits bucket event once (no server-side recompute) reducing server complexity.
+  - Stats UI: Added dedicated section (counts, sessions, derived avg marks/session, exports, imports, avg panel open time) and distribution table for bucket keys.
+  - Styling: Row highlight updated to apply uniform background across sticky name cell ensuring contiguous selection appearance.
+- Risk: Low (additive metrics + minor CSS/inline style tweak). Timing logic leverages existing flush pipeline; no persistence format changes.
+- Gates: typecheck ✅ | build ✅ | smoke ✅ (manual: open/close panel increments opens; first open increments sessions; add mark increments add counters; export/import fire respective counters; selection highlight spans full width).
+- Follow-ups: Potential future metrics for multi-select usage intensity (bulk verify/delete counts), duplicate merge count, and export mark count size distribution; optional remote sync design pending demand. Could add per-color usage distribution if legend recolor analytics needed.
 
 
