@@ -36,6 +36,7 @@ import { createShortShare, fetchShortShare } from './utils/shortShare';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import DonateCryptoModal from './components/DonateCryptoModal';
 import { Suspense, lazy } from 'react';
+import TransmissionPanel from './components/Transmission/TransmissionPanel';
 const StatsPage = lazy(()=> import('./components/StatsPage'));
 // Station icon (ensure file added at assets/icons/station.png)
 // Will be lazy loaded via TextureLoader when toggle active
@@ -192,6 +193,34 @@ function App() {
   const [layoutResetToken, setLayoutResetToken] = useState(0); // layout-only reset for panel positions
   // UI visibility + scaling
   const [hideUI, setHideUI] = useState(false);
+  const [showTransmission, setShowTransmission] = useState(()=>{ try { return !(getPrefs() as any).transmissionSeen; } catch { return true; } });
+  const [transmissionWidth, setTransmissionWidth] = useState<number|undefined>(undefined);
+  const [transmissionBg, setTransmissionBg] = useState<string|undefined>(undefined);
+  // Replay pill now derives from persisted prefs.transmissionSeen (always available after first complete or dismissal)
+  const [hasSeenTransmission, setHasSeenTransmission] = useState(()=>{ try { return !!(getPrefs() as any).transmissionSeen; } catch { return false; } });
+  // Incrementing replayCounter forces a new key so TransmissionPanel remounts fresh for replay.
+  const [replayCounter, setReplayCounter] = useState(0);
+  useEffect(()=>{
+    function measure(){
+      const el = document.querySelector('.ef-top-toolbar') as HTMLElement | null;
+      if(el){ setTransmissionWidth(el.offsetWidth); }
+    }
+    measure();
+    window.addEventListener('resize', measure);
+    return ()=> window.removeEventListener('resize', measure);
+  }, []);
+  // Transmission backgrounds: rotate every 14s while panel visible (continues after typing until dismissed)
+  useEffect(()=>{
+    if(!showTransmission){ return; }
+    const choices=['/transmission/towers_1280x720.jpg','/transmission/awake_1280x720.jpg','/transmission/corridorofsaddness_1280x720.jpg'];
+    let idx = Math.floor(Math.random()*choices.length);
+    setTransmissionBg(choices[idx]);
+    const interval = setInterval(()=>{
+      idx = (idx+1) % choices.length;
+      setTransmissionBg(choices[idx]);
+    }, 14000);
+    return ()=> clearInterval(interval);
+  }, [showTransmission]);
   const uiScaleTrackedRef = useRef(false); // ensure only first ui_scale per session
   const uiScaleStops = [0.5,0.6,0.7,0.8,0.9,1.0,1.1,1.2,1.3];
   const initialScale = (():number=>{ const p=getPrefs(); return (p as any).uiScale && typeof (p as any).uiScale==='number'? (p as any).uiScale : 1; })();
@@ -4458,6 +4487,42 @@ function App() {
       <HelpPanel accentIsBlue={accentIsBlue} supportExpandRequestId={supportExpandRequestId} supportContent={supportContent} />
     </div>
   </div>
+  {showTransmission && !hideUI && (
+    <TransmissionPanel
+      key={replayCounter}
+      tribeName="WOLF"
+      stagingSystem="G:2VE5"
+      discordUrl="https://discord.gg/7DG8XebH"
+      referralCode="n7GEWunG"
+      term="Remnant"
+      widthPx={transmissionWidth}
+      backgroundUrl={transmissionBg}
+      replayMode={replayCounter>0}
+      onClose={()=> { setShowTransmission(false); setHasSeenTransmission(true); }}
+      onRoute={()=>{
+        ensurePanel('routing');
+        try { setLastDestinationSystemName('G:2VE5'); } catch {}
+        setHasSeenTransmission(true);
+      }}
+    />
+  )}
+  {!showTransmission && hasSeenTransmission && !hideUI && (
+    <button
+      className="tx-replay-pill"
+      style={{ position:'fixed', top: (10 + 70 + 8)+'px', right:10, zIndex:3191, background:'rgba(0,0,0,0.55)', border:'1px solid rgba(255,255,255,0.25)', color:'#fff', padding:'6px 10px', borderRadius:20, fontSize:12, cursor:'pointer', backdropFilter:'blur(6px) saturate(150%)', letterSpacing:'.5px' }}
+      onClick={()=>{ 
+        try {
+          (window as any).__efUserReplay = true; // explicit user intent flag
+          try { (window as any).__efUserReplayTS = Date.now(); } catch {}
+          const w:any = window as any; if(!w.__efTxAppLog) w.__efTxAppLog = []; w.__efTxAppLog.push({ t:Date.now(), evt:'replay_click', replayCounter, showTransmission }); if(w.__efTxAppLog.length>400) w.__efTxAppLog.splice(0,w.__efTxAppLog.length-400);
+        } catch {}
+        setReplayCounter(c=>c+1);
+        setShowTransmission(true);
+        try { track({ type:'transmission_replay' }); } catch {}; 
+      }}
+      aria-label="Replay transmission"
+    >Replay Transmission</button>
+  )}
   {/* Search panel (separate bounding box) */}
   <div className="ef-left-cluster ef-search-panel" style={hideUI?{display:'none'}:{ position: 'absolute', top: 10, left: 10, zIndex: 1405, color: 'white', padding: '10px 12px 12px', borderRadius: '14px', border:'1px solid rgba(255,255,255,0.22)', background: 'linear-gradient(180deg, rgba(30,30,32,0.78) 0%, rgba(18,18,20,0.78) 55%, rgba(12,12,14,0.78) 100%)', backdropFilter:'blur(9px) saturate(140%)', boxShadow:'0 6px 24px -6px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.05) inset' }}>
         <div style={{ display:'flex', alignItems:'stretch', gap:'6px', minWidth:340 }}>

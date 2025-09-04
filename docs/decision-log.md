@@ -1,11 +1,14 @@
 ## 2025-09-03 – Region Stats Metric Simplification
-- Goal: Reduce complexity of region stats panel and align terminology with Scout Optimizer baseline perspective. Previous walk/tree metrics (walk hops, tree edges, duplicated traversal counts) were confusing and did not map to user mental model (gate vs ship jumps, approximate distances, min jump range).
-- Files: `src/workers/region_stats_worker.ts`, `src/components/RegionStatsCard.tsx`, `src/App.tsx` (inline fallback), this log.
-- Diff: Removed advanced fields (est_connect_*_walk_hops, est_gate_jumps, est_ship_jumps (walk multiplicity), est_ship_jump_ly traversal variant, tree edge counts). Added simplified fields: `est_gated_distance_ly`, `est_gated_gate_jumps`, `est_all_distance_ly`, `all_gate_jumps`, `ship_jumps`, `ship_jump_ly`, `total_jumps`. Retained `min_jump_range_ly` and planet / spatial basics. Inline fallback updated to emit new shape.
-- Rationale: Focus on practical scouting planning: approximate gated vs all-system coverage distance, minimal gate vs ship jump counts, and required jump range. Removes lower-level spanning tree traversal abstractions not needed by end users.
-- Risk: Low (UI-only metrics layer). MST computation unchanged; only presentation & field names altered. Cached stats invalidated naturally due to new shape.
-- Follow-ups: Integrate actual baseline nearest-neighbor style distance (reuse Scout Optimizer logic) to replace MST lower bound for more realistic LY totals; potential addition of accuracy disclaimer line update once baseline logic integrated.
 
+## 2025-09-04 – Usage Dev 404 Auto-Disable & Transmission Replay Fix
+- Goal: Stop noisy console spam of repeated 404 errors for usage tracking when running plain Vite dev (no Netlify functions) and ensure transmission replay truly restarts intro with audio.
+- Changes:
+  - usage.ts: Added first-404 detection (status 404) → sets `disabledDueToMissingEndpoint`, clears queue, halts future scheduling; exposes `window.__efEnableUsageTracking()` to re-enable manually after starting functions.
+  - transmission: Gated `transmission_major_glitch` tracking to intro typing only (removed perpetual post-intro events).
+  - transmission replay: Reset intro init guard (`hasIntroInitializedRef`) before `initIntro()` so replay re-types intro lines & plays ambient once.
+- Risk: Low (utility + component-local adjustments). No schema or server function changes.
+- Gates: typecheck ✅ build ✅ (post-change). Manual smoke: dev start w/out functions now prints single disable message; replay triggers full intro and audio; major glitch events stop after intro.
+- Follow-ups: Optional UI indicator when usage disabled; potential echo delay jitter metric later.
 ## 2025-09-03 – Region Stats Baseline Distance Integration
 - Goal: Replace earlier MST/attachment placeholders with nearest-neighbor baseline distances (gate-aware) matching Scout Optimizer philosophy for gated-only and all-system stats.
 - Files: `src/workers/region_stats_worker.ts`.
@@ -356,6 +359,32 @@
 - Follow-ups: Add screenshot thumbnails or mini icon legend if user feedback indicates confusion; later persist last-open help sections if frequently revisited.
 
 ## 2025-09-03 – Usage Metric: Compare Regions Opens
+## 2025-09-04 – Transmission Persistence & Autoplay Adjustments
+## 2025-09-04 – Transmission Replay & Echo Audio Rules Refinement
+- Goal: Enforce deterministic replay + echo behavior: intro (with audio) on initial show & explicit replay only; echo phase silent (visual typing + glitches only), no ambient replays or duplicate ARMED lines.
+- Behavior Spec Implemented:
+  1. Replay pill forces full intro regardless of previous view (via `replayMode` prop + remount counter).
+  2. Ambient + glitch audio restricted strictly to intro typing; cut immediately when intro finishes OR when user fast‑forwards.
+  3. Echo phase: continues forever with random 15–45s delay; typed lines silent; visual minor/major glitches retained (no audio playback).
+  4. "—— ECHO CHANNEL ARMED ——" appears exactly once per session (not reinserted by echoes or audio restarts).
+  5. Fast Forward button only visible during intro; if pressed, accelerates typing and immediately stops ambient audio.
+  6. No ambient restarts in echo mode; volume/mute changes post‑intro do not resurrect audio until next replay.
+- Files: `App.tsx` (replayCounter & replayMode prop), `TransmissionPanel.tsx` (audio gating, skip logic, silent echo typing), `decision-log.md`.
+- Risk: Low (component‑local state machine adjustments). Pref schema untouched.
+- Gates: typecheck ✅ build ✅ (pending manual smoke: replay twice, confirm audio only during intro, echo delays present, no duplicate ARMED line, ambient stays off in echo).
+- Follow-ups: (Optional) explicit metric for replay count vs dismiss, configurable echo delay range.
+- Goal: Resolve user issues: lost replay button after reload, unintended intro replays, silent audio until manual toggle, overly loud default volume.
+- Changes:
+  - Lowered default transmission volume for new users from 0.65 -> 0.25 (prefs default). Existing stored prefs untouched.
+  - Replay pill now derives from persisted `transmissionSeen` (no separate ephemeral state). Always available post first view across reloads.
+  - On mount, if `transmissionSeen` and not explicit replay, skip intro block; start in echo-only mode with header marker line.
+  - Added autoplay retry (2 attempts) for ambient audio when intro starts or echo-only mode initializes (handles browser gesture gating).
+  - Guard prevents spontaneous intro restart by only invoking `initIntro()` when replayMode / not yet seen.
+  - Added comments & minor refactor in `TransmissionPanel.tsx` for clarity (volume fallback, autoplay retry logic).
+- Files: `prefs.ts` (default volume adjustment comment), `TransmissionPanel.tsx`, `App.tsx`, `decision-log.md`.
+- Risk: Low (UI + prefs default only; no schema migration). Existing users retain prior volume; skip logic gated by `transmissionSeen` boolean.
+- Gates: typecheck pending | build pending | smoke plan: 1) Fresh load -> intro plays at 25% volume. 2) Dismiss -> reload -> echo-only channel appears on replay with no intro unless replay triggered. 3) Replay pill visible after reload. 4) Fast-forward still accelerates typing.
+- Follow-ups: Consider explicit replay mode prop toggling to re-run intro lines even if `transmissionSeen` (currently replay pill simply remounts component, which triggers intro since showTransmission resets). Potential metrics for echo line consumption/time.
 ## 2025-09-04 – User Overlay Foundational Enhancements (Search, Sort Presets, Aging, Text Export)
 -## 2025-09-04 – User Overlay Advanced Interaction (Legend, Multi-Select, Soft Hover, Duplicate Merge)
 - Goal: Accelerate large mark list workflows (hundreds+) with rapid recolor, batch maintenance, and low-friction spatial inspection without committing selection.
@@ -424,5 +453,18 @@
 - Purpose: Force remote build (clear stale cache referencing earlier missing overlay methods/exports). No functional code changes beyond this log entry.
 - Risk: None (documentation only).
 - Gates: Not applicable; serves solely as a rebuild catalyst.
+
+## 2025-09-04 – Transmission Intro Guard & Diagnostics Hardening
+- Goal: Eliminate sporadic unintended replays of the full intro ("BEGIN BURST") during echo phase and provide diagnostic visibility if future regressions occur. Maintain silent echo behavior (visual glitches only) while ensuring audio never returns post-intro except via explicit replay.
+- Changes:
+  - Added immutable `introModeRef` set on mount (true only if intro should run: first view or explicit replay). All audio + glitch sound effects now gated by `introModeRef` && !doneIntro.
+  - Inserted structured debug logger `window.__efTxLog` (bounded to last 400 events) capturing lifecycle events: mount (with flags), intro_init, intro_complete, echo_scheduled(delay), echo_append(line), skip_fastforward, replay_trigger, unmount.
+  - Strengthened ambient + glitch audio gating (minor & major glitches) to suppress any sound after intro completion; prior logic only checked typing state.
+  - Added replay remount key (`key={replayCounter}`) on `TransmissionPanel` usage in `App.tsx` ensuring clean remount state each replay.
+  - Replay handler now explicitly re-enables intro mode (`introModeRef.current = true`) before reinitializing text.
+- Files: `TransmissionPanel.tsx`, `App.tsx`, `decision-log.md`.
+- Risk: Low (component-local guards + prop key). No preference schema changes, no impact on other panels.
+- Verification: Build succeeds; manual smoke (intro plays once, fast forward cuts audio, echo lines append silently w/ visual glitches, replay triggers fresh intro w/ audio, no unsolicited intro restart after multiple echo cycles). `window.__efTxLog` shows expected ordered events.
+- Follow-ups: If spontaneous intro re-init ever logs without a user replay_trigger, capture stack trace hook (deferred until needed). Potential metric (transmission_replay_count) if operator wants adoption analytics for replay feature.
 
 

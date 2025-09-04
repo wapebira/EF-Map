@@ -98,6 +98,18 @@ const EVENT_MAP = {
   , overlay_import: { counters: ['overlay_imports'] }
   , overlay_panel_time: { sum: { key:'overlay_panel_time_ms_sum', countKey:'overlay_panel_time_count', valueField:'ms' } }
   , overlay_marks_count_bucket: { countersDynamic: (b)=> { const v=b.bucket; const allowed=['marks_0','marks_1_5','marks_6_15','marks_16_30','marks_31_60','marks_61_plus']; return allowed.includes(v)? [v]: []; } }
+  // Onboarding transmission events
+  , transmission_show: { counters: ['transmission_shows'] }
+  , transmission_complete: { counters: ['transmission_completes'] }
+  , transmission_skip: { counters: ['transmission_skips'] }
+  , transmission_dismiss: { counters: ['transmission_dismisses'] }
+  , transmission_link_click: { counters: ['transmission_link_clicks'] }
+  , transmission_route_click: { counters: ['transmission_route_clicks'] }
+  , transmission_replay: { counters: ['transmission_replays'] }
+  , transmission_audio_play: { counters: ['transmission_audio_plays'] }
+  , transmission_audio_mute: { counters: ['transmission_audio_mutes'] }
+  , transmission_audio_unmute: { counters: ['transmission_audio_unmutes'] }
+  , transmission_major_glitch: { counters: ['transmission_major_glitches'] }
 };
 
 // Schema versioning for aggregate snapshots.

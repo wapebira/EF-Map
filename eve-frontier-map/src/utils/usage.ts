@@ -7,13 +7,17 @@ const QUEUE: UsageEventBase[] = [];
 let flushTimer: any = null;
 const FLUSH_INTERVAL = 5000; // batch every 5s
 const MAX_BATCH = 12;
+// Dev safeguard: if functions endpoint returns 404 (local vite without Netlify functions)
+// we disable further network attempts to avoid spamming console.
+let disabledDueToMissingEndpoint = false;
 
 function scheduleFlush(){
-  if(flushTimer) return;
+  if(flushTimer || disabledDueToMissingEndpoint) return;
   flushTimer = setTimeout(()=>{ flushTimer = null; flush(); }, FLUSH_INTERVAL);
 }
 
 async function flush(){
+  if(disabledDueToMissingEndpoint){ QUEUE.length = 0; return; }
   if(!QUEUE.length) return;
   const batch = QUEUE.splice(0, MAX_BATCH);
   // send sequentially (functions are cheap) to keep server logic simple
@@ -26,6 +30,12 @@ async function flush(){
           console.warn('[usage] event rejected', evt.type);
         } else {
           console.warn('[usage] event failed', evt.type, res.status);
+          if(res.status === 404){
+            disabledDueToMissingEndpoint = true;
+            console.warn('[usage] disabling usage tracking (endpoint 404).');
+            QUEUE.length = 0;
+            break;
+          }
         }
       }
     } catch(e) { /* ignore network errors silently */ }
@@ -59,6 +69,7 @@ function noteActivity(){
 }
 
 export function track(evt: UsageEventBase){
+  if(disabledDueToMissingEndpoint) return;
   QUEUE.push(evt);
   noteActivity();
   if(QUEUE.length >= MAX_BATCH) flush(); else scheduleFlush();
@@ -71,6 +82,7 @@ export async function flushNow(){
 
 // Send a single critical event immediately; falls back to queued if network fails
 export async function trackImmediate(evt: UsageEventBase){
+  if(disabledDueToMissingEndpoint){ return; }
   try {
     const res = await fetch('/.netlify/functions/usage-event', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(evt) });
     if(!res.ok){
@@ -259,4 +271,6 @@ if(typeof window !== 'undefined'){
   const handler = () => { finalizeSession(); };
   window.addEventListener('beforeunload', handler);
   document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='hidden') handler(); });
+  // Expose manual re-enable for debugging if Netlify functions started after load
+  ;(window as any).__efEnableUsageTracking = () => { disabledDueToMissingEndpoint = false; console.info('[usage] manual re-enable invoked'); scheduleFlush(); };
 }
