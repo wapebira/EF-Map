@@ -380,7 +380,8 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
   }, [resetToken]);
 
   // Update From system when an external system selection occurs
-  useEffect(()=>{ if(selectedSystemName){ setFromSystem(prev=> prev || selectedSystemName); } }, [selectedSystemName]);
+  // Always reflect latest selected system as From (user request); removing previous 'only if empty' guard
+  useEffect(()=>{ if(selectedSystemName){ setFromSystem(selectedSystemName); } }, [selectedSystemName]);
 
   // Update To system when external destination selection occurs (always override to stay in sync with context menu)
   useEffect(()=>{
