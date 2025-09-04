@@ -39,14 +39,24 @@ const ECHO_POOL:string[] = [
 
 const INTRO_LINES = (o:{tribe:string; staging:string; discord:string; code:string; term:string}) => [
   '—— BEGIN BURST ——',
-  `Neural handshake accepted. You\u2019re a fresh hull with a jump drive and nowhere sane to go.`,
-  'Out there: tutorial grads piling gates, pirates farming impatience.',
-  'Out here: open lanes, unburned anomalies, ore that hasn\u2019t been strip-mined twice today.',
-  `We\u2019re ${o.tribe}. No doctrine. Just people pushing further.`,
-  `Lock ${o.staging} as destination. Put distance between you and the noise.`,
-  `Comms node: ${o.discord}`,
-  `Referral code: ${o.code}`,
-  'Hold channel open for more. Closing is allowed; deserting is routine.',
+  'Signal acquisition… narrow-beam… static… whatever. I\u2019m broadcasting anyway.',
+  'If you can read this you probably just crawled out of the tutorial cradle with a jump drive and zero plan.',
+  'Behind you: clustering rookies, gate camps farming impatience, recycled ore veins getting their third strip today.',
+  'Ahead: unsurveyed pockets, fat anomalies, belts that still smell like geology instead of industry.',
+  `I\u2019m with ${o.tribe}. No doctrine. No motivational holos. Just stubborn frames pushing further.`,
+  `Primary rendezvous: set destination ${o.staging}. That vector gets you off the noise lanes.`,
+  'It is a haul. You WILL burn fuel. Refuel smart; panic warps cost more than isotopes.',
+  'Expect stretches of absolutely nothing. That\u2019s normal. Nothing means you\u2019re early, not lost.',
+  'Your ship is consumable. Your map intel isn\u2019t. Trade hull confidence for better notes.',
+  `Web map tool you\u2019re in: I built it so fresh hulls could plot the jump corridor out here without begging corp chat.`,
+  'Need app help (search quirks, routing oddities)? In-game channel: EF-MAP (type it exactly with the hyphen).',
+  'Want live chatter / immediate orientation pings? Join channel WSTART (caps). If it\u2019s quiet, log observations anyway.',
+  `Discord uplink: ${o.discord}`,
+  `Referral tag (paste somewhere respectable): ${o.code}`,
+  'When you arrive: fewer eyes, fatter rocks, slower hunters. Different game. Still deadly—just honest about it.',
+  'If this beam feels one-way, good. Broadcast discipline keeps predators lazy.',
+  'Leave the window open. Echo channel will drip more fragments while I range scan. Close it if you hate flavor text.',
+  'Plot route, prep fuel, and move. History doesn\u2019t bookmark systems that waited.',
   '—— ECHO CHANNEL ARMED ——'
 ];
 
@@ -325,7 +335,22 @@ const TransmissionPanel: React.FC<TransmissionPanelProps> = ({ onClose, onRoute,
           try { (window as any).localStorage.setItem('transmissionSeenHard','1'); } catch {}
           try { (window as any).__efTxIntroComplete = true; (window as any).__efTxPersist = { text: fullTextRef.current, introComplete:true, queue: echoQueueRef.current.slice(), nextDue: Date.now() + 20000 }; } catch {}
           try { track({ type:'transmission_complete' }); } catch {};
-          if(ambientRef.current){ try { ambientRef.current.pause(); ambientRef.current.currentTime = 0; } catch {} }
+          // Graceful ambient termination: fade out instead of hard cut (don\u2019t sever mid-cycle)
+          if(ambientRef.current){
+            try {
+              const a = ambientRef.current; a.loop = false; // let current play-through end if near end
+              const startVol = a.volume;
+              const fadeMs = 900; const steps = 9; const stepDur = fadeMs/steps;
+              let i=0;
+              const fade = () => {
+                if(!a) return;
+                i++; const ratio = 1 - (i/steps);
+                a.volume = mutedRef.current?0: Math.max(0, startVol * ratio);
+                if(i < steps){ setTimeout(fade, stepDur); } else { try { a.pause(); a.currentTime = 0; } catch {} }
+              };
+              fade();
+            } catch {}
+          }
           scheduleNextEcho();
           logEvent('intro_complete');
           introModeRef.current = false;
