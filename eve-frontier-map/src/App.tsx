@@ -4295,8 +4295,7 @@ function App() {
             }}
           />
           <div style={{marginTop:8, display:'flex', gap:8}}>
-            {/* Legacy inline Add Mark button removed; functionality moved into UserOverlayPanel top toolbar */}
-            <small style={{opacity:0.7}}>Shift+RightClick a star for quick add</small>
+            {/* Legacy inline Add Mark button and quick add hint removed; Shift+RightClick still functions without UI hint. */}
           </div>
         </PanelDrawer>
       )}
