@@ -35,7 +35,8 @@ import { encodeShare, decodeShare } from './utils/share';
 import { createShortShare, fetchShortShare } from './utils/shortShare';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import DonateCryptoModal from './components/DonateCryptoModal';
-import StatsPage from './components/StatsPage';
+import { Suspense, lazy } from 'react';
+const StatsPage = lazy(()=> import('./components/StatsPage'));
 // Station icon (ensure file added at assets/icons/station.png)
 // Will be lazy loaded via TextureLoader when toggle active
 import stationIconUrl from './assets/icons/station.png';
@@ -157,7 +158,11 @@ const REGION_OUTLINE_COLOR = new THREE.Color(0x00aaff); // Shared blue for regio
 function App() {
   // Lightweight standalone stats page rendering (no full router). If path is /stats, render stats component only.
   if (typeof window !== 'undefined' && window.location.pathname === '/stats') {
-    return <StatsPage />;
+    return (
+      <Suspense fallback={<div style={{padding:20,color:'#ccc',fontSize:14}}>Loading stats…</div>}>
+        <StatsPage />
+      </Suspense>
+    );
   }
   // Synchronous initial prefs load for reliable first render
   const initialPrefsRef = useRef(getPrefs());
