@@ -106,32 +106,30 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	// Track whether we've already recorded savings for the current baseline (avoid double counting if user stops multiple times)
 	const savingsRecordedRef = useRef<boolean>(false);
 	// Helper to record optimization savings + session time once (used on Stop, unmount, visibility hidden, panel close, or time budget)
-	const recordOptimizationMetrics = useCallback(async (label?:string)=>{
+	const recordOptimizationMetrics = useCallback(async ()=>{
 		try {
 			let sent=false;
 			const baseline = baselineDistanceRef.current;
 			const champ = championDistanceRefVal.current;
 			// Savings
-			if(!savingsRecordedRef.current && baseline!==null && champ!==null){
-				const saved = baseline - champ;
-				if(saved > 0){
-					console.debug('[ScoutOpt] recording savings', { saved: saved.toFixed(4), baseline, champion: champ, label });
-					await trackImmediate({ type:'scout_opt_savings', saved: parseFloat(saved.toFixed(4)) });
-					try { (window as any).__efTrackSavingsBucket && (window as any).__efTrackSavingsBucket(saved); } catch {}
-					savingsRecordedRef.current = true; sent=true;
+				if(!savingsRecordedRef.current && baseline!==null && champ!==null){
+					const saved = baseline - champ;
+					if(saved > 0){
+						await trackImmediate({ type:'scout_opt_savings', saved: parseFloat(saved.toFixed(4)) });
+						try { (window as any).__efTrackSavingsBucket && (window as any).__efTrackSavingsBucket(saved); } catch {}
+						savingsRecordedRef.current = true; sent=true;
+					}
 				}
-			}
 			// Session time
-			if(optimizationStartTimeRef.current){
-				const ms = Date.now() - optimizationStartTimeRef.current;
-				if(ms>0){
-					console.debug('[ScoutOpt] recording session time', ms, label||'');
-					await trackImmediate({ type:'scout_opt_session_time', ms }); sent=true;
+				if(optimizationStartTimeRef.current){
+					const ms = Date.now() - optimizationStartTimeRef.current;
+					if(ms>0){
+						await trackImmediate({ type:'scout_opt_session_time', ms }); sent=true;
+					}
+					optimizationStartTimeRef.current = 0;
 				}
-				optimizationStartTimeRef.current = 0;
-			}
 			if(sent){ await flushNow(); }
-		} catch(e){ console.debug('[ScoutOpt][diag] metrics error', e); }
+			} catch(e){ /* debug removed: metrics error */ }
 	}, [championDistance]);
 	const globalMonitorRef = useRef<number|undefined>(undefined);
 	const totalMaxTimeSecRef = useRef<number>(0);
@@ -465,7 +463,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		// Invalidate any in-flight worker work by bumping generation
 		generationRef.current += 1;
 		// Before terminating, if we have a baseline and a current champion different from baseline, record savings + opt session time
-		recordOptimizationMetrics('stop');
+		recordOptimizationMetrics();
 		// Ask workers to stop and then terminate them to guarantee halt
 		workersRef.current.forEach(w=> { try { w.postMessage({ type:'stop' }); } catch(e){} });
 		setTimeout(() => { workersRef.current.forEach(w=> { try { w.terminate(); } catch(e){} }); workersRef.current=[]; }, 50);
@@ -855,7 +853,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		return ()=>{ 
 			if(globalMonitorRef.current!==undefined){ clearInterval(globalMonitorRef.current); globalMonitorRef.current=undefined; }
 			// If optimization was running, capture partial savings/session
-			if(isCalculating || optimizationStartTimeRef.current){ recordOptimizationMetrics('unmount'); }
+			if(isCalculating || optimizationStartTimeRef.current){ recordOptimizationMetrics(); }
 			// Count abandoned baseline on unmount if user never started optimization after baseline completed
 			if(baselineAwaitingOptRef.current){ try { track({ type:'scout_abandoned' }); } catch {}
 			}
@@ -871,7 +869,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 			// Or if baseline completed but optimization not started
 			else if(baselineAwaitingOptRef.current){ try { track({ type:'scout_abandoned' }); } catch {} }
 			if(isCalculating || optimizationStartTimeRef.current || (!savingsRecordedRef.current && baselineDistanceRef.current!==null && championDistance!==null && championDistance < baselineDistanceRef.current)){
-				recordOptimizationMetrics('panel-close');
+				recordOptimizationMetrics();
 			}
 		}
 		prevOpenRef.current = open;
@@ -881,7 +879,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	useEffect(()=>{
 		const visHandler = ()=>{
 			if(document.visibilityState === 'hidden'){
-				if(isCalculating || optimizationStartTimeRef.current){ recordOptimizationMetrics('hidden'); }
+				if(isCalculating || optimizationStartTimeRef.current){ recordOptimizationMetrics(); }
 			}
 		};
 		document.addEventListener('visibilitychange', visHandler);

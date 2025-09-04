@@ -177,7 +177,7 @@ function App() {
   floorBelowMin: 0.12,
     curveExp: 1,
   });
-  useEffect(()=>{ (window as any).__efSetHoverTuning = (opts: Partial<typeof hoverTuningRef.current>) => { Object.assign(hoverTuningRef.current, opts); console.log('[EF] Updated hover tuning', hoverTuningRef.current); }; }, []);
+  useEffect(()=>{ (window as any).__efSetHoverTuning = (opts: Partial<typeof hoverTuningRef.current>) => { Object.assign(hoverTuningRef.current, opts); /* debug removed */ }; }, []);
   const [isLoaded, setIsLoaded] = useState(false);
 
   const mountRef = useRef<HTMLDivElement>(null);
@@ -262,11 +262,11 @@ function App() {
     if(!regionStatsWorkerRef.current){
       try {
         regionStatsWorkerRef.current = new Worker(new URL('./workers/region_stats_worker.ts', import.meta.url), { type:'module' });
-        console.debug('[RegionStats] Worker created');
+  /* debug removed: worker created */
         regionStatsWorkerRef.current.onmessage = (e: MessageEvent)=>{
           const data = e.data;
             if(data && data.type==='result'){
-              console.debug('[RegionStats] Worker result received', data);
+              /* debug removed: worker result received */
               const regions: Record<number, RegionStats> = data.regions || {};
               Object.entries(regions).forEach(([rid, stats])=>{
                 regionStatsCacheRef.current.set(Number(rid), stats as RegionStats);
@@ -370,11 +370,11 @@ function App() {
         }
         setRegionStatsLoading(true);
         if(regionStatsWorkerRef.current){
-          console.debug('[RegionStats] Posting compute request', {rid, systems: systems.length, gates: gates.length});
+          /* debug removed: posting compute request */
           try { regionStatsWorkerRef.current.postMessage({ type:'compute', systems, gates }); } catch (e){ console.warn('[RegionStats] postMessage failed', e); setRegionStatsLoading(false); }
         } else {
           // Inline fallback
-          console.debug('[RegionStats] Worker missing – computing inline');
+          /* debug removed: worker missing inline compute */
           try {
             const stats = computeRegionStatsInline(systems, gates);
             regionStatsCacheRef.current.set(rid, stats);
@@ -398,7 +398,7 @@ function App() {
       const t = setTimeout(()=>{
         if(!activeRegionStats && regionStatsLoading){
           try {
-            console.debug('[RegionStats] Timeout fallback inline compute for region', rid);
+            /* debug removed: timeout fallback inline */
             if(mapData){
               // Rebuild systems/gates for that region
               const systems:any[]=[]; const gates:any[]=[];
@@ -427,12 +427,11 @@ function App() {
         s.add(key);
         try { (window as any).__efTrackRegionStatsView && (window as any).__efTrackRegionStatsView(); } catch {}
       }
-  try { console.debug('[RegionStats] Active stats set', activeRegionStats); } catch {}
+  try { /* debug removed: active stats set */ } catch {}
       // Debug: surface station presence discrepancy quickly (can be removed later)
       try {
         if((window as any).console){
-          const hasStation = (activeRegionStats as any).has_station;
-          console.debug('[RegionStats][Debug] Region', rid, 'has_station =', hasStation, 'highlighted system id', highlightedSystem.id);
+          /* debug removed: region has_station detail */
         }
       } catch {/* ignore */}
     }
@@ -1149,7 +1148,7 @@ function App() {
     }
     stationSpriteGroupRef.current = group;
     sceneRef.current.add(group);
-    try { if((window as any).console){ console.debug('[Stations] Sprites created. Systems with stations:', set.size, 'Sprites added:', added); } } catch {/* ignore */}
+  try { /* debug removed: stations sprites created */ } catch {/* ignore */}
     return () => { clearRetry(); };
   }, [showStations, mapData, getTransformedPosition, stationsRetryToken]);
   // Station scaling: 24px min at baseline/far, only nearest station to camera grows significantly; others remain near min.
@@ -2248,7 +2247,7 @@ function App() {
     // Ensure internal ref populated early (previously only set when overlay mounted -> caused false negatives in region stats)
     stationSystemIdSetRef.current = stationSet;
     if(stationSet.size && (window as any).console){
-      console.debug('[Stations] Loaded', stationSet.size, 'systems with stations. Example ID:', stationSet.values().next().value);
+  /* debug removed: stations loaded */
     }
   } catch {/* ignore */}
   setMapData({ solar_systems, stargates, regions, constellations });
@@ -2416,7 +2415,7 @@ function App() {
              if(mat && mat.uniforms && mat.uniforms.uTime){
                if(!(window as any).__efBubbleLastLog || tNowMs - (window as any).__efBubbleLastLog > 1000){
                  (window as any).__efBubbleLastLog = tNowMs;
-                 console.log('[bubble]', 'uTime', mat.uniforms.uTime.value, 'rotationY', rangeBubbleRef.current!.group.rotation.y.toFixed(2));
+                 /* debug removed: bubble uTime */
                }
              }
            }
