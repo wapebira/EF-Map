@@ -11,7 +11,7 @@ import RegionHighlighterModule, { setRegionHighlightColors } from './modules/Reg
 import RegionStatsCard, { type RegionStats } from './components/RegionStatsCard';
 import CompareRegionsPanel from './components/CompareRegionsPanel';
 import UserOverlayPanel from './components/UserOverlay/UserOverlayPanel';
-import { OVERLAY_FEATURE_FLAG } from './utils/userOverlay';
+import { OVERLAY_FEATURE_FLAG } from './utils/userOverlay.ts';
 import { UserOverlayRings } from './modules/UserOverlayRings';
 import AddOverlayMarkModal from './components/UserOverlay/AddOverlayMarkModal';
 import logo from './assets/logo/logo.png';
@@ -1552,6 +1552,83 @@ function App() {
 
   // Multi-panel open state (allow several drawers at once) - persisted
   const [openPanels, setOpenPanels] = useState<Set<string>>(new Set());
+  // User Overlay Rings visibility & rebuild (consolidated)
+  // Ensures halos reliably reappear after exiting cinematic mode while panel remains open (fix for step 4 failing)
+  const prevOverlayShowRef = useRef<boolean>(false);
+  useEffect(()=>{
+    if(!overlayRingsRef.current) return;
+    const shouldShow = openPanels.has('user-overlay') && !cinematicMode;
+    // Always set visibility when dependency changes (even if same) to recover from any external visibility side-effects
+    try { overlayRingsRef.current.setVisible(shouldShow); } catch {/* ignore */}
+    // Rebuild when transitioning hidden -> visible or after cinematic exit
+    const becameVisible = shouldShow && !prevOverlayShowRef.current;
+    if(becameVisible){
+  try { console.debug('[overlay] becameVisible -> rebuild'); (overlayRingsRef.current as any).rebuild?.(); } catch {/* ignore */}
+      // Double-pass: schedule a next-frame visibility + optional rebuild to guard against race with cinematic teardown
+  try { requestAnimationFrame(()=>{ if(overlayRingsRef.current){ console.debug('[overlay] post-frame visibility reinforce'); overlayRingsRef.current.setVisible(true); }}); } catch {/* ignore */}
+    }
+    // If panel just opened (regardless of cinematic state) and we have geometry, force rebuild to refresh positions/colors
+    if(openPanels.has('user-overlay') && !prevOverlayShowRef.current && overlayRingsRef.current){
+  try { console.debug('[overlay] panel opened -> rebuild'); (overlayRingsRef.current as any).rebuild?.(); } catch {/* ignore */}
+    }
+    prevOverlayShowRef.current = shouldShow;
+  }, [openPanels, cinematicMode]);
+  // Explicit cinematic exit recovery (belt & suspenders) – if panel open after cinematic ends but rings still hidden/missing
+  const prevCinematicRef = useRef<boolean>(false);
+  useEffect(()=>{
+    if(!overlayRingsRef.current) { prevCinematicRef.current = cinematicMode; return; }
+    if(prevCinematicRef.current && !cinematicMode && openPanels.has('user-overlay')){
+      try {
+        console.debug('[overlay] cinematic exit -> force rebuild & show');
+        (overlayRingsRef.current as any).rebuild?.();
+        overlayRingsRef.current.setVisible(true);
+        requestAnimationFrame(()=>{ try { overlayRingsRef.current && overlayRingsRef.current.setVisible(true); } catch {/* ignore */} });
+      } catch {/* ignore */}
+    }
+    prevCinematicRef.current = cinematicMode;
+  }, [cinematicMode, openPanels]);
+  // Debug state helper
+  useEffect(()=>{
+    (window as any).__efOverlayState = () => {
+      try {
+        const inst = overlayRingsRef.current as any;
+        if(!inst) return { exists:false };
+        const group:any = (inst as any).group || inst.group; // private, but for debug only
+        const points:any = inst.points || (inst.group && inst.group.children && inst.group.children[0]);
+        return {
+          exists:true,
+          visible: !!(group && group.visible),
+          points: !!points,
+          pointCount: points?.geometry?.getAttribute?.('position')?.count,
+          colors: points?.geometry?.getAttribute?.('color')?.count,
+        };
+      } catch(e){ return { error:String(e) }; }
+    };
+  }, []);
+  // Rescue / re-init: if overlay rings ref lost (e.g. hot reload or disposal) while panel open, recreate
+  useEffect(()=>{
+    if(!OVERLAY_FEATURE_FLAG) return;
+    if(overlayRingsRef.current) return; // nothing to do
+    if(!openPanels.has('user-overlay')) return;
+    if(!sceneRef.current || !ringTexture) return;
+    if(cinematicMode) return; // wait until cinematic off
+    try {
+      console.debug('[overlay] rescue init');
+      overlayRingsRef.current = new UserOverlayRings(sceneRef.current, ringTexture, 15);
+      if(mapData) overlayRingsRef.current.setMapData(mapData);
+      overlayRingsRef.current.setVisible(true);
+    } catch(e){ console.warn('[overlay] rescue init failed', e); }
+  }, [openPanels, cinematicMode, mapData]);
+  // Debug helper: window.__efOverlayForce(true|false) to manually toggle & rebuild
+  useEffect(()=>{
+    (window as any).__efOverlayForce = (v:boolean)=>{
+      try {
+        if(!overlayRingsRef.current) return;
+        overlayRingsRef.current.setVisible(v);
+        if(v){ (overlayRingsRef.current as any).rebuild?.(); }
+      } catch {/* ignore */}
+    };
+  }, []);
   const [addOverlayOpen, setAddOverlayOpen] = useState(false);
   const [addOverlaySystem, setAddOverlaySystem] = useState<{ id:number; name:string }|null>(null);
   // Z-index management for draggable panels
@@ -2243,6 +2320,11 @@ function App() {
           if(OVERLAY_FEATURE_FLAG && ringTexture && !overlayRingsRef.current) {
             // Size chosen to sit just outside capped star size (~10px). Adjust if visual gap too large.
             overlayRingsRef.current = new UserOverlayRings(sceneRef.current, ringTexture, 15);
+            // Start hidden by default; immediately show if panel already open & not cinematic
+            try {
+              const shouldStartVisible = openPanels.has('user-overlay') && !cinematicMode;
+              overlayRingsRef.current.setVisible(shouldStartVisible);
+            } catch {/* ignore */}
             (window as any).__efOverlayRebuild = () => { try { overlayRingsRef.current && (overlayRingsRef.current as any).rebuild && (overlayRingsRef.current as any).rebuild(); } catch {} };
             if(mapData) { try { overlayRingsRef.current.setMapData(mapData); } catch {} }
           }
