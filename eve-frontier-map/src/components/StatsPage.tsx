@@ -76,7 +76,17 @@ const DESCRIPTIONS: Record<string,string> = {
   'UI Scale':'Chosen interface scale percentages distribution.',
   'Reachability Usage':'Adoption & interaction with jump range reachability tools.',
   'Range Buckets':'Distribution of chosen max jump ranges (approx – sampled on edit pauses).',
-  'Last 7 Days (Newest First)':'Daily aggregate snapshot: one JSON per day.'
+  'Last 7 Days (Newest First)':'Daily aggregate snapshot: one JSON per day.',
+  // Overlay panel
+  'Overlay opens':'User-triggered opens of the overlay panel (includes repeats).',
+  'Overlay sessions':'Distinct sessions with at least one open (first open per session).',
+  'Marks added':'Total marks created (including duplicates pre-merge).',
+  'Mark sessions':'Sessions where at least one mark was added.',
+  'Avg marks / session':'Marks added divided by mark sessions (engaged sessions only).',
+  'Overlay exports':'JSON export actions.',
+  'Overlay imports':'JSON import actions (successful additions).',
+  'Avg panel open time':'Average cumulative time the overlay panel remained open per engaged session.',
+  'Overlay Marks Count':'Distribution of mark counts present at session snapshot time.'
 };
 
 const StatRow: React.FC<{ label:string; value:React.ReactNode }> = ({ label, value }) => {
@@ -283,6 +293,18 @@ const StatsPage: React.FC = () => {
             <StatRow label="Crypto clicks" value={data.counters.donate_crypto_clicks||0} />
             <StatRow label="Stripe CTR" value={( ()=>{ const o=data.counters.donate_modal_open||0; const s=data.counters.donate_stripe_clicks||0; if(!o) return '—'; return ((s/o)*100).toFixed(1)+'%'; })()} />
           </section>
+          {/* User Overlay */}
+          <section style={{ background:'rgba(255,255,255,0.06)', padding:'16px 18px', border:'1px solid rgba(255,255,255,0.15)', borderRadius:10, boxShadow:'0 2px 4px rgba(0,0,0,0.45)' }}>
+            <h2 style={{ margin:'0 0 8px 0', fontSize:'15px', letterSpacing:'.5px', textTransform:'uppercase', opacity:0.85 }}>User Overlay</h2>
+            <StatRow label="Overlay opens" value={data.counters.overlay_opens||0} />
+            <StatRow label="Overlay sessions" value={data.counters.overlay_sessions||0} />
+            <StatRow label="Marks added" value={data.counters.overlay_add_marks||0} />
+            <StatRow label="Mark sessions" value={data.counters.overlay_add_sessions||0} />
+            <StatRow label="Avg marks / session" value={( ()=>{ const adds=data.counters.overlay_add_marks||0; const sess=data.counters.overlay_add_sessions||0; if(!adds||!sess) return '—'; return (adds/sess).toFixed(1); })()} />
+            <StatRow label="Overlay exports" value={data.counters.overlay_exports||0} />
+            <StatRow label="Overlay imports" value={data.counters.overlay_imports||0} />
+            <StatRow label="Avg panel open time" value={formatDurationAvg(data.sums.overlay_panel_time_ms_sum, data.sums.overlay_panel_time_count)} />
+          </section>
           {/* Session & Cinematic */}
           <section style={{ background:'rgba(255,255,255,0.06)', padding:'16px 18px', border:'1px solid rgba(255,255,255,0.15)', borderRadius:10, boxShadow:'0 2px 4px rgba(0,0,0,0.45)' }}>
             <h2 style={{ margin:'0 0 8px 0', fontSize:'15px', letterSpacing:'.5px', textTransform:'uppercase', opacity:0.85 }}>Session & Cinematic</h2>
@@ -318,6 +340,7 @@ const StatsPage: React.FC = () => {
               {(()=>{ const keys=['bins_5','bins_3_4','bins_1_2','bins_0']; const labelMap:{[k:string]:string}={bins_5:'5',bins_3_4:'3–4',bins_1_2:'1–2',bins_0:'0'}; const rows=keys.map(k=>({k,c:data.counters[k]||0,label:labelMap[k]})); const tot=rows.reduce((a,b)=>a+b.c,0); return <DistTable title="Planet Bins Active" rows={rows} total={tot} />; })()}
               {(()=>{ const workerKeys=Object.keys(data.counters).filter(k=> k.startsWith('opt_workers_used_')); const rows=workerKeys.sort((a,b)=> parseInt(a.split('_').pop()||'0')-parseInt(b.split('_').pop()||'0')).map(k=>({k,c:data.counters[k]||0,label:k.replace('opt_workers_used_','')})); const tot=rows.reduce((a,b)=>a+b.c,0); return <DistTable title="Workers Used" rows={rows} total={tot} />; })()}
               {(()=>{ const scaleKeys=Object.keys(data.counters).filter(k=> k.startsWith('ui_scale_')); const rows=scaleKeys.sort((a,b)=> parseInt(a.replace('ui_scale_',''))-parseInt(b.replace('ui_scale_',''))).map(k=>({k,c:data.counters[k]||0,label:k.replace('ui_scale_','')+'%'})); const tot=rows.reduce((a,b)=>a+b.c,0); return <DistTable title="UI Scale" rows={rows} total={tot} />; })()}
+              {(()=>{ const keys=['marks_0','marks_1_5','marks_6_15','marks_16_30','marks_31_60','marks_61_plus']; const labelMap:{[k:string]:string}={marks_0:'0',marks_1_5:'1–5',marks_6_15:'6–15',marks_16_30:'16–30',marks_31_60:'31–60',marks_61_plus:'61+'}; const rows=keys.map(k=>({k,c:data.counters[k]||0,label:labelMap[k]})); const tot=rows.reduce((a,b)=>a+b.c,0); return <DistTable title="Overlay Marks Count" rows={rows} total={tot} />; })()}
             </div>
           </section>
   </div>

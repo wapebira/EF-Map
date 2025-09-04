@@ -7,7 +7,7 @@ interface SortState { key: keyof UserOverlayEntry | 'systemName'; dir:1|-1; }
 const headerStyle: React.CSSProperties = { position:'sticky', top:0, background:'rgba(40,40,44,0.92)', cursor:'pointer', padding:'4px 6px', fontSize:11, fontWeight:600, zIndex:1, whiteSpace:'nowrap' };
 const cellStyle: React.CSSProperties = { padding:'3px 6px', fontSize:11, borderBottom:'1px solid rgba(255,255,255,0.04)', verticalAlign:'top' };
 const centerCell: React.CSSProperties = { ...cellStyle, textAlign:'center' }; // for all but note column
-const nameCellSticky: React.CSSProperties = { position:'sticky', left:0, background:'rgba(30,30,34,0.92)', fontWeight:500 };
+const nameCellSticky: React.CSSProperties = { position:'sticky', left:0, background:'rgba(30,30,34,0.92)', fontWeight:500, zIndex:2 };
 const btnStyle: React.CSSProperties = { background:'var(--accent)', color:'#fff', border:'none', padding:'4px 10px', borderRadius:6, cursor:'pointer', fontSize:12 };
 const btnDangerStyle: React.CSSProperties = { ...btnStyle, background:'#742e2e' };
 const selectStyle: React.CSSProperties = { background:'#222', color:'#fff', border:'1px solid #444', padding:'4px 6px', borderRadius:6, fontSize:12 };
@@ -231,11 +231,13 @@ export const UserOverlayPanel: React.FC<PanelProps> = ({ onAddMark, onSetDestina
               };
               const stale = e.updatedAt < staleCutoff;
               const selectedRow = allSelectedSet.has(e.id);
-              return (
+        // Selected row background: apply via a variable so we can reuse for sticky cell to avoid gap.
+        const rowBg = selectedRow? 'rgba(255,255,255,0.10)' : undefined;
+        return (
                 <tr
                   key={e.id}
                   onContextMenu={handleRowContext}
-                  style={{ ...(stale? { opacity:0.55 }: {}), background: selectedRow? 'rgba(255,255,255,0.08)': undefined, outline: selectedRow? '1px solid rgba(255,255,255,0.15)': undefined, cursor:'pointer' }}
+          style={{ ...(stale? { opacity:0.55 }: {}), background: rowBg, outline: selectedRow? '1px solid rgba(255,255,255,0.18)': undefined, cursor:'pointer' }}
                   onClick={(ev)=> toggleRowSelect(e.id, sorted.findIndex(x=> x.id===e.id), ev)}
                   onMouseEnter={()=> onSoftHover && onSoftHover(e.systemName)}
                   onMouseLeave={()=> onSoftHover && onSoftHover(null)}
@@ -264,7 +266,7 @@ export const UserOverlayPanel: React.FC<PanelProps> = ({ onAddMark, onSetDestina
                     )}
                   </td>
                   <td
-                    style={{ ...centerCell, ...nameCellSticky, cursor:'pointer', textDecoration:'underline' }}
+                    style={{ ...centerCell, ...nameCellSticky, cursor:'pointer', textDecoration:'underline', background: rowBg || nameCellSticky.background }}
                     title={e.systemName}
                     onClick={()=> onSelectSystem && onSelectSystem(e.systemName)}
                   >{e.systemName}</td>
