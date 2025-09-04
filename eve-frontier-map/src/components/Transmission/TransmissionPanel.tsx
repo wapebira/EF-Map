@@ -200,7 +200,10 @@ const TransmissionPanel: React.FC<TransmissionPanelProps> = ({ onClose, onRoute,
 
   // Helper to (re)construct randomized phases
   const reshuffleEchoes = () => {
-    const shuffled = [...ECHO_POOL].sort(()=>0.5-Math.random());
+    const code = referralCode || '';
+    const shuffled = [...ECHO_POOL]
+      .map(l=> code? l.replace(/\$\{REF_CODE\}/g, code) : l)
+      .sort(()=>0.5-Math.random());
     echoQueueRef.current = shuffled;
   };
   const initIntro = () => {
