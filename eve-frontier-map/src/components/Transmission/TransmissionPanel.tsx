@@ -206,7 +206,8 @@ const TransmissionPanel: React.FC<TransmissionPanelProps> = ({ onClose, onRoute,
       }
       arr.push(entry);
       // Also echo to console for immediate visibility (prefixed)
-      try { if((window as any).__EF_TX_DEBUG!==false) console.debug('[tx]', type, extra); } catch {}
+  // Debug logging now disabled by default; set window.__EF_TX_DEBUG = true in console to re-enable granular traces
+  try { if((window as any).__EF_TX_DEBUG === true) console.debug('[tx]', type, extra); } catch {}
     } catch {}
   };
 
