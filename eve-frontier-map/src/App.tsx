@@ -4287,9 +4287,15 @@ function App() {
           initialSize={{ width: 780, height: 480 }}
           minSize={{ width: 520, height: 320 }}
         >
-          <UserOverlayPanel />
+          <UserOverlayPanel
+            selectedSystem={highlightedSystem ? { id: highlightedSystem.id, name: highlightedSystem.name } : null}
+            onAddMark={(systemName, systemId) => {
+              setAddOverlaySystem({ id: systemId, name: systemName });
+              setAddOverlayOpen(true);
+            }}
+          />
           <div style={{marginTop:8, display:'flex', gap:8}}>
-            <button onClick={()=>{ if(highlightedSystem){ setAddOverlaySystem({ id: highlightedSystem.id, name: highlightedSystem.name }); setAddOverlayOpen(true); } else if(hoveredSystem){ setAddOverlaySystem({ id:hoveredSystem.id, name:hoveredSystem.name }); setAddOverlayOpen(true);} }} disabled={!(highlightedSystem||hoveredSystem)} aria-label="Add mark for current system">Add Mark</button>
+            {/* Legacy inline Add Mark button removed; functionality moved into UserOverlayPanel top toolbar */}
             <small style={{opacity:0.7}}>Shift+RightClick a star for quick add</small>
           </div>
         </PanelDrawer>

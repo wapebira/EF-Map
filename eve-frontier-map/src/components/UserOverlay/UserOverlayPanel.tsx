@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { userOverlayStore, setOverlayFilterColor } from '../../utils/userOverlay';
+import { userOverlayStore, setOverlayFilterColor, OVERLAY_COLOR_NAMES } from '../../utils/userOverlay';
 import type { UserOverlayEntry } from '../../utils/userOverlay';
 
 interface SortState { key: keyof UserOverlayEntry | 'systemName'; dir:1|-1; }
@@ -13,7 +13,12 @@ const rowBtnStyle: React.CSSProperties = { background:'#333', color:'#ddd', bord
 const pickerStyle: React.CSSProperties = { position:'absolute', marginTop:4, background:'rgba(22,22,24,0.95)', padding:8, border:'1px solid #333', borderRadius:6, zIndex:10, boxShadow:'0 4px 16px -4px rgba(0,0,0,0.6)' };
 const pickerInputStyle: React.CSSProperties = { background:'#111', color:'#fff', border:'1px solid #444', padding:'4px 6px', borderRadius:4, fontSize:11, width:100 };
 
-export const UserOverlayPanel: React.FC = () => {
+interface PanelProps {
+  onAddMark(systemName: string, systemId: number): void;
+  selectedSystem?: { id:number; name:string } | null;
+}
+
+export const UserOverlayPanel: React.FC<PanelProps> = ({ onAddMark, selectedSystem }) => {
   const [entries, setEntries] = useState<UserOverlayEntry[]>(userOverlayStore.getEntries());
   const [sort, setSort] = useState<SortState>({ key:'createdAt', dir:-1 });
   const [filterColor, setFilterColor] = useState<string|undefined>(undefined);
@@ -33,15 +38,20 @@ export const UserOverlayPanel: React.FC = () => {
   const header = (label:string, key:SortState['key']) => <th style={headerStyle} onClick={()=> toggleSort(key)}>{label} {sort.key===key? (sort.dir===1?'▲':'▼'):''}</th>;
   return (
     <div style={{ width:'100%', height:'100%', display:'flex', flexDirection:'column', overflow:'hidden' }}>
-      <div style={{ display:'flex', flexWrap:'wrap', gap:6, padding:'2px 0 6px 0' }}>
-  <button style={btnStyle} disabled>Add (right-click map)</button>
+  <div style={{ display:'flex', flexWrap:'wrap', gap:6, padding:'2px 0 6px 0' }}>
+	<button
+      style={{ ...btnStyle, opacity: selectedSystem? 1:0.5, cursor: selectedSystem? 'pointer':'not-allowed' }}
+      disabled={!selectedSystem}
+      onClick={()=> { if(selectedSystem) onAddMark(selectedSystem.name, selectedSystem.id); }}
+      title={selectedSystem? 'Add mark for selected system':'Select a system first'}
+    >Add Mark</button>
         <button style={btnStyle} onClick={onExport} disabled={!entries.length}>Export</button>
         <label style={{ ...btnStyle, display:'inline-flex', alignItems:'center', gap:4, cursor:'pointer' }}>
           Import<input type='file' accept='application/json' style={{ display:'none' }} onChange={e=> onImport(e.target.files)} />
         </label>
   <select value={filterColor||''} onChange={e=> setFilterColor(e.target.value||undefined)} style={selectStyle}>
           <option value=''>All Colors</option>
-          {colorsInUse.map(c=> <option key={c} value={c}>{c}</option>)}
+          {colorsInUse.map(c=> <option key={c} value={c}>{OVERLAY_COLOR_NAMES[c] || c}</option>)}
         </select>
         <button style={btnDangerStyle} onClick={clearAll} disabled={!entries.length}>Clear All</button>
         <div style={{ marginLeft:'auto', fontSize:11, opacity:0.7 }}>Marks: {entries.length}</div>
