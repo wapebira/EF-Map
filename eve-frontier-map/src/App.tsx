@@ -1563,13 +1563,12 @@ function App() {
     // Rebuild when transitioning hidden -> visible or after cinematic exit
     const becameVisible = shouldShow && !prevOverlayShowRef.current;
     if(becameVisible){
-  try { console.debug('[overlay] becameVisible -> rebuild'); (overlayRingsRef.current as any).rebuild?.(); } catch {/* ignore */}
-      // Double-pass: schedule a next-frame visibility + optional rebuild to guard against race with cinematic teardown
-  try { requestAnimationFrame(()=>{ if(overlayRingsRef.current){ console.debug('[overlay] post-frame visibility reinforce'); overlayRingsRef.current.setVisible(true); }}); } catch {/* ignore */}
+      try { (overlayRingsRef.current as any).rebuild?.(); } catch {/* ignore */}
+      try { requestAnimationFrame(()=>{ if(overlayRingsRef.current){ overlayRingsRef.current.setVisible(true); }}); } catch {/* ignore */}
     }
     // If panel just opened (regardless of cinematic state) and we have geometry, force rebuild to refresh positions/colors
     if(openPanels.has('user-overlay') && !prevOverlayShowRef.current && overlayRingsRef.current){
-  try { console.debug('[overlay] panel opened -> rebuild'); (overlayRingsRef.current as any).rebuild?.(); } catch {/* ignore */}
+      try { (overlayRingsRef.current as any).rebuild?.(); } catch {/* ignore */}
     }
     prevOverlayShowRef.current = shouldShow;
   }, [openPanels, cinematicMode]);
@@ -1579,7 +1578,6 @@ function App() {
     if(!overlayRingsRef.current) { prevCinematicRef.current = cinematicMode; return; }
     if(prevCinematicRef.current && !cinematicMode && openPanels.has('user-overlay')){
       try {
-        console.debug('[overlay] cinematic exit -> force rebuild & show');
         (overlayRingsRef.current as any).rebuild?.();
         overlayRingsRef.current.setVisible(true);
         requestAnimationFrame(()=>{ try { overlayRingsRef.current && overlayRingsRef.current.setVisible(true); } catch {/* ignore */} });
@@ -1588,23 +1586,7 @@ function App() {
     prevCinematicRef.current = cinematicMode;
   }, [cinematicMode, openPanels]);
   // Debug state helper
-  useEffect(()=>{
-    (window as any).__efOverlayState = () => {
-      try {
-        const inst = overlayRingsRef.current as any;
-        if(!inst) return { exists:false };
-        const group:any = (inst as any).group || inst.group; // private, but for debug only
-        const points:any = inst.points || (inst.group && inst.group.children && inst.group.children[0]);
-        return {
-          exists:true,
-          visible: !!(group && group.visible),
-          points: !!points,
-          pointCount: points?.geometry?.getAttribute?.('position')?.count,
-          colors: points?.geometry?.getAttribute?.('color')?.count,
-        };
-      } catch(e){ return { error:String(e) }; }
-    };
-  }, []);
+  // (Removed debug overlay state helper in production)
   // Rescue / re-init: if overlay rings ref lost (e.g. hot reload or disposal) while panel open, recreate
   useEffect(()=>{
     if(!OVERLAY_FEATURE_FLAG) return;
@@ -1613,7 +1595,7 @@ function App() {
     if(!sceneRef.current || !ringTexture) return;
     if(cinematicMode) return; // wait until cinematic off
     try {
-      console.debug('[overlay] rescue init');
+  // silent rescue init
       overlayRingsRef.current = new UserOverlayRings(sceneRef.current, ringTexture, 15);
       if(mapData) overlayRingsRef.current.setMapData(mapData);
       overlayRingsRef.current.setVisible(true);
