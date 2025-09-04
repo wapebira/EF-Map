@@ -1668,6 +1668,7 @@ function App() {
   const cinematicDrawerRef = useRef<PanelDrawerHandle|null>(null);
   const regionStatsDrawerRef = useRef<PanelDrawerHandle|null>(null);
   const regionCompareDrawerRef = useRef<PanelDrawerHandle|null>(null);
+  const userOverlayDrawerRef = useRef<PanelDrawerHandle|null>(null);
   // Maintain legend in open order when toggled
   useEffect(()=>{
     setOpenPanelOrder(prev=>{
@@ -1682,7 +1683,7 @@ function App() {
   const autoOrderRef = useRef<string[]>([]); // current left-to-right order of auto-managed panels
   useLayoutEffect(()=>{
     const BASE_X = 140, BASE_Y = 70, GAP_X = 24;
-  const managed = (id:string)=> id==='routing' || id==='cinematic' || id==='planet-legend' || id==='region-stats' || id==='region-compare';
+  const managed = (id:string)=> id==='routing' || id==='cinematic' || id==='planet-legend' || id==='region-stats' || id==='region-compare' || id==='user-overlay';
     const active = openPanelOrder.filter(id=> managed(id) && (id==='planet-legend'? isPlanetCountActive : openPanels.has(id)));
     const prevOrder = autoOrderRef.current;
     // Remove any that are no longer active
@@ -1702,6 +1703,7 @@ function App() {
   else if(id==='cinematic' && cinematicDrawerRef.current) cinematicDrawerRef.current.autoPosition(target);
   else if(id==='region-stats' && regionStatsDrawerRef.current) regionStatsDrawerRef.current.autoPosition(target);
   else if(id==='region-compare' && regionCompareDrawerRef.current) regionCompareDrawerRef.current.autoPosition(target);
+  else if(id==='user-overlay' && userOverlayDrawerRef.current) userOverlayDrawerRef.current.autoPosition(target);
   else if(id==='planet-legend') { try { window.dispatchEvent(new CustomEvent('ef:auto-pos', { detail:{ id, target, cascade:true } })); } catch {/* ignore */} }
     };
     const compactAll = () => {
@@ -1751,6 +1753,24 @@ function App() {
     // Two-frame defer to let new panel DOM mount & width settle
     requestAnimationFrame(()=> requestAnimationFrame(run));
   }, [openPanels, openPanelOrder, isPlanetCountActive, uiScale]);
+
+  // Specific nudge: if user-overlay is the ONLY managed panel opened first, re-run cascade after content paint to ensure same offset adjustments.
+  useEffect(()=>{
+    const managedIds = ['routing','cinematic','planet-legend','region-stats','region-compare','user-overlay'];
+    const activeManaged = Array.from(openPanels).filter(id=> managedIds.includes(id) || (id==='planet-legend' && isPlanetCountActive));
+    if(activeManaged.length===1 && activeManaged[0]==='user-overlay'){
+      // skip if user has a stored position already
+      if(localStorage.getItem('panel-pos:drawer-user-overlay')) return;
+      // Trigger a tiny deferred alignment (will be no-op if already aligned)
+      requestAnimationFrame(()=>{
+        try {
+          if(userOverlayDrawerRef.current){
+            userOverlayDrawerRef.current.autoPosition({ x:140, y:70 });
+          }
+        } catch {/* ignore */}
+      });
+    }
+  }, [openPanels, isPlanetCountActive]);
   // Optional debug toggle (open console and set window.DEBUG_PREFS=true)
   ;(window as any).DEBUG_PREFS = (window as any).DEBUG_PREFS || false;
 
@@ -3582,7 +3602,7 @@ function App() {
     const renderer = rendererRef.current;
 
     if (hoverPoint && camera && renderer) {
-      if (hoveredSystem && !(cinematicModeRef.current && !cinematicLabelsRef.current)) {
+  if (hoveredSystem && !(cinematicModeRef.current && !cinematicLabelsRef.current)) {
         const pos = getTransformedPosition(hoveredSystem.position);
         hoverPoint.position.set(pos.x, pos.y, pos.z);
 
@@ -3596,10 +3616,20 @@ function App() {
         const newRingSize = Math.max(MIN_HOVER_RING_SIZE, MAX_STAR_PIXEL_SIZE + HOVER_RING_PADDING);
         
         (hoverPoint.material as THREE.PointsMaterial).size = newRingSize;
+        // Force consistent hover color (orange accent) regardless of underlying overlay mark color
+        try {
+          const hoverMat = hoverPoint.material as THREE.PointsMaterial;
+          // Use orange hex directly for clarity; could derive from accent palette if needed
+          hoverMat.color.set('#ff8a2b');
+        } catch {/* ignore */}
 
-        hoverPoint.visible = true;
+  hoverPoint.visible = true;
+  // Suppress overlay ring for this system to avoid blended color variability
+  try { overlayRingsRef.current?.setSuppressedSystem(hoveredSystem.id); } catch {/* ignore */}
     } else {
         hoverPoint.visible = false;
+  // Restore overlay rings
+  try { overlayRingsRef.current?.setSuppressedSystem(null); } catch {/* ignore */}
       }
     }
   }, [hoveredSystem, getTransformedPosition, pointsMaterial, cinematicLabels]);
@@ -4290,6 +4320,7 @@ function App() {
       )}
       {OVERLAY_FEATURE_FLAG && openPanels.has('user-overlay') && (
         <PanelDrawer
+          ref={userOverlayDrawerRef}
           id="user-overlay"
           title={'User Overlay (Marks)'}
           scale={uiScale}
@@ -4306,6 +4337,13 @@ function App() {
             onAddMark={(systemName, systemId) => {
               setAddOverlaySystem({ id: systemId, name: systemName });
               setAddOverlayOpen(true);
+            }}
+            onSoftHover={(name)=>{
+              if(!mapData){ return; }
+              if(!name){ setHoveredSystem(null); return; }
+              // Do not change highlighted selection; only adjust hover label
+              const sys = Object.values(mapData.solar_systems).find(s=> s.name===name);
+              if(sys){ setHoveredSystem(sys as any); }
             }}
             onSetDestination={(name)=>{
               // Reuse existing destination logic (similar to context menu action)
