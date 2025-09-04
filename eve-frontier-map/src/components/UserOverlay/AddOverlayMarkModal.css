@@ -27,8 +27,22 @@
 .overlay-add-window-textarea:focus{outline:1px solid var(--accent,#00aaff);}
 .overlay-add-window .color-swatch{width:26px;height:26px;border-radius:4px;margin:0;padding:0;border:none;box-shadow:0 0 0 1px rgba(0,0,0,0.5);}
 .overlay-add-window .color-swatch.active{box-shadow:0 0 0 2px #fff,0 0 0 4px var(--accent,#00aaff);} 
-.overlay-add-window .resize-handle{position:absolute;width:16px;height:16px;right:2px;bottom:2px;cursor:nwse-resize;background:linear-gradient(135deg,rgba(255,255,255,0.08) 0%,rgba(255,255,255,0.02) 60%);border-radius:4px;box-shadow:inset 0 0 0 1px rgba(255,255,255,0.05);} 
-.overlay-add-window .resize-handle:after{content:'';position:absolute;inset:0;border:1px solid rgba(255,255,255,0.08);border-radius:4px;pointer-events:none;}
+/* Edge / corner resize zones (invisible) */
+.overlay-add-window .resize-edge{position:absolute;z-index:10;}
+.overlay-add-window .edge-n{top:-3px;left:6px;right:6px;height:6px;cursor:n-resize;}
+.overlay-add-window .edge-s{bottom:-3px;left:6px;right:6px;height:6px;cursor:s-resize;}
+.overlay-add-window .edge-e{top:6px;right:-3px;bottom:6px;width:6px;cursor:e-resize;}
+.overlay-add-window .edge-w{top:6px;left:-3px;bottom:6px;width:6px;cursor:w-resize;}
+.overlay-add-window .resize-corner{position:absolute;width:12px;height:12px;z-index:11;}
+.overlay-add-window .corner-ne{top:-4px;right:-4px;cursor:ne-resize;}
+.overlay-add-window .corner-nw{top:-4px;left:-4px;cursor:nw-resize;}
+.overlay-add-window .corner-se{bottom:-4px;right:-4px;cursor:se-resize;}
+.overlay-add-window .corner-sw{bottom:-4px;left:-4px;cursor:sw-resize;}
 
 /* Ensure palette row wraps nicely within dynamic width */
 .overlay-add-window .palette-row{display:flex;flex-wrap:wrap;gap:6px;}
+
+/* Adaptive layout: textarea shrinks before actions row disappears */
+.overlay-add-window-body{min-height:0;}
+.overlay-add-window-body .actions{flex-shrink:0;padding-top:4px;}
+.overlay-add-window-textarea{flex:1 1 auto;min-height:40px;}
