@@ -10,7 +10,19 @@ interface Props {
   onAdded?(id: string): void;
 }
 
-const PALETTE = ['#ff4c26','#ffa600','#ffd400','#3fbf3f','#00aaff','#7d5cff','#ff2ca8','#cccccc','#ffffff'];
+// Updated palette: removed low-contrast light grays (#ccc, #fff); added solid red + true blue + kept vivid contrasting hues.
+// Order groups warm -> cool -> vivid accents.
+const PALETTE = [
+  '#ff4c26', // dark orange
+  '#ffa600', // orange
+  '#ffd400', // yellow
+  '#ff0000', // red
+  '#3fbf3f', // green
+  '#00aaff', // cyan
+  '#0060ff', // blue
+  '#7d5cff', // purple
+  '#ff2ca8'  // pink
+];
 
 export const AddOverlayMarkModal: React.FC<Props> = ({ open, systemId, systemName, onClose, onAdded }) => {
   const [color, setColor] = useState('#ff4c26');
@@ -27,9 +39,15 @@ export const AddOverlayMarkModal: React.FC<Props> = ({ open, systemId, systemNam
         <form onSubmit={handleSubmit}>
           <div className="palette-row">
             {PALETTE.map(c=> (
-              <button key={c} type="button" className={"color-swatch" + (c===color? ' active':'')} style={{ background:c, border: c.toLowerCase()==='#ffffff'? '1px solid #666':'none' }} onClick={()=> setColor(c)} aria-label={"Select color "+c}></button>
+              <button
+                key={c}
+                type="button"
+                className={"color-swatch" + (c===color? ' active':'')}
+                style={{ background:c }}
+                onClick={()=> setColor(c)}
+                aria-label={"Select color "+c}
+              ></button>
             ))}
-            <input aria-label="Custom hex" value={color} onChange={e=> setColor(e.target.value)} maxLength={7} style={{ width:90, marginLeft:8 }} />
           </div>
           <textarea ref={noteRef} placeholder="Note (optional)" value={note} onChange={e=> setNote(e.target.value)} maxLength={240} style={{ width:'100%', minHeight:90, marginTop:8 }}/>
           <div className="actions" style={{ display:'flex', gap:8, marginTop:12, justifyContent:'flex-end' }}>
