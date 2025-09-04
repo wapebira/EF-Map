@@ -4311,6 +4311,8 @@ function App() {
               // Reuse existing destination logic (similar to context menu action)
               setLastDestinationSystemName(name);
               destinationLockedRef.current = true;
+              // Auto-open routing panel if start system already chosen
+              if(lastSelectedSystemName && !openPanels.has('routing')){ try { ensurePanel('routing'); bringToFront('routing'); } catch {/* ignore */} }
               try { track({ type:'route_set_destination_panel' }); } catch {}
             }}
             onAddWaypoint={(name)=>{
@@ -4320,6 +4322,15 @@ function App() {
             onAvoidSystem={(name)=>{
               setAvoidSystems(prev=> prev.includes(name)? prev : [...prev, name]);
               try { track({ type:'route_add_avoid_panel' }); } catch {}
+            }}
+            onSelectSystem={(name)=>{
+              if(!mapData) return;
+              const sys = Object.values(mapData.solar_systems).find(s=> s.name === name);
+              if(!sys) return;
+              selectSystem(sys as any);
+              setLastSelectedSystemName(sys.name);
+              // If a destination is already set and routing panel closed, open it to hint at route capability
+              if(lastDestinationSystemName && !openPanels.has('routing')){ try { ensurePanel('routing'); bringToFront('routing'); } catch {/* ignore */} }
             }}
           />
           <div style={{marginTop:8, display:'flex', gap:8}}>

@@ -18,10 +18,11 @@ interface PanelProps {
   onSetDestination?(systemName: string): void;
   onAddWaypoint?(systemName: string): void;
   onAvoidSystem?(systemName: string): void;
+  onSelectSystem?(systemName: string): void;
   selectedSystem?: { id:number; name:string } | null;
 }
 
-export const UserOverlayPanel: React.FC<PanelProps> = ({ onAddMark, onSetDestination, onAddWaypoint, onAvoidSystem, selectedSystem }) => {
+export const UserOverlayPanel: React.FC<PanelProps> = ({ onAddMark, onSetDestination, onAddWaypoint, onAvoidSystem, onSelectSystem, selectedSystem }) => {
   const [entries, setEntries] = useState<UserOverlayEntry[]>(userOverlayStore.getEntries());
   const [sort, setSort] = useState<SortState>({ key:'createdAt', dir:-1 });
   const [filterColor, setFilterColor] = useState<string|undefined>(undefined);
@@ -107,7 +108,6 @@ export const UserOverlayPanel: React.FC<PanelProps> = ({ onAddMark, onSetDestina
                 const esc = (evt: KeyboardEvent) => { if(evt.key==='Escape') cleanup(); };
                 window.addEventListener('click', outside, true);
                 window.addEventListener('keydown', esc, true);
-                makeItem(e.systemName, undefined);
                 makeItem('Set Destination', onSetDestination? ()=> onSetDestination(e.systemName): undefined);
                 makeItem('Add Waypoint', onAddWaypoint? ()=> onAddWaypoint(e.systemName): undefined);
                 makeItem('Avoid System', onAvoidSystem? ()=> onAvoidSystem(e.systemName): undefined);
@@ -139,7 +139,11 @@ export const UserOverlayPanel: React.FC<PanelProps> = ({ onAddMark, onSetDestina
                       </div>
                     )}
                   </td>
-                  <td style={{ ...cellStyle, ...nameCellSticky }} title={e.systemName}>{e.systemName}</td>
+                  <td
+                    style={{ ...cellStyle, ...nameCellSticky, cursor:'pointer', textDecoration:'underline' }}
+                    title={e.systemName}
+                    onClick={()=> onSelectSystem && onSelectSystem(e.systemName)}
+                  >{e.systemName}</td>
                   <td style={cellStyle} onClick={()=> { if(!editing){ setEditingId(e.id); setEditNote(e.note); } }}>
                     {editing ? (
                       <div style={{ display:'flex', flexDirection:'column', gap:4 }}>
