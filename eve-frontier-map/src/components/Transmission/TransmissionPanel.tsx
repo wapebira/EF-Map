@@ -14,6 +14,7 @@ interface TransmissionPanelProps {
   term: string;
   widthPx?: number;
   onReplayRegistered?: () => void;
+  // replayMode: when true we ALWAYS run full intro (audio + typing) even if previously seen.
   replayMode?: boolean;
 }
 
@@ -99,6 +100,10 @@ const TransmissionPanel: React.FC<TransmissionPanelProps> = ({ onClose, onRoute,
   const echoTimerRef = useRef<any>(null);
   const echoTypingRef = useRef<boolean>(false); // true while an echo is being typed
   const hasIntroInitializedRef = useRef<boolean>(false); // guard intro init
+  // Echo delta typing: store immutable base text + new line delta so we never retrace prior characters
+  const echoBaseTextRef = useRef<string>('');
+  const echoDeltaRef = useRef<string>('');
+  const echoDeltaIndexRef = useRef<number>(0);
   // Detect React 18 StrictMode dev double-mount (mount -> unmount -> mount sequence in quick succession).
   const lastMountTimeRef = useRef<number>(0);
   const strictDoubleMountRef = useRef<boolean>(false);
@@ -141,16 +146,19 @@ const TransmissionPanel: React.FC<TransmissionPanelProps> = ({ onClose, onRoute,
   // Simplified: no sentinel/allow gates; rely solely on hardSeen + explicit fresh replay flag.
   // Replay freshness: require timestamp within 2s of mount to treat as intentional replay.
   let userReplay = false;
+  // Simplify replay semantics: if parent passes replayMode=true we force full intro regardless of hard/prefs seen flags.
+  try { userReplay = !!replayMode; } catch {}
+  // Attempt early restore of persisted state (covers accidental remount / HMR without forcing intro re-run).
+  let restoredPersisted = false;
   try {
-    const flag = (window as any).__efUserReplay === true && replayMode;
-    const ts = (window as any).__efUserReplayTS;
-  userReplay = !!flag && typeof ts === 'number' && (Date.now() - ts) < 5000; // 5s freshness window for replay
-    if(flag && !userReplay){
-      // Stale replay flag leaked across remount; clear it.
-      (window as any).__efUserReplay = false; (window as any).__efUserReplayTS = 0;
+    if(!userReplay){
+      const persist = (window as any).__efTxPersist;
+      if(persist && typeof persist === 'object' && typeof persist.text === 'string' && persist.introComplete){
+        restoredPersisted = true; // we'll apply after mount effect state setters
+      }
     }
   } catch {}
-  const alreadySeen = (hardSeen || !!prefs.transmissionSeen) && !userReplay;
+  const alreadySeen = userReplay ? false : (restoredPersisted || hardSeen || !!prefs.transmissionSeen || (():boolean=>{ try { return (window as any).__efTxIntroComplete === true; } catch { return false; } })());
   // Determine intro mode only once per mount
   introModeRef.current = !alreadySeen; // true if we will run intro on this mount
   const now = Date.now();
@@ -162,16 +170,52 @@ const TransmissionPanel: React.FC<TransmissionPanelProps> = ({ onClose, onRoute,
   logEvent('mount', { replayMode: userReplay, alreadySeen, introMode:introModeRef.current, strictDouble: strictDoubleMountRef.current });
   try { (window as any).__efTxFirstPageLoadDone = true; } catch {}
   // Consume one-shot replay flag so accidental remounts cannot reuse it.
-  if(userReplay){ try { (window as any).__efUserReplay = false; (window as any).__efUserReplayTS = 0; } catch {} }
-  if(alreadySeen){
-    // Echo-only mode (no intro, no audio) – show armed line once.
-    fullTextRef.current = '—— ECHO CHANNEL ARMED ——';
-    setDisplayText(fullTextRef.current);
-    setDoneIntro(true);
-    setTyping(false);
-    reshuffleEchoes();
-    scheduleNextEcho();
-  logEvent('echo_only_start', { reason: hardSeen? 'hard_seen' : 'prefs_seen' });
+  // Legacy global flags no longer used – clear any stale values defensively.
+  try { (window as any).__efUserReplay = false; (window as any).__efUserReplayTS = 0; } catch {}
+  if(userReplay){
+    // Explicit replay resets global completion marker so intro will run fresh.
+    try { (window as any).__efTxIntroComplete = false; } catch {}
+  }
+
+  if(alreadySeen && !userReplay){
+    // Echo-only mode (no intro, no audio).
+    // Attempt to restore prior echo state (dev StrictMode remount or accidental re-render) from window singleton.
+    try {
+      const persisted = (window as any).__efTxEchoState;
+      if(persisted && typeof persisted === 'object' && typeof persisted.text === 'string' && persisted.text.includes('ECHO CHANNEL ARMED')){
+        fullTextRef.current = persisted.text;
+        setDisplayText(persisted.text);
+        setDoneIntro(true);
+        setTyping(false);
+        echoQueueRef.current = persisted.queue && Array.isArray(persisted.queue) && persisted.queue.length ? persisted.queue : [];
+        const remaining = typeof persisted.nextDue === 'number' ? (persisted.nextDue - Date.now()) : NaN;
+        if(!isNaN(remaining) && remaining > 200){
+          // schedule echo with remaining delay
+          scheduleNextEcho(remaining);
+          logEvent('echo_state_restored', { remaining });
+        } else {
+          // schedule immediate (with small debounce) to keep cadence
+          scheduleNextEcho(800 + Math.random()*400);
+          logEvent('echo_state_restored_immediate');
+        }
+      } else {
+        fullTextRef.current = '—— ECHO CHANNEL ARMED ——';
+        setDisplayText(fullTextRef.current);
+        setDoneIntro(true);
+        setTyping(false);
+        reshuffleEchoes();
+        scheduleNextEcho();
+        logEvent('echo_only_start', { reason: hardSeen? 'hard_seen' : 'prefs_seen' });
+      }
+    } catch {
+      fullTextRef.current = '—— ECHO CHANNEL ARMED ——';
+      setDisplayText(fullTextRef.current);
+      setDoneIntro(true);
+      setTyping(false);
+      reshuffleEchoes();
+      scheduleNextEcho();
+      logEvent('echo_only_start', { reason: hardSeen? 'hard_seen' : 'prefs_seen' });
+    }
   } else {
     initIntro();
     reshuffleEchoes();
@@ -218,6 +262,14 @@ const TransmissionPanel: React.FC<TransmissionPanelProps> = ({ onClose, onRoute,
       if(majorGlitchTimeoutRef.current) clearTimeout(majorGlitchTimeoutRef.current);
   if(phaseTimerRef.current) clearTimeout(phaseTimerRef.current);
   if(echoTimerRef.current) clearTimeout(echoTimerRef.current);
+      // Persist echo state (if intro completed) for accidental remount continuity (StrictMode / HMR)
+      try {
+        if(doneIntroRef.current){
+          (window as any).__efTxEchoState = { text: fullTextRef.current, queue: echoQueueRef.current.slice(), nextDue: echoTimerNextDueRef.current || Date.now() + 30000 };
+          (window as any).__efTxPersist = { text: fullTextRef.current, introComplete: true, queue: echoQueueRef.current.slice(), nextDue: echoTimerNextDueRef.current || Date.now() + 30000 };
+          logEvent('echo_state_persisted');
+        }
+      } catch {}
       // Teardown audio fully to avoid layering on remount (HMR / navigation)
       (window as any).__efStopTxAudio && (window as any).__efStopTxAudio();
       // Release sources (avoid holding references)
@@ -271,6 +323,7 @@ const TransmissionPanel: React.FC<TransmissionPanelProps> = ({ onClose, onRoute,
           setDoneIntro(true);
           setTransmissionSeen();
           try { (window as any).localStorage.setItem('transmissionSeenHard','1'); } catch {}
+          try { (window as any).__efTxIntroComplete = true; (window as any).__efTxPersist = { text: fullTextRef.current, introComplete:true, queue: echoQueueRef.current.slice(), nextDue: Date.now() + 20000 }; } catch {}
           try { track({ type:'transmission_complete' }); } catch {};
           if(ambientRef.current){ try { ambientRef.current.pause(); ambientRef.current.currentTime = 0; } catch {} }
           scheduleNextEcho();
@@ -349,50 +402,69 @@ const TransmissionPanel: React.FC<TransmissionPanelProps> = ({ onClose, onRoute,
     setTimeout(()=>{ setDisplayText(current); if(textRef.current){ textRef.current.classList.add('tx-text-glitch'); setTimeout(()=> textRef.current && textRef.current.classList.remove('tx-text-glitch'), 220); } }, 140);
   };
 
-  const scheduleNextEcho = () => {
+  const echoTimerNextDueRef = useRef<number|undefined>(undefined);
+  const scheduleNextEcho = (explicitDelay?: number) => {
     if(!show) return;
     if(echoTypingRef.current){ logEvent('echo_schedule_skipped_typing'); return; }
     if(echoTimerRef.current){ clearTimeout(echoTimerRef.current); echoTimerRef.current=null; }
-    const delay = 15000 + Math.random()*30000; // 15s to 45s
+    const delay = typeof explicitDelay === 'number' ? explicitDelay : (15000 + Math.random()*30000); // 15s to 45s or restored remaining
+    echoTimerNextDueRef.current = Date.now() + delay;
     echoTimerRef.current = setTimeout(()=>{ appendNextEcho(); }, delay);
     logEvent('echo_scheduled', { delay });
   };
 
   const appendNextEcho = () => {
-  if(echoTypingRef.current){ logEvent('echo_append_ignored', { reason:'typing' }); return; }
+    if(echoTypingRef.current){ logEvent('echo_append_ignored', { reason:'typing' }); return; }
     if(echoTimerRef.current){ clearTimeout(echoTimerRef.current); echoTimerRef.current=null; }
     if(!echoQueueRef.current.length){ reshuffleEchoes(); }
     const line = echoQueueRef.current.shift();
     if(!line){ scheduleNextEcho(); return; }
-    const prefix = fullTextRef.current.endsWith('\n')? '' : '\n';
-    fullTextRef.current = fullTextRef.current + prefix + line;
-    charIndexRef.current = displayText.length;
-    setTyping(true);
-    echoTypingRef.current = true;
-    startTypingEchoSegment();
-    logEvent('echo_append', { line });
+    // Prevent accidental duplication: if the last line already ends with this exact line, reschedule instead of appending.
+    const existingTail = fullTextRef.current.split('\n').slice(-1)[0];
+    if(existingTail === line){
+      logEvent('echo_duplicate_line_skipped');
+      scheduleNextEcho();
+      return;
+    }
+  const prefix = fullTextRef.current.endsWith('\n')? '' : '\n';
+  const base = fullTextRef.current; // snapshot BEFORE append
+  const delta = prefix + line;
+  fullTextRef.current = base + delta; // canonical full text (for persistence)
+  echoBaseTextRef.current = base;
+  echoDeltaRef.current = delta;
+  echoDeltaIndexRef.current = 0;
+  echoTypingRef.current = true;
+  setTyping(true);
+  startTypingEchoDelta();
+  logEvent('echo_append', { line });
+  // Persist immediately so even if HMR/remount during typing we resume safely.
+  try { (window as any).__efTxEchoState = { text: fullTextRef.current, queue: echoQueueRef.current.slice(), nextDue: (echoTimerNextDueRef.current||0) }; } catch {}
   };
 
-  const startTypingEchoSegment = () => {
-    const tick = () => {
-      if(!typingRef.current) return;
-      const targetLen = fullTextRef.current.length;
-      if(charIndexRef.current >= targetLen){
+  // Delta echo typing: only append new chars after base snapshot; never rewrites existing portion
+  const startTypingEchoDelta = () => {
+    logEvent('echo_typing_start');
+    const step = () => {
+      if(!typingRef.current || !echoTypingRef.current) return;
+      const target = echoDeltaRef.current.length;
+      if(echoDeltaIndexRef.current >= target){
+        setDisplayText(echoBaseTextRef.current + echoDeltaRef.current);
         setTyping(false);
         echoTypingRef.current = false;
         logEvent('echo_typing_complete');
+        try { (window as any).__efTxPersist = { text: fullTextRef.current, introComplete:true, queue: echoQueueRef.current.slice(), nextDue: Date.now() + 30000 }; } catch {}
         scheduleNextEcho();
         return;
       }
-      const advance = fast ? 24 : 1;
-      charIndexRef.current = Math.min(targetLen, charIndexRef.current + advance);
-      setDisplayText(fullTextRef.current.slice(0, charIndexRef.current));
-      const lastChar = fullTextRef.current[charIndexRef.current-1];
+      const advance = fast ? target - echoDeltaIndexRef.current : 1;
+      echoDeltaIndexRef.current = Math.min(target, echoDeltaIndexRef.current + advance);
+      const partial = echoDeltaRef.current.slice(0, echoDeltaIndexRef.current);
+      setDisplayText(echoBaseTextRef.current + partial);
+      const lastChar = partial[partial.length-1];
       const delay = fast ? 0 : (lastChar==='\n' ? 170 : TYPING_INTERVAL + Math.random()*40);
-      setTimeout(tick, delay);
+      setTimeout(step, delay);
     };
-    setTimeout(tick, 200);
-    logEvent('echo_typing_start');
+    setTimeout(step, 120);
   };
 
   const handleSkip = () => {
