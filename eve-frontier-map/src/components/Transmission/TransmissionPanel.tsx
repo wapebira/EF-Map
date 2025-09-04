@@ -51,7 +51,7 @@ const ECHO_POOL:string[] = [
   'Reapers shot me twice. Statistical sample agrees: not actually gods.',
   'Reapers doctrine: “If it moves and is new, delete it.” Inspirational stuff.',
   'X accepts everyone. Democratic rock reduction collective. Their ore piles vote unanimously.',
-  'Join X if you want to mine, chat about mining, or schedule future mining while mining.',
+  'Join EXTI if you want to mine, chat about mining, or schedule future mining while mining.',
   'X tactical briefings: which rock is handsomest today.',
   'Saints: respectable hull poppers. Shots traded. Salutes exchanged. Keep flying, Saints.',
   'Saints once volleyed my scout, then sent fuel money. Mixed feelings. Mostly respect.',
