@@ -20,6 +20,7 @@ interface TransmissionPanelProps {
 
 // Larger pool of possible echo lines (mix of serious + light)
 const ECHO_POOL:string[] = [
+  // Core original set
   '...still receiving? Good. Most sever link at first silence.',
   'If the map feels sparse that means you\u2019re early, not lost.',
   'Hazard note: an empty system only promises it was empty once.',
@@ -34,7 +35,83 @@ const ECHO_POOL:string[] = [
   'Someone out there is faster; compensate by being more patient.',
   'Gate camps farm impatience. Don\u2019t be high-yield.',
   'Every detour you log saves a future hull. Earn quiet gratitude.',
-  'Exploit window: before the guides get written.'
+  'Exploit window: before the guides get written.',
+  // Recruitment / referral nudges
+  'Referral code still un-entered? Whisper “${REF_CODE}” to the void. Sometimes the void gives back.',
+  'Leaderboard rumor: pilots who paste ${REF_CODE} into sign-up menus jump 7% further (citation: none).',
+  'Broadcast etiquette: subtle recruitment beats spam. This message is neither. Use ${REF_CODE}.',
+  // CCP personalities
+  'CCPJotunn survival record: 04:59. Stopwatch still warm. Send him a clock emoji—tactically.',
+  'CCPJotunn tried a “come kill me” and galaxy answered “ok”. Four minutes, fifty‑nine seconds of legend.',
+  'If you last longer than CCPJotunn in hostile space today, brag responsibly.',
+  'CCPOverload is Scottish. This scientifically increases server stability and soup quality.',
+  'CCPOverload accent adds +5% warp alignment speed (placebo tier).',
+  // Tribes / factions humor
+  'Reapers claim elite status; killboard shows elite rookie recycling. Adjust awe downward.',
+  'Reapers shot me twice. Statistical sample agrees: not actually gods.',
+  'Reapers doctrine: “If it moves and is new, delete it.” Inspirational stuff.',
+  'X accepts everyone. Democratic rock reduction collective. Their ore piles vote unanimously.',
+  'Join X if you want to mine, chat about mining, or schedule future mining while mining.',
+  'X tactical briefings: which rock is handsomest today.',
+  'Saints: respectable hull poppers. Shots traded. Salutes exchanged. Keep flying, Saints.',
+  'Saints once volleyed my scout, then sent fuel money. Mixed feelings. Mostly respect.',
+  'ProtoDroid will hack your ship open if you lock yourself out. Invoice arrives before air returns.',
+  'Lost your access codes? ProtoDroid can help. You can afford the fee, probably.',
+  'Diddy McCoy only speaks GIF. Linguists baffled. Diplomats exhausted.',
+  'AWAR: American timezone density wave. Friendly. Mildly obsessed with claiming Scottish ancestry.',
+  'Every AWAR pilot: “I have a Scottish great‑something.” Statistical improbability accepted politely.',
+  // Channels / help
+  'Need map help? In-game channel EF-MAP. Type, ask, resist apologizing for basic questions.',
+  'WSTART channel: ambient newcomers hum. Drop intel crumbs; they grow routes.',
+  'EF-MAP answers “Why is my route weird?” WSTART answers “Am I alone?”',
+  // Flavor / universe ambience
+  'An empty D-scan is a lullaby AND an alarm bell. Interpret creatively.',
+  'Bookmark gas. Future you might be poor, bored, or both.',
+  'Jump fuel math error? That’s how ghost beacons are born.',
+  'Mining alone? Align something. Future you will sign a thank-you note.',
+  'If your probe spread looks like spilled cereal, recalibrate.',
+  'Space boredom stage 3: naming rocks. Stage 4: arguing with them.',
+  'Route planner says “7 jumps”; your panic says “17”. Believe the planner.',
+  'Clutter your overview with purpose, not procrastination.',
+  'The universe won’t congratulate you for scanning that ghost site. I will: nice work.',
+  'Amateurs spam warp. Professionals coast patience.',
+  // Over-the-top recruitment satire
+  'JOIN WOLF: unlimited existential dread, occasional loot, 100% fewer gate taxes (not legally binding).',
+  'Propaganda voice: “Only with us will you transcend.” Reality voice: bring snacks and curiosity.',
+  'Mandatory daily chant banned. We replaced it with optional silence.',
+  'Advance your career: cartographer, anomaly looter, rock whisperer. Or idle. We notice neither.',
+  // Meta humor
+  'If this window is still open, curiosity > impulse closure. That’s scout DNA.',
+  'Echo channel algorithm: shuffled lines + mild concern for your attention span.',
+  'Somewhere a Reaper is refreshing killboard stats instead of scouting. Use that window.',
+  'If an echo line repeats, blame quantum narrative drift. Or my shuffle.',
+  // Light taunts / playful
+  'Reapers, if you’re reading this, recruit an industrialist. Your hangars look hungry.',
+  'Dear X: diversify. Even your drones are bored.',
+  'Saints, keep the respectful volleys coming. Sharpened iron, etc.',
+  'ProtoDroid, stop rooting around my nav buffers. They tickle.',
+  'Diddy: send a non-GIF once. For science.',
+  'AWAR pilots, submit genealogy proofs in triplicate before next clan claim.',
+  // Referral playful pushes
+  'Referral whispers echo farther. ${REF_CODE} into the dark and maybe the dark funds your hull.',
+  'Statistically someone reading this still hasn’t used ${REF_CODE}. Astronomical oversight.',
+  // Situational / utility
+  'If route fuel math feels tight: add a detour now, not stranded later.',
+  'Rotate d-scan angles. Straight lines breed complacency.',
+  'Never warp gate-to-gate sleepy. Predators love autopilot souls.',
+  'An aligned exit vector is free insurance. Align while you read this line.',
+  'Cache a safe spot mid-pipe. Future pursuit might thank you.',
+  // Shorties / breathers
+  'Silence isn’t empty.',
+  'You are earlier than you feel.',
+  'Intel ages fast; notes age slow.',
+  'Refuel before “maybe later”.',
+  'Your boredom feeds hunters.',
+  'Patience mines safer ore.',
+  // Closing style variety
+  'Ping when you arrive. Or don’t. The map will know.',
+  'If you read all these lines you’re already learning: persistence.',
+  'Still here? You’ll make it out here.',
 ];
 
 const INTRO_LINES = (o:{tribe:string; staging:string; discord:string; code:string; term:string}) => [
