@@ -4018,6 +4018,9 @@ function App() {
       inner.appendChild(optionsWrap);
       el.appendChild(inner);
       const menuObj = new CSS2DObject(el);
+      // Hide the selected label while context menu is open to prevent overlap
+  if(selectedLabelObj.current) selectedLabelObj.current.visible = false;
+  // attach restore handler after element creation below
       contextMenuObjRef.current = menuObj;
       // Anchor the menu to the system's 3D position so it appears adjacent to the star.
       // (Previous regression added the label directly to the scene at (0,0,0) causing it to appear far away.)
@@ -4050,18 +4053,29 @@ function App() {
     // Close context menu on left click anywhere outside menu
     const closeOnLeftClick = (ev: MouseEvent) => {
       if(ev.button !== 0) return;
-      if(!contextMenuObjRef.current) return;
+  if(!contextMenuObjRef.current) return;
       const el = contextMenuObjRef.current.element as HTMLElement;
+      if(el && !(el as any).__restoreSelectedLabelAttached){
+        (el as any).__restoreSelectedLabelAttached = true;
+        (el as any).__restoreSelectedLabel = () => {
+          // restore selection label visibility when menu closes
+          if(selectedLabelObj.current && selectedLabelObj.current.visible === false){
+            selectedLabelObj.current.visible = true;
+          }
+        };
+      }
       if(el && ev.target instanceof Node && el.contains(ev.target)) return; // click inside menu
       try {
-        if(contextMenuObjRef.current.parent){
+  if((el as any).__restoreSelectedLabel){ try { (el as any).__restoreSelectedLabel(); } catch {/* ignore */} }
+  if(contextMenuObjRef.current.parent){
           contextMenuObjRef.current.parent.remove(contextMenuObjRef.current);
           if(sceneRef.current && contextMenuObjRef.current.parent instanceof THREE.Object3D){
             sceneRef.current.remove(contextMenuObjRef.current.parent);
           }
         }
       } catch {/* ignore */}
-      contextMenuObjRef.current = null; contextMenuSystemRef.current = null;
+  if(el && (el as any).__restoreSelectedLabel){ try { (el as any).__restoreSelectedLabel(); } catch {/* ignore */} }
+  contextMenuObjRef.current = null; contextMenuSystemRef.current = null;
     };
     window.addEventListener('mousedown', closeOnLeftClick);
     // Close on Escape for accessibility / stuck states
@@ -4292,6 +4306,20 @@ function App() {
             onAddMark={(systemName, systemId) => {
               setAddOverlaySystem({ id: systemId, name: systemName });
               setAddOverlayOpen(true);
+            }}
+            onSetDestination={(name)=>{
+              // Reuse existing destination logic (similar to context menu action)
+              setLastDestinationSystemName(name);
+              destinationLockedRef.current = true;
+              try { track({ type:'route_set_destination_panel' }); } catch {}
+            }}
+            onAddWaypoint={(name)=>{
+              setWaypoints(prev=> prev.includes(name)? prev : (prev.length<10 ? [...prev, name]: prev));
+              try { track({ type:'route_add_waypoint_panel' }); } catch {}
+            }}
+            onAvoidSystem={(name)=>{
+              setAvoidSystems(prev=> prev.includes(name)? prev : [...prev, name]);
+              try { track({ type:'route_add_avoid_panel' }); } catch {}
             }}
           />
           <div style={{marginTop:8, display:'flex', gap:8}}>
