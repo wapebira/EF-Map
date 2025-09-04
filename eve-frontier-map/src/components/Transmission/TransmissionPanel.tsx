@@ -151,7 +151,7 @@ const INTRO_LINES = (o:{tribe:string; staging:string; discord:string; code:strin
   'If you can read this you probably just crawled out of the tutorial cradle with a jump drive and zero plan.',
   'Behind you: clustering rookies, gate camps farming impatience, recycled ore veins getting their third strip today.',
   'Ahead: unsurveyed pockets, fat anomalies, belts that still smell like geology instead of industry.',
-  `I\u2019m with ${o.tribe}. No doctrine. No motivational holos. Just stubborn frames pushing further.`,
+  `I\u2019m with ${o.tribe}. No doctrine. No motivational holos. Just stubborn Riders pushing further.`,
   `Primary rendezvous: set destination ${o.staging}. That vector gets you off the noise lanes.`,
   'It is a haul. You WILL burn fuel. Refuel smart; panic warps cost more than isotopes.',
   'Expect stretches of absolutely nothing. That\u2019s normal. Nothing means you\u2019re early, not lost.',
