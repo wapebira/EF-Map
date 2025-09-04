@@ -1,0 +1,37 @@
+.transmission-wrapper { position:fixed; top: calc(10px + 70px); /* below top toolbar (approx height) */ right:10px; width:560px; max-width:560px; z-index:3190; font-family: 'Fira Mono','Roboto Mono','IBM Plex Mono','Cousine','Consolas',monospace; pointer-events:auto; min-height:420px; }
+@media (max-height: 860px){ .transmission-wrapper { top: calc(10px + 64px); } }
+@media (max-width: 900px){ .transmission-wrapper { right:50%; transform:translateX(50%); } }
+.transmission-bg { position:absolute; inset:0; background-size:cover; background-position:center; filter:brightness(.55) contrast(1.05) saturate(.9); border-radius:16px; }
+/* subtle animated scanlines */
+.transmission-wrapper::after { content:""; pointer-events:none; position:absolute; inset:0; background: repeating-linear-gradient( to bottom, rgba(255,255,255,0.05) 0px, rgba(255,255,255,0.05) 1px, transparent 1px, transparent 3px ); mix-blend-mode:overlay; opacity:.15; border-radius:16px; animation: scan 6s linear infinite; }
+@keyframes scan { 0%{ background-position:0 0;} 100%{ background-position:0 200px; } }
+.transmission-overlay { position:absolute; inset:0; background:radial-gradient(circle at 70% 30%, rgba(255,255,255,0.08), rgba(0,0,0,0.78) 65%); border-radius:16px; box-shadow:0 6px 24px -6px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.08) inset; backdrop-filter:blur(6px) saturate(150%); }
+.transmission-content { position:relative; display:flex; flex-direction:column; padding:14px 16px 14px; gap:12px; color:#f2f2f1; font-size:13px; line-height:1.35; }
+.transmission-header { display:flex; align-items:center; gap:10px; font-size:13px; font-weight:600; letter-spacing:.5px; }
+.transmission-header .title { font-weight:700; text-transform:uppercase; font-size:12px; opacity:.85; }
+.transmission-header .signal { display:flex; gap:4px; }
+.signal .dot { width:6px; height:6px; border-radius:50%; background:var(--accent); opacity:.6; animation: pulse 1.6s infinite ease-in-out; }
+.signal .dot:nth-child(2){ animation-delay:.3s; }
+.signal .dot:nth-child(3){ animation-delay:.6s; }
+@keyframes pulse { 0%,100%{ transform:scale(.55); opacity:.3;} 50%{ transform:scale(1); opacity:1;} }
+.tx-btn { background:rgba(255,255,255,0.09); border:1px solid rgba(255,255,255,0.16); color:#fff; padding:6px 10px; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:6px; line-height:1.1; letter-spacing:.35px; transition:background .2s ease,border-color .2s ease,filter .2s ease; }
+.tx-btn:hover { background:var(--accent); border-color:var(--accent); }
+.tx-btn.primary { background:var(--accent); border-color:var(--accent); }
+.tx-btn.primary:hover { filter:brightness(1.08); }
+.tx-btn.subtle { background:rgba(255,255,255,0.05); }
+.tx-btn.close { background:rgba(255,255,255,0.08); }
+.tx-btn.link { text-decoration:none; }
+.transmission-text { margin:0; padding:10px 12px; background:rgba(0,0,0,0.45); border:1px solid rgba(255,255,255,0.14); border-radius:10px; max-height:420px; overflow:hidden; white-space:pre-wrap; font-size:12px; line-height:1.35; position:relative; }
+.cursor { display:inline-block; width:10px; background:var(--accent); height:14px; animation: blink 1s steps(2,start) infinite; transform:translateY(2px); }
+@keyframes blink { 0%,50%{ opacity:1;} 50.1%,100%{ opacity:0;} }
+.transmission-actions { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+.ref-code { font-size:12px; opacity:.9; background:rgba(255,255,255,0.08); padding:4px 8px; border-radius:6px; border:1px solid rgba(255,255,255,0.15); }
+.transmission-footer { font-size:10px; opacity:.55; text-align:right; margin-top:-4px; }
+@media (max-width: 520px){ .transmission-wrapper { width:90vw; max-width:90vw; } .transmission-text{ max-height:300px;} }
+
+/* Major glitch burst overlay */
+.tx-major-glitch { position:absolute; inset:0; background:repeating-linear-gradient(90deg, rgba(255,255,255,0.18) 0 2px, rgba(0,0,0,0.05) 2px 4px); mix-blend-mode:screen; animation: majorGlitch 220ms steps(2,start) forwards; opacity:0; pointer-events:none; border-radius:16px; }
+@keyframes majorGlitch { 0%{ opacity:.0; filter:contrast(120%) brightness(120%);} 40%{ opacity:1; filter:contrast(160%) brightness(180%);} 80%{ opacity:.6; } 100%{ opacity:0; } }
+
+.tx-text-glitch { animation: textGlitch 180ms steps(2,start) forwards; }
+@keyframes textGlitch { 0%{ text-shadow:2px 0 var(--accent), -2px 0 #fff; } 50%{ text-shadow:-2px 0 var(--accent), 2px 0 #fff; } 100%{ text-shadow:none; } }
