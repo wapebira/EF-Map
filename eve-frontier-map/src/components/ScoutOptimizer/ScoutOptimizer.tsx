@@ -34,7 +34,7 @@ const MAX_SYSTEMS_WARNING = 300;
 
 const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, onReturnToStartChange, onBaselineRoute, onOptimizedRoute, onClearRoute, invalidateToken, importedRoutePath, resetToken, selectedSystemName, embedded = false, planetBinsActive, minPlanets, maxPlanets }: ScoutOptimizerProps) => {
 	const [startSystem, setStartSystem] = useState('');
-	const [radius, setRadius] = useState('50');
+	const [radius, setRadius] = useState(''); // empty default so placeholder is visible
 	const [useRegion, setUseRegion] = useState(false);
 	const [gateReachableOnly, setGateReachableOnly] = useState(false);
 	// Apply planet count legend filter (user toggle). When active, collected systems restricted to active legend bins.
@@ -145,7 +145,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	useEffect(()=>{
 		if(resetToken === undefined) return;
 		setStartSystem('');
-		setRadius('50');
+		setRadius('');
 		setUseRegion(false);
 		setGateReachableOnly(false);
 		setUsePlanetCount(false);
@@ -175,9 +175,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 
 	// Update start system when external system selection occurs
 	useEffect(()=>{
-		if(selectedSystemName){
-			setStartSystem(prev=> prev || selectedSystemName); // do not overwrite if user already entered one
-		}
+		if(selectedSystemName){ setStartSystem(selectedSystemName); }
 	}, [selectedSystemName]);
 
 	// (persistence now handled inline in input onChange, mirroring P2P debounce pattern)
