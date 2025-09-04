@@ -89,6 +89,15 @@ const EVENT_MAP = {
   reachability_range_bucket: { countersDynamic: (b)=> { const v=b.bucket; const allowed=['rng_lt_10','rng_10_25','rng_25_50','rng_50_100','rng_gt_100']; return allowed.includes(v)? [v]: []; } }
   , region_stats_view: { counters: ['region_stats_views'] }
   , compare_regions_open: { counters: ['compare_regions_opens'] }
+  // --- Overlay panel metrics ---
+  , overlay_open: { counters: ['overlay_opens'] }
+  , overlay_open_first: { counters: ['overlay_sessions'] }
+  , overlay_add_mark: { counters: ['overlay_add_marks'] }
+  , overlay_add_first: { counters: ['overlay_add_sessions'] }
+  , overlay_export: { counters: ['overlay_exports'] }
+  , overlay_import: { counters: ['overlay_imports'] }
+  , overlay_panel_time: { sum: { key:'overlay_panel_time_ms_sum', countKey:'overlay_panel_time_count', valueField:'ms' } }
+  , overlay_marks_count_bucket: { countersDynamic: (b)=> { const v=b.bucket; const allowed=['marks_0','marks_1_5','marks_6_15','marks_16_30','marks_31_60','marks_61_plus']; return allowed.includes(v)? [v]: []; } }
 };
 
 // Schema versioning for aggregate snapshots.

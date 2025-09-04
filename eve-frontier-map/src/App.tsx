@@ -10,6 +10,11 @@ import './App.css';
 import RegionHighlighterModule, { setRegionHighlightColors } from './modules/RegionHighlighter';
 import RegionStatsCard, { type RegionStats } from './components/RegionStatsCard';
 import CompareRegionsPanel from './components/CompareRegionsPanel';
+import UserOverlayPanel from './components/UserOverlay/UserOverlayPanel';
+import { userOverlayStore } from './utils/userOverlay';
+import { OVERLAY_FEATURE_FLAG } from './utils/userOverlay.ts';
+import { UserOverlayRings } from './modules/UserOverlayRings';
+import AddOverlayMarkModal from './components/UserOverlay/AddOverlayMarkModal';
 import logo from './assets/logo/logo.png';
 import { openDbFromArrayBuffer } from "./lib/sql";
 import type { SystemRow, StargateRow, RegionRow, ConstellationRow } from "./types/db";
@@ -194,6 +199,8 @@ function App() {
   const [waypointOptimize, setWaypointOptimize] = useState<boolean>(false); // false = visit in order added
   const destinationLockedRef = useRef<boolean>(false); // becomes true once user explicitly sets destination via context menu
   const [hoveredSystem, setHoveredSystem] = useState<SolarSystem | null>(null);
+  const hoveredSystemRef = useRef<SolarSystem | null>(null);
+  useEffect(()=> { hoveredSystemRef.current = hoveredSystem; }, [hoveredSystem]);
   const [isRegionHighlighterActive, setIsRegionHighlighterActive] = useState(false);
   const regionSystemsIndexRef = useRef<Map<number, any[]>|null>(null);
   const [regionStatsVisible, setRegionStatsVisible] = useState(true); // show by default when region highlight active
@@ -590,6 +597,12 @@ function App() {
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
   const starFieldRef = useRef<THREE.Points | null>(null);
+  const overlayRingsRef = useRef<UserOverlayRings | null>(null); // persistent user overlay halos
+
+  // When mapData loads (or changes), inject into overlay rings so positions rebuild with correct coordinates
+  useEffect(()=>{
+    if(mapData && overlayRingsRef.current){ try { overlayRingsRef.current.setMapData(mapData); } catch(e){ console.warn('[overlay] setMapData failed', e); } }
+  }, [mapData]);
   const hoverPointRef = useRef<THREE.Points | null>(null);
   const stargateLinesRef = useRef<THREE.LineSegments | null>(null);
   // Glow pass removed; no secondary line material
@@ -1450,6 +1463,23 @@ function App() {
   };
   // Reapply when dependencies change
   useEffect(()=>{ if(reachInRangeHighlight && reachBubble){ applyInRangeHighlight(); } }, [reachInRangeHighlight, reachBubble, reachRange, highlightedSystem, accentIsBlue, reachDim]);
+  // Open Add Overlay modal with Shift+RightClick on a hovered or highlighted system
+  useEffect(()=>{
+    if(!OVERLAY_FEATURE_FLAG) return;
+    const handler = (e:MouseEvent) => {
+      if(e.button===2 && e.shiftKey){
+        const sys = hoveredSystemRef.current || highlightedSystem;
+        if(sys){
+          e.preventDefault();
+            setAddOverlaySystem({ id: sys.id, name: sys.name });
+            setAddOverlayOpen(true);
+            setOpenPanels(p=> { const n=new Set(p); n.add('user-overlay'); return n; });
+        }
+      }
+    };
+    window.addEventListener('mousedown', handler, { capture:true });
+    return ()=> window.removeEventListener('mousedown', handler, { capture:true } as any);
+  }, [highlightedSystem]);
 
 
   // Initialize and manage the routing worker
@@ -1523,6 +1553,67 @@ function App() {
 
   // Multi-panel open state (allow several drawers at once) - persisted
   const [openPanels, setOpenPanels] = useState<Set<string>>(new Set());
+  // User Overlay Rings visibility & rebuild (consolidated)
+  // Ensures halos reliably reappear after exiting cinematic mode while panel remains open (fix for step 4 failing)
+  const prevOverlayShowRef = useRef<boolean>(false);
+  useEffect(()=>{
+    if(!overlayRingsRef.current) return;
+    const shouldShow = openPanels.has('user-overlay') && !cinematicMode;
+    // Always set visibility when dependency changes (even if same) to recover from any external visibility side-effects
+    try { overlayRingsRef.current.setVisible(shouldShow); } catch {/* ignore */}
+    // Rebuild when transitioning hidden -> visible or after cinematic exit
+    const becameVisible = shouldShow && !prevOverlayShowRef.current;
+    if(becameVisible){
+      try { (overlayRingsRef.current as any).rebuild?.(); } catch {/* ignore */}
+      try { requestAnimationFrame(()=>{ if(overlayRingsRef.current){ overlayRingsRef.current.setVisible(true); }}); } catch {/* ignore */}
+    }
+    // If panel just opened (regardless of cinematic state) and we have geometry, force rebuild to refresh positions/colors
+    if(openPanels.has('user-overlay') && !prevOverlayShowRef.current && overlayRingsRef.current){
+      try { (overlayRingsRef.current as any).rebuild?.(); } catch {/* ignore */}
+    }
+    prevOverlayShowRef.current = shouldShow;
+  }, [openPanels, cinematicMode]);
+  // Explicit cinematic exit recovery (belt & suspenders) – if panel open after cinematic ends but rings still hidden/missing
+  const prevCinematicRef = useRef<boolean>(false);
+  useEffect(()=>{
+    if(!overlayRingsRef.current) { prevCinematicRef.current = cinematicMode; return; }
+    if(prevCinematicRef.current && !cinematicMode && openPanels.has('user-overlay')){
+      try {
+        (overlayRingsRef.current as any).rebuild?.();
+        overlayRingsRef.current.setVisible(true);
+        requestAnimationFrame(()=>{ try { overlayRingsRef.current && overlayRingsRef.current.setVisible(true); } catch {/* ignore */} });
+      } catch {/* ignore */}
+    }
+    prevCinematicRef.current = cinematicMode;
+  }, [cinematicMode, openPanels]);
+  // Debug state helper
+  // (Removed debug overlay state helper in production)
+  // Rescue / re-init: if overlay rings ref lost (e.g. hot reload or disposal) while panel open, recreate
+  useEffect(()=>{
+    if(!OVERLAY_FEATURE_FLAG) return;
+    if(overlayRingsRef.current) return; // nothing to do
+    if(!openPanels.has('user-overlay')) return;
+    if(!sceneRef.current || !ringTexture) return;
+    if(cinematicMode) return; // wait until cinematic off
+    try {
+  // silent rescue init
+      overlayRingsRef.current = new UserOverlayRings(sceneRef.current, ringTexture, 15);
+      if(mapData) overlayRingsRef.current.setMapData(mapData);
+      overlayRingsRef.current.setVisible(true);
+    } catch(e){ console.warn('[overlay] rescue init failed', e); }
+  }, [openPanels, cinematicMode, mapData]);
+  // Debug helper: window.__efOverlayForce(true|false) to manually toggle & rebuild
+  useEffect(()=>{
+    (window as any).__efOverlayForce = (v:boolean)=>{
+      try {
+        if(!overlayRingsRef.current) return;
+        overlayRingsRef.current.setVisible(v);
+        if(v){ (overlayRingsRef.current as any).rebuild?.(); }
+      } catch {/* ignore */}
+    };
+  }, []);
+  const [addOverlayOpen, setAddOverlayOpen] = useState(false);
+  const [addOverlaySystem, setAddOverlaySystem] = useState<{ id:number; name:string }|null>(null);
   // Z-index management for draggable panels
   const [panelZ, setPanelZ] = useState<Record<string, number>>({});
   const topZRef = useRef(1500);
@@ -1578,6 +1669,7 @@ function App() {
   const cinematicDrawerRef = useRef<PanelDrawerHandle|null>(null);
   const regionStatsDrawerRef = useRef<PanelDrawerHandle|null>(null);
   const regionCompareDrawerRef = useRef<PanelDrawerHandle|null>(null);
+  const userOverlayDrawerRef = useRef<PanelDrawerHandle|null>(null);
   // Maintain legend in open order when toggled
   useEffect(()=>{
     setOpenPanelOrder(prev=>{
@@ -1588,11 +1680,20 @@ function App() {
     });
   }, [isPlanetCountActive]);
 
+  // Overlay open/close metric hook
+  useEffect(()=>{
+    try {
+      const visible = openPanels.has('user-overlay') && !cinematicMode;
+      if(visible) (window as any).__efOverlayOpened?.((window as any).userOverlayCount || userOverlayStore.getEntries().length);
+      else (window as any).__efOverlayClosed?.();
+    } catch {/* ignore */}
+  }, [openPanels, cinematicMode]);
+
   // Incremental cascade (append on open, compact on close) preserving existing positions.
   const autoOrderRef = useRef<string[]>([]); // current left-to-right order of auto-managed panels
   useLayoutEffect(()=>{
     const BASE_X = 140, BASE_Y = 70, GAP_X = 24;
-  const managed = (id:string)=> id==='routing' || id==='cinematic' || id==='planet-legend' || id==='region-stats' || id==='region-compare';
+  const managed = (id:string)=> id==='routing' || id==='cinematic' || id==='planet-legend' || id==='region-stats' || id==='region-compare' || id==='user-overlay';
     const active = openPanelOrder.filter(id=> managed(id) && (id==='planet-legend'? isPlanetCountActive : openPanels.has(id)));
     const prevOrder = autoOrderRef.current;
     // Remove any that are no longer active
@@ -1612,6 +1713,7 @@ function App() {
   else if(id==='cinematic' && cinematicDrawerRef.current) cinematicDrawerRef.current.autoPosition(target);
   else if(id==='region-stats' && regionStatsDrawerRef.current) regionStatsDrawerRef.current.autoPosition(target);
   else if(id==='region-compare' && regionCompareDrawerRef.current) regionCompareDrawerRef.current.autoPosition(target);
+  else if(id==='user-overlay' && userOverlayDrawerRef.current) userOverlayDrawerRef.current.autoPosition(target);
   else if(id==='planet-legend') { try { window.dispatchEvent(new CustomEvent('ef:auto-pos', { detail:{ id, target, cascade:true } })); } catch {/* ignore */} }
     };
     const compactAll = () => {
@@ -1661,6 +1763,24 @@ function App() {
     // Two-frame defer to let new panel DOM mount & width settle
     requestAnimationFrame(()=> requestAnimationFrame(run));
   }, [openPanels, openPanelOrder, isPlanetCountActive, uiScale]);
+
+  // Specific nudge: if user-overlay is the ONLY managed panel opened first, re-run cascade after content paint to ensure same offset adjustments.
+  useEffect(()=>{
+    const managedIds = ['routing','cinematic','planet-legend','region-stats','region-compare','user-overlay'];
+    const activeManaged = Array.from(openPanels).filter(id=> managedIds.includes(id) || (id==='planet-legend' && isPlanetCountActive));
+    if(activeManaged.length===1 && activeManaged[0]==='user-overlay'){
+      // skip if user has a stored position already
+      if(localStorage.getItem('panel-pos:drawer-user-overlay')) return;
+      // Trigger a tiny deferred alignment (will be no-op if already aligned)
+      requestAnimationFrame(()=>{
+        try {
+          if(userOverlayDrawerRef.current){
+            userOverlayDrawerRef.current.autoPosition({ x:140, y:70 });
+          }
+        } catch {/* ignore */}
+      });
+    }
+  }, [openPanels, isPlanetCountActive]);
   // Optional debug toggle (open console and set window.DEBUG_PREFS=true)
   ;(window as any).DEBUG_PREFS = (window as any).DEBUG_PREFS || false;
 
@@ -2201,9 +2321,26 @@ function App() {
       transparent: true,
       alphaTest: 0.5,
     });
-    hoverPointRef.current = new THREE.Points(hoverGeometry, hoverMaterial);
-    hoverPointRef.current.visible = false;
-    sceneRef.current.add(hoverPointRef.current);
+  hoverPointRef.current = new THREE.Points(hoverGeometry, hoverMaterial);
+      hoverPointRef.current.visible = false;
+        sceneRef.current.add(hoverPointRef.current);
+
+  // (Legacy prompt-based overlay add removed; custom context menu + modal now handles Add Mark.)
+
+        // User Overlay Rings (halos) - instantiate once & retain via ref so mapData can be injected later
+        try {
+          if(OVERLAY_FEATURE_FLAG && ringTexture && !overlayRingsRef.current) {
+            // Size chosen to sit just outside capped star size (~10px). Adjust if visual gap too large.
+            overlayRingsRef.current = new UserOverlayRings(sceneRef.current, ringTexture, 15);
+            // Start hidden by default; immediately show if panel already open & not cinematic
+            try {
+              const shouldStartVisible = openPanels.has('user-overlay') && !cinematicMode;
+              overlayRingsRef.current.setVisible(shouldStartVisible);
+            } catch {/* ignore */}
+            (window as any).__efOverlayRebuild = () => { try { overlayRingsRef.current && (overlayRingsRef.current as any).rebuild && (overlayRingsRef.current as any).rebuild(); } catch {} };
+            if(mapData) { try { overlayRingsRef.current.setMapData(mapData); } catch {} }
+          }
+        } catch(e){ console.warn('[overlay] rings init failed', e); }
 
   let running = true; let rafId = 0;
   // Removed pulseState (selection halo pulsing disabled)
@@ -2254,7 +2391,9 @@ function App() {
         // Allow enabling debug gradient in console: window.__efGateDebug = true
   try { if((window as any).__efGateDebug !== undefined && stargateLinesRef.current){ const m:any = stargateLinesRef.current.material; if(m.uniforms?.uDebug){ m.uniforms.uDebug.value = (window as any).__efGateDebug ? 1.0 : 0.0; } } } catch {}
        }
-       // Jump range bubble: animate iridescence & interpolate position if active
+  // Update user overlay color cycling
+  try { if(overlayRingsRef.current){ overlayRingsRef.current.update(performance.now()); } } catch {/* ignore */}
+  // Jump range bubble: animate iridescence & interpolate position if active
        if(rangeBubbleRef.current){
          try {
            // Position interpolation (bubbleAnimRef managed on selection)
@@ -2262,22 +2401,22 @@ function App() {
              const tNow = performance.now();
              const t = (tNow - bubbleAnimRef.current.startTime) / bubbleAnimRef.current.duration;
              if(t >= 1){
-               rangeBubbleRef.current.group.position.copy(bubbleAnimRef.current.end);
+               rangeBubbleRef.current!.group.position.copy(bubbleAnimRef.current.end);
                bubbleAnimRef.current.active = false;
              } else {
                const tt = t*t*(3-2*t); // smoothstep ease
-               rangeBubbleRef.current.group.position.lerpVectors(bubbleAnimRef.current.start, bubbleAnimRef.current.end, tt);
+               rangeBubbleRef.current!.group.position.lerpVectors(bubbleAnimRef.current.start, bubbleAnimRef.current.end, tt);
              }
            }
            const tNowMs = performance.now();
-           rangeBubbleRef.current.tick(tNowMs);
+           rangeBubbleRef.current!.tick(tNowMs);
            if((window as any).__efBubbleDebug){
-             const child = rangeBubbleRef.current.group.children?.[1];
+             const child = rangeBubbleRef.current!.group.children?.[1];
              const mat:any = (child && (child as any).material) ? (child as any).material : undefined;
              if(mat && mat.uniforms && mat.uniforms.uTime){
                if(!(window as any).__efBubbleLastLog || tNowMs - (window as any).__efBubbleLastLog > 1000){
                  (window as any).__efBubbleLastLog = tNowMs;
-                 console.log('[bubble]', 'uTime', mat.uniforms.uTime.value, 'rotationY', rangeBubbleRef.current.group.rotation.y.toFixed(2));
+                 console.log('[bubble]', 'uTime', mat.uniforms.uTime.value, 'rotationY', rangeBubbleRef.current!.group.rotation.y.toFixed(2));
                }
              }
            }
@@ -2811,12 +2950,13 @@ function App() {
       } catch { /* ignore */ }
       // Force restore of base star material properties (in case palette / additive blending lingered)
       try {
-        if(starFieldRef.current){
+      if (starFieldRef.current) {
           const mat = starFieldRef.current.material as THREE.PointsMaterial;
           mat.blending = THREE.NormalBlending;
           mat.depthWrite = true;
           mat.transparent = true;
           mat.opacity = 1.0;
+      if(overlayRingsRef.current){ try { overlayRingsRef.current.dispose(); } catch {}; overlayRingsRef.current = null; }
           (mat as any).needsUpdate = true;
           // Reapply color buffer to plain white (actual pipeline effect will recolor next frame)
           const geom = starFieldRef.current.geometry as THREE.BufferGeometry;
@@ -3472,7 +3612,7 @@ function App() {
     const renderer = rendererRef.current;
 
     if (hoverPoint && camera && renderer) {
-      if (hoveredSystem && !(cinematicModeRef.current && !cinematicLabelsRef.current)) {
+  if (hoveredSystem && !(cinematicModeRef.current && !cinematicLabelsRef.current)) {
         const pos = getTransformedPosition(hoveredSystem.position);
         hoverPoint.position.set(pos.x, pos.y, pos.z);
 
@@ -3486,10 +3626,20 @@ function App() {
         const newRingSize = Math.max(MIN_HOVER_RING_SIZE, MAX_STAR_PIXEL_SIZE + HOVER_RING_PADDING);
         
         (hoverPoint.material as THREE.PointsMaterial).size = newRingSize;
+        // Force consistent hover color (orange accent) regardless of underlying overlay mark color
+        try {
+          const hoverMat = hoverPoint.material as THREE.PointsMaterial;
+          // Use orange hex directly for clarity; could derive from accent palette if needed
+          hoverMat.color.set('#ff8a2b');
+        } catch {/* ignore */}
 
-        hoverPoint.visible = true;
+  hoverPoint.visible = true;
+  // Suppress overlay ring for this system to avoid blended color variability
+  try { overlayRingsRef.current?.setSuppressedSystem(hoveredSystem.id); } catch {/* ignore */}
     } else {
         hoverPoint.visible = false;
+  // Restore overlay rings
+  try { overlayRingsRef.current?.setSuppressedSystem(null); } catch {/* ignore */}
       }
     }
   }, [hoveredSystem, getTransformedPosition, pointsMaterial, cinematicLabels]);
@@ -3886,9 +4036,31 @@ function App() {
       });
       optionsWrap.appendChild(avoidItem);
 
+      // Add Mark item (User Overlay)
+      if(OVERLAY_FEATURE_FLAG){
+        const markItem = document.createElement('div');
+        markItem.className = 'context-menu-item';
+        markItem.textContent = 'Add Mark';
+        markItem.addEventListener('mousedown', e=> { e.stopPropagation(); e.preventDefault(); });
+        markItem.addEventListener('click', e => {
+          e.stopPropagation();
+          if(contextMenuSystemRef.current){
+            const sys = contextMenuSystemRef.current;
+            setAddOverlaySystem({ id: sys.id, name: sys.name });
+            setAddOverlayOpen(true);
+            setOpenPanels(p=> { const n=new Set(p); n.add('user-overlay'); return n; });
+          }
+          closeMenu();
+        });
+        optionsWrap.appendChild(markItem);
+      }
+
       inner.appendChild(optionsWrap);
       el.appendChild(inner);
       const menuObj = new CSS2DObject(el);
+      // Hide the selected label while context menu is open to prevent overlap
+  if(selectedLabelObj.current) selectedLabelObj.current.visible = false;
+  // attach restore handler after element creation below
       contextMenuObjRef.current = menuObj;
       // Anchor the menu to the system's 3D position so it appears adjacent to the star.
       // (Previous regression added the label directly to the scene at (0,0,0) causing it to appear far away.)
@@ -3921,18 +4093,29 @@ function App() {
     // Close context menu on left click anywhere outside menu
     const closeOnLeftClick = (ev: MouseEvent) => {
       if(ev.button !== 0) return;
-      if(!contextMenuObjRef.current) return;
+  if(!contextMenuObjRef.current) return;
       const el = contextMenuObjRef.current.element as HTMLElement;
+      if(el && !(el as any).__restoreSelectedLabelAttached){
+        (el as any).__restoreSelectedLabelAttached = true;
+        (el as any).__restoreSelectedLabel = () => {
+          // restore selection label visibility when menu closes
+          if(selectedLabelObj.current && selectedLabelObj.current.visible === false){
+            selectedLabelObj.current.visible = true;
+          }
+        };
+      }
       if(el && ev.target instanceof Node && el.contains(ev.target)) return; // click inside menu
       try {
-        if(contextMenuObjRef.current.parent){
+  if((el as any).__restoreSelectedLabel){ try { (el as any).__restoreSelectedLabel(); } catch {/* ignore */} }
+  if(contextMenuObjRef.current.parent){
           contextMenuObjRef.current.parent.remove(contextMenuObjRef.current);
           if(sceneRef.current && contextMenuObjRef.current.parent instanceof THREE.Object3D){
             sceneRef.current.remove(contextMenuObjRef.current.parent);
           }
         }
       } catch {/* ignore */}
-      contextMenuObjRef.current = null; contextMenuSystemRef.current = null;
+  if(el && (el as any).__restoreSelectedLabel){ try { (el as any).__restoreSelectedLabel(); } catch {/* ignore */} }
+  contextMenuObjRef.current = null; contextMenuSystemRef.current = null;
     };
     window.addEventListener('mousedown', closeOnLeftClick);
     // Close on Escape for accessibility / stuck states
@@ -4051,7 +4234,7 @@ function App() {
           <RegionStatsCard regionName={activeRegionName} stats={regionStatsLoading && !activeRegionStats ? null : activeRegionStats} />
         </PanelDrawer>
       )}
-      {openPanels.has('region-compare') && (
+  {openPanels.has('region-compare') && (
         <PanelDrawer
           ref={regionCompareDrawerRef}
           id="region-compare"
@@ -4144,6 +4327,72 @@ function App() {
             }}
           />
         </PanelDrawer>
+      )}
+      {OVERLAY_FEATURE_FLAG && openPanels.has('user-overlay') && (
+        <PanelDrawer
+          ref={userOverlayDrawerRef}
+          id="user-overlay"
+          title={'User Overlay (Marks)'}
+          scale={uiScale}
+          zIndex={panelZ['user-overlay']||1450}
+          onActivate={bringToFront}
+          onClose={(id)=> { setOpenPanels(p=> { const n=new Set(p); n.delete(id); return n; }); }}
+          resetToken={layoutResetToken}
+          resizable
+          initialSize={{ width: 780, height: 480 }}
+          minSize={{ width: 520, height: 320 }}
+        >
+          <UserOverlayPanel
+            selectedSystem={highlightedSystem ? { id: highlightedSystem.id, name: highlightedSystem.name } : null}
+            onAddMark={(systemName, systemId) => {
+              setAddOverlaySystem({ id: systemId, name: systemName });
+              setAddOverlayOpen(true);
+            }}
+            onSoftHover={(name)=>{
+              if(!mapData){ return; }
+              if(!name){ setHoveredSystem(null); return; }
+              // Do not change highlighted selection; only adjust hover label
+              const sys = Object.values(mapData.solar_systems).find(s=> s.name===name);
+              if(sys){ setHoveredSystem(sys as any); }
+            }}
+            onSetDestination={(name)=>{
+              // Reuse existing destination logic (similar to context menu action)
+              setLastDestinationSystemName(name);
+              destinationLockedRef.current = true;
+              // Auto-open routing panel if start system already chosen
+              if(lastSelectedSystemName && !openPanels.has('routing')){ try { ensurePanel('routing'); bringToFront('routing'); } catch {/* ignore */} }
+              try { track({ type:'route_set_destination_panel' }); } catch {}
+            }}
+            onAddWaypoint={(name)=>{
+              setWaypoints(prev=> prev.includes(name)? prev : (prev.length<10 ? [...prev, name]: prev));
+              try { track({ type:'route_add_waypoint_panel' }); } catch {}
+            }}
+            onAvoidSystem={(name)=>{
+              setAvoidSystems(prev=> prev.includes(name)? prev : [...prev, name]);
+              try { track({ type:'route_add_avoid_panel' }); } catch {}
+            }}
+            onSelectSystem={(name)=>{
+              if(!mapData) return;
+              const sys = Object.values(mapData.solar_systems).find(s=> s.name === name);
+              if(!sys) return;
+              selectSystem(sys as any);
+              setLastSelectedSystemName(sys.name);
+              // If a destination is already set and routing panel closed, open it to hint at route capability
+              if(lastDestinationSystemName && !openPanels.has('routing')){ try { ensurePanel('routing'); bringToFront('routing'); } catch {/* ignore */} }
+            }}
+          />
+          <div style={{marginTop:8, display:'flex', gap:8}}>
+            {/* Legacy inline Add Mark button and quick add hint removed; Shift+RightClick still functions without UI hint. */}
+          </div>
+        </PanelDrawer>
+      )}
+      {addOverlayOpen && addOverlaySystem && (
+        <AddOverlayMarkModal
+          open={addOverlayOpen}
+          systemId={addOverlaySystem.id}
+          systemName={addOverlaySystem.name}
+          onClose={()=> { setAddOverlayOpen(false); setAddOverlaySystem(null); }}
+        />
       )}
   <DonateCryptoModal open={cryptoModalOpen} onClose={()=> setCryptoModalOpen(false)} address="0xC1204805b018ec2Ad06e6119965134AfFa212C10" ensName="lacal.eth" />
   {/* Referral code copy state */}
@@ -4268,6 +4517,7 @@ function App() {
               { id:'stations', type:'toggle', label:'Show Stations', display:(<>Show<br/>Stations</>), icon:null, active:showStations, onToggle:()=> setShowStations(v=> { const next=!v; try { persistShowStations(next); } catch {}; try { if(next) track({ type:'show_stations' }); } catch {}; return next; }) },
               { id:'distance', type:'toggle', label:'Show Distance', display:(<>Show<br/>Distance</>), icon:null, active:showDistance, onToggle:()=> setShowDistance(v=> !v) },
               { id:'region-compare', type:'panel', label:'Compare Regions', display:(<>Compare<br/>Regions</>), icon:null, active:openPanels.has('region-compare'), onSelect:()=> togglePanel('region-compare') },
+              { id:'user-overlay', type:'panel', label:'User Overlay', display:(<>User<br/>Overlay</>), icon:null, active:openPanels.has('user-overlay'), onSelect:()=> togglePanel('user-overlay') },
               // onSelect emits compare_regions_open event in togglePanel extension below
               { id:'reset-layout', type:'panel', label:'Reset Layout', display:(<>Reset<br/>Layout</>), icon:null, active:false, onSelect:()=> { if(window.confirm('Reset panel positions and layout?')) { fullReset(); setOpenPanels(new Set()); setAccentIsBlue(false); setResetToken(t=> t+1); setLayoutResetToken(t=> t+1); } } },
             ] as any}

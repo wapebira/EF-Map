@@ -1,0 +1,48 @@
+.overlay-add-modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,0.45);display:flex;align-items:center;justify-content:center;z-index:5000;font-family:var(--font-stack, system-ui, sans-serif);} 
+.overlay-add-modal{background:#111;padding:16px 18px;border:1px solid #333;max-width:420px;width:100%;border-radius:6px;box-shadow:0 4px 24px rgba(0,0,0,0.6);color:#eee;font-size:14px;}
+.overlay-add-modal h3{margin:0 0 8px;font-size:16px;font-weight:600;}
+.palette-row{display:flex;align-items:center;flex-wrap:wrap;gap:6px;}
+.color-swatch{width:28px;height:28px;border-radius:4px;cursor:pointer;outline:none;box-shadow:0 0 0 1px rgba(0,0,0,0.4);}
+.color-swatch.active{box-shadow:0 0 0 2px #fff,0 0 0 4px var(--accent,#00aaff);} 
+.overlay-add-modal textarea{background:#1b1b1b;color:#eee;border:1px solid #333;border-radius:4px;padding:6px;font-family:inherit;font-size:13px;resize:vertical;}
+.overlay-add-modal button{background:#222;color:#eee;border:1px solid #444;padding:6px 12px;border-radius:4px;cursor:pointer;font-size:13px;}
+.overlay-add-modal button:hover{background:#2c2c2c;}
+.overlay-add-modal button[type=submit]{background:var(--accent,#00aaff);border-color:var(--accent,#00aaff);color:#fff;font-weight:600;}
+.overlay-add-modal button[type=submit]:hover{filter:brightness(1.1);}
+
+/* New floating draggable window styles */
+.overlay-add-window{position:fixed;z-index:5000;background:#111;border:1px solid #2d2d2d;border-radius:8px;box-shadow:0 6px 28px -6px rgba(0,0,0,0.75),0 0 0 1px rgba(255,255,255,0.04);display:flex;flex-direction:column;color:#eee;font-size:13px;user-select:none;}
+.overlay-add-window-header{height:34px;display:flex;align-items:center;justify-content:space-between;padding:0 10px;cursor:move;background:linear-gradient(#1c1c1c,#151515);border-bottom:1px solid #2b2b2b;border-top-left-radius:8px;border-top-right-radius:8px;font-weight:600;font-size:13px;letter-spacing:0.3px;}
+.overlay-add-window-header .title{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding-right:8px;}
+.overlay-add-window-header .close-btn{background:#222;border:1px solid #444;color:#ccc;border-radius:4px;width:26px;height:24px;font-size:14px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;}
+.overlay-add-window-header .close-btn:hover{background:#2d2d2d;color:#fff;}
+.overlay-add-window-body{flex:1;display:flex;flex-direction:column;padding:10px 12px 12px 12px;gap:10px;overflow:hidden;}
+.overlay-add-window-body .palette-row{margin-top:2px;}
+.overlay-add-window-body .actions{display:flex;gap:10px;margin-top:auto;justify-content:flex-end;}
+.overlay-add-window-body button{background:#222;color:#eee;border:1px solid #444;padding:6px 12px;border-radius:4px;cursor:pointer;font-size:13px;}
+.overlay-add-window-body button:hover{background:#2c2c2c;}
+.overlay-add-window-body button[type=submit]{background:var(--accent,#00aaff);border-color:var(--accent,#00aaff);color:#fff;font-weight:600;}
+.overlay-add-window-body button[type=submit]:hover{filter:brightness(1.1);} 
+.overlay-add-window-textarea{flex:1;min-height:120px;background:#181818;color:#eee;border:1px solid #303030;border-radius:6px;padding:8px;font-family:inherit;font-size:13px;resize:none;line-height:1.35;}
+.overlay-add-window-textarea:focus{outline:1px solid var(--accent,#00aaff);}
+.overlay-add-window .color-swatch{width:26px;height:26px;border-radius:4px;margin:0;padding:0;border:none;box-shadow:0 0 0 1px rgba(0,0,0,0.5);}
+.overlay-add-window .color-swatch.active{box-shadow:0 0 0 2px #fff,0 0 0 4px var(--accent,#00aaff);} 
+/* Edge / corner resize zones (invisible) */
+.overlay-add-window .resize-edge{position:absolute;z-index:10;}
+.overlay-add-window .edge-n{top:-3px;left:6px;right:6px;height:6px;cursor:n-resize;}
+.overlay-add-window .edge-s{bottom:-3px;left:6px;right:6px;height:6px;cursor:s-resize;}
+.overlay-add-window .edge-e{top:6px;right:-3px;bottom:6px;width:6px;cursor:e-resize;}
+.overlay-add-window .edge-w{top:6px;left:-3px;bottom:6px;width:6px;cursor:w-resize;}
+.overlay-add-window .resize-corner{position:absolute;width:12px;height:12px;z-index:11;}
+.overlay-add-window .corner-ne{top:-4px;right:-4px;cursor:ne-resize;}
+.overlay-add-window .corner-nw{top:-4px;left:-4px;cursor:nw-resize;}
+.overlay-add-window .corner-se{bottom:-4px;right:-4px;cursor:se-resize;}
+.overlay-add-window .corner-sw{bottom:-4px;left:-4px;cursor:sw-resize;}
+
+/* Ensure palette row wraps nicely within dynamic width */
+.overlay-add-window .palette-row{display:flex;flex-wrap:wrap;gap:6px;}
+
+/* Adaptive layout: textarea shrinks before actions row disappears */
+.overlay-add-window-body{min-height:0;}
+.overlay-add-window-body .actions{flex-shrink:0;padding-top:4px;}
+.overlay-add-window-textarea{flex:1 1 auto;min-height:40px;}

@@ -28,6 +28,7 @@ const baseDefaults: Record<string,{x:number;y:number}> = {
   cinematic: { x:140, y:70 },
   'region-stats': { x:140, y:70 },
   'region-compare': { x:140, y:70 },
+  'user-overlay': { x:140, y:70 },
 };
 
 const PanelDrawer = forwardRef<PanelDrawerHandle, PanelDrawerProps>(({ id, title, onClose, children, defaultPos, scale=1, zIndex=1450, onActivate, resetToken, resizable=false, initialSize, minSize, maxSize }, ref) => {
