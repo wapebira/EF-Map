@@ -10,6 +10,10 @@ import './App.css';
 import RegionHighlighterModule, { setRegionHighlightColors } from './modules/RegionHighlighter';
 import RegionStatsCard, { type RegionStats } from './components/RegionStatsCard';
 import CompareRegionsPanel from './components/CompareRegionsPanel';
+import UserOverlayPanel from './components/UserOverlay/UserOverlayPanel';
+import { OVERLAY_FEATURE_FLAG } from './utils/userOverlay';
+import { UserOverlayRings } from './modules/UserOverlayRings';
+import AddOverlayMarkModal from './components/UserOverlay/AddOverlayMarkModal';
 import logo from './assets/logo/logo.png';
 import { openDbFromArrayBuffer } from "./lib/sql";
 import type { SystemRow, StargateRow, RegionRow, ConstellationRow } from "./types/db";
@@ -194,6 +198,8 @@ function App() {
   const [waypointOptimize, setWaypointOptimize] = useState<boolean>(false); // false = visit in order added
   const destinationLockedRef = useRef<boolean>(false); // becomes true once user explicitly sets destination via context menu
   const [hoveredSystem, setHoveredSystem] = useState<SolarSystem | null>(null);
+  const hoveredSystemRef = useRef<SolarSystem | null>(null);
+  useEffect(()=> { hoveredSystemRef.current = hoveredSystem; }, [hoveredSystem]);
   const [isRegionHighlighterActive, setIsRegionHighlighterActive] = useState(false);
   const regionSystemsIndexRef = useRef<Map<number, any[]>|null>(null);
   const [regionStatsVisible, setRegionStatsVisible] = useState(true); // show by default when region highlight active
@@ -590,6 +596,12 @@ function App() {
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
   const starFieldRef = useRef<THREE.Points | null>(null);
+  const overlayRingsRef = useRef<UserOverlayRings | null>(null); // persistent user overlay halos
+
+  // When mapData loads (or changes), inject into overlay rings so positions rebuild with correct coordinates
+  useEffect(()=>{
+    if(mapData && overlayRingsRef.current){ try { overlayRingsRef.current.setMapData(mapData); } catch(e){ console.warn('[overlay] setMapData failed', e); } }
+  }, [mapData]);
   const hoverPointRef = useRef<THREE.Points | null>(null);
   const stargateLinesRef = useRef<THREE.LineSegments | null>(null);
   // Glow pass removed; no secondary line material
@@ -1450,6 +1462,23 @@ function App() {
   };
   // Reapply when dependencies change
   useEffect(()=>{ if(reachInRangeHighlight && reachBubble){ applyInRangeHighlight(); } }, [reachInRangeHighlight, reachBubble, reachRange, highlightedSystem, accentIsBlue, reachDim]);
+  // Open Add Overlay modal with Shift+RightClick on a hovered or highlighted system
+  useEffect(()=>{
+    if(!OVERLAY_FEATURE_FLAG) return;
+    const handler = (e:MouseEvent) => {
+      if(e.button===2 && e.shiftKey){
+        const sys = hoveredSystemRef.current || highlightedSystem;
+        if(sys){
+          e.preventDefault();
+            setAddOverlaySystem({ id: sys.id, name: sys.name });
+            setAddOverlayOpen(true);
+            setOpenPanels(p=> { const n=new Set(p); n.add('user-overlay'); return n; });
+        }
+      }
+    };
+    window.addEventListener('mousedown', handler, { capture:true });
+    return ()=> window.removeEventListener('mousedown', handler, { capture:true } as any);
+  }, [highlightedSystem]);
 
 
   // Initialize and manage the routing worker
@@ -1523,6 +1552,8 @@ function App() {
 
   // Multi-panel open state (allow several drawers at once) - persisted
   const [openPanels, setOpenPanels] = useState<Set<string>>(new Set());
+  const [addOverlayOpen, setAddOverlayOpen] = useState(false);
+  const [addOverlaySystem, setAddOverlaySystem] = useState<{ id:number; name:string }|null>(null);
   // Z-index management for draggable panels
   const [panelZ, setPanelZ] = useState<Record<string, number>>({});
   const topZRef = useRef(1500);
@@ -2201,9 +2232,21 @@ function App() {
       transparent: true,
       alphaTest: 0.5,
     });
-    hoverPointRef.current = new THREE.Points(hoverGeometry, hoverMaterial);
-    hoverPointRef.current.visible = false;
-    sceneRef.current.add(hoverPointRef.current);
+  hoverPointRef.current = new THREE.Points(hoverGeometry, hoverMaterial);
+      hoverPointRef.current.visible = false;
+        sceneRef.current.add(hoverPointRef.current);
+
+  // (Legacy prompt-based overlay add removed; custom context menu + modal now handles Add Mark.)
+
+        // User Overlay Rings (halos) - instantiate once & retain via ref so mapData can be injected later
+        try {
+          if(OVERLAY_FEATURE_FLAG && ringTexture && !overlayRingsRef.current) {
+            // Size chosen to sit just outside capped star size (~10px). Adjust if visual gap too large.
+            overlayRingsRef.current = new UserOverlayRings(sceneRef.current, ringTexture, 15);
+            (window as any).__efOverlayRebuild = () => { try { overlayRingsRef.current && (overlayRingsRef.current as any).rebuild && (overlayRingsRef.current as any).rebuild(); } catch {} };
+            if(mapData) { try { overlayRingsRef.current.setMapData(mapData); } catch {} }
+          }
+        } catch(e){ console.warn('[overlay] rings init failed', e); }
 
   let running = true; let rafId = 0;
   // Removed pulseState (selection halo pulsing disabled)
@@ -2254,7 +2297,9 @@ function App() {
         // Allow enabling debug gradient in console: window.__efGateDebug = true
   try { if((window as any).__efGateDebug !== undefined && stargateLinesRef.current){ const m:any = stargateLinesRef.current.material; if(m.uniforms?.uDebug){ m.uniforms.uDebug.value = (window as any).__efGateDebug ? 1.0 : 0.0; } } } catch {}
        }
-       // Jump range bubble: animate iridescence & interpolate position if active
+  // Update user overlay color cycling
+  try { if(overlayRingsRef.current){ overlayRingsRef.current.update(performance.now()); } } catch {/* ignore */}
+  // Jump range bubble: animate iridescence & interpolate position if active
        if(rangeBubbleRef.current){
          try {
            // Position interpolation (bubbleAnimRef managed on selection)
@@ -2262,22 +2307,22 @@ function App() {
              const tNow = performance.now();
              const t = (tNow - bubbleAnimRef.current.startTime) / bubbleAnimRef.current.duration;
              if(t >= 1){
-               rangeBubbleRef.current.group.position.copy(bubbleAnimRef.current.end);
+               rangeBubbleRef.current!.group.position.copy(bubbleAnimRef.current.end);
                bubbleAnimRef.current.active = false;
              } else {
                const tt = t*t*(3-2*t); // smoothstep ease
-               rangeBubbleRef.current.group.position.lerpVectors(bubbleAnimRef.current.start, bubbleAnimRef.current.end, tt);
+               rangeBubbleRef.current!.group.position.lerpVectors(bubbleAnimRef.current.start, bubbleAnimRef.current.end, tt);
              }
            }
            const tNowMs = performance.now();
-           rangeBubbleRef.current.tick(tNowMs);
+           rangeBubbleRef.current!.tick(tNowMs);
            if((window as any).__efBubbleDebug){
-             const child = rangeBubbleRef.current.group.children?.[1];
+             const child = rangeBubbleRef.current!.group.children?.[1];
              const mat:any = (child && (child as any).material) ? (child as any).material : undefined;
              if(mat && mat.uniforms && mat.uniforms.uTime){
                if(!(window as any).__efBubbleLastLog || tNowMs - (window as any).__efBubbleLastLog > 1000){
                  (window as any).__efBubbleLastLog = tNowMs;
-                 console.log('[bubble]', 'uTime', mat.uniforms.uTime.value, 'rotationY', rangeBubbleRef.current.group.rotation.y.toFixed(2));
+                 console.log('[bubble]', 'uTime', mat.uniforms.uTime.value, 'rotationY', rangeBubbleRef.current!.group.rotation.y.toFixed(2));
                }
              }
            }
@@ -2811,12 +2856,13 @@ function App() {
       } catch { /* ignore */ }
       // Force restore of base star material properties (in case palette / additive blending lingered)
       try {
-        if(starFieldRef.current){
+      if (starFieldRef.current) {
           const mat = starFieldRef.current.material as THREE.PointsMaterial;
           mat.blending = THREE.NormalBlending;
           mat.depthWrite = true;
           mat.transparent = true;
           mat.opacity = 1.0;
+      if(overlayRingsRef.current){ try { overlayRingsRef.current.dispose(); } catch {}; overlayRingsRef.current = null; }
           (mat as any).needsUpdate = true;
           // Reapply color buffer to plain white (actual pipeline effect will recolor next frame)
           const geom = starFieldRef.current.geometry as THREE.BufferGeometry;
@@ -3886,6 +3932,25 @@ function App() {
       });
       optionsWrap.appendChild(avoidItem);
 
+      // Add Mark item (User Overlay)
+      if(OVERLAY_FEATURE_FLAG){
+        const markItem = document.createElement('div');
+        markItem.className = 'context-menu-item';
+        markItem.textContent = 'Add Mark';
+        markItem.addEventListener('mousedown', e=> { e.stopPropagation(); e.preventDefault(); });
+        markItem.addEventListener('click', e => {
+          e.stopPropagation();
+          if(contextMenuSystemRef.current){
+            const sys = contextMenuSystemRef.current;
+            setAddOverlaySystem({ id: sys.id, name: sys.name });
+            setAddOverlayOpen(true);
+            setOpenPanels(p=> { const n=new Set(p); n.add('user-overlay'); return n; });
+          }
+          closeMenu();
+        });
+        optionsWrap.appendChild(markItem);
+      }
+
       inner.appendChild(optionsWrap);
       el.appendChild(inner);
       const menuObj = new CSS2DObject(el);
@@ -4051,7 +4116,7 @@ function App() {
           <RegionStatsCard regionName={activeRegionName} stats={regionStatsLoading && !activeRegionStats ? null : activeRegionStats} />
         </PanelDrawer>
       )}
-      {openPanels.has('region-compare') && (
+  {openPanels.has('region-compare') && (
         <PanelDrawer
           ref={regionCompareDrawerRef}
           id="region-compare"
@@ -4144,6 +4209,34 @@ function App() {
             }}
           />
         </PanelDrawer>
+      )}
+      {OVERLAY_FEATURE_FLAG && openPanels.has('user-overlay') && (
+        <PanelDrawer
+          id="user-overlay"
+          title={'User Overlay (Marks)'}
+          scale={uiScale}
+          zIndex={panelZ['user-overlay']||1450}
+          onActivate={bringToFront}
+          onClose={(id)=> { setOpenPanels(p=> { const n=new Set(p); n.delete(id); return n; }); }}
+          resetToken={layoutResetToken}
+          resizable
+          initialSize={{ width: 780, height: 480 }}
+          minSize={{ width: 520, height: 320 }}
+        >
+          <UserOverlayPanel />
+          <div style={{marginTop:8, display:'flex', gap:8}}>
+            <button onClick={()=>{ if(highlightedSystem){ setAddOverlaySystem({ id: highlightedSystem.id, name: highlightedSystem.name }); setAddOverlayOpen(true); } else if(hoveredSystem){ setAddOverlaySystem({ id:hoveredSystem.id, name:hoveredSystem.name }); setAddOverlayOpen(true);} }} disabled={!(highlightedSystem||hoveredSystem)} aria-label="Add mark for current system">Add Mark</button>
+            <small style={{opacity:0.7}}>Shift+RightClick a star for quick add</small>
+          </div>
+        </PanelDrawer>
+      )}
+      {addOverlayOpen && addOverlaySystem && (
+        <AddOverlayMarkModal
+          open={addOverlayOpen}
+          systemId={addOverlaySystem.id}
+          systemName={addOverlaySystem.name}
+          onClose={()=> { setAddOverlayOpen(false); setAddOverlaySystem(null); }}
+        />
       )}
   <DonateCryptoModal open={cryptoModalOpen} onClose={()=> setCryptoModalOpen(false)} address="0xC1204805b018ec2Ad06e6119965134AfFa212C10" ensName="lacal.eth" />
   {/* Referral code copy state */}
@@ -4268,6 +4361,7 @@ function App() {
               { id:'stations', type:'toggle', label:'Show Stations', display:(<>Show<br/>Stations</>), icon:null, active:showStations, onToggle:()=> setShowStations(v=> { const next=!v; try { persistShowStations(next); } catch {}; try { if(next) track({ type:'show_stations' }); } catch {}; return next; }) },
               { id:'distance', type:'toggle', label:'Show Distance', display:(<>Show<br/>Distance</>), icon:null, active:showDistance, onToggle:()=> setShowDistance(v=> !v) },
               { id:'region-compare', type:'panel', label:'Compare Regions', display:(<>Compare<br/>Regions</>), icon:null, active:openPanels.has('region-compare'), onSelect:()=> togglePanel('region-compare') },
+              { id:'user-overlay', type:'panel', label:'User Overlay', display:(<>User<br/>Overlay</>), icon:null, active:openPanels.has('user-overlay'), onSelect:()=> togglePanel('user-overlay') },
               // onSelect emits compare_regions_open event in togglePanel extension below
               { id:'reset-layout', type:'panel', label:'Reset Layout', display:(<>Reset<br/>Layout</>), icon:null, active:false, onSelect:()=> { if(window.confirm('Reset panel positions and layout?')) { fullReset(); setOpenPanels(new Set()); setAccentIsBlue(false); setResetToken(t=> t+1); setLayoutResetToken(t=> t+1); } } },
             ] as any}
