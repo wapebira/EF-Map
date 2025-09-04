@@ -543,7 +543,7 @@ const TransmissionPanel: React.FC<TransmissionPanelProps> = ({ onClose, onRoute,
     if(!show) return;
     if(echoTypingRef.current){ logEvent('echo_schedule_skipped_typing'); return; }
     if(echoTimerRef.current){ clearTimeout(echoTimerRef.current); echoTimerRef.current=null; }
-    const delay = typeof explicitDelay === 'number' ? explicitDelay : (15000 + Math.random()*30000); // 15s to 45s or restored remaining
+  const delay = typeof explicitDelay === 'number' ? explicitDelay : (10000 + Math.random()*15000); // 10s to 25s or restored remaining
     echoTimerNextDueRef.current = Date.now() + delay;
     echoTimerRef.current = setTimeout(()=>{ appendNextEcho(); }, delay);
     logEvent('echo_scheduled', { delay });
