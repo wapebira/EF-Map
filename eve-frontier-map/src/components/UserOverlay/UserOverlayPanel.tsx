@@ -78,47 +78,43 @@ export const UserOverlayPanel: React.FC<PanelProps> = ({ onAddMark, onSetDestina
               const picking = colorPickerFor === e.id;
               const handleRowContext: React.MouseEventHandler<HTMLTableRowElement> = (ev) => {
                 ev.preventDefault();
-                // Basic lightweight custom menu using an absolutely positioned div appended to body
                 const existing = document.getElementById('overlay-row-context-menu');
                 if(existing) existing.remove();
-                const menu = document.createElement('div');
-                menu.id = 'overlay-row-context-menu';
-                menu.style.position = 'fixed';
-                menu.style.top = ev.clientY + 'px';
-                menu.style.left = ev.clientX + 'px';
-                menu.style.zIndex = '9999';
-                menu.style.background = 'rgba(20,20,24,0.95)';
-                menu.style.border = '1px solid #333';
-                menu.style.borderRadius = '6px';
-                menu.style.boxShadow = '0 6px 18px -4px rgba(0,0,0,0.6)';
-                menu.style.minWidth = '180px';
-                menu.style.fontSize = '12px';
-                menu.style.padding = '4px 0';
-                menu.style.color = '#fff';
-                (menu.style as any).backdropFilter = 'blur(4px)';
-                const addItem = (label:string, fn: (()=>void)|undefined) => {
+                const wrapper = document.createElement('div');
+                wrapper.id = 'overlay-row-context-menu';
+                wrapper.className = 'system-label-wrapper';
+                Object.assign(wrapper.style, { position:'fixed', top: ev.clientY + 'px', left: ev.clientX + 'px', zIndex:'9999' });
+                const inner = document.createElement('div');
+                inner.className = 'system-label system-label--selected';
+                // Title
+                const titleSpan = document.createElement('div');
+                titleSpan.textContent = e.systemName;
+                titleSpan.style.fontWeight = '700';
+                inner.appendChild(titleSpan);
+                const optionsWrap = document.createElement('div');
+                optionsWrap.className = 'context-menu-options';
+                const makeItem = (label:string, fn: (()=>void)|undefined) => {
                   const item = document.createElement('div');
+                  item.className = 'context-menu-item';
                   item.textContent = label;
-                  Object.assign(item.style, {
-                    padding:'6px 12px', cursor: fn? 'pointer':'default', whiteSpace:'nowrap',
-                    opacity: fn? '1':'0.4'
-                  });
-                  item.onmouseenter = ()=>{ if(fn) item.style.background='rgba(255,255,255,0.08)'; };
-                  item.onmouseleave = ()=>{ item.style.background='transparent'; };
-                  if(fn){ item.onclick = ()=> { fn(); cleanup(); }; }
-                  menu.appendChild(item);
+                  if(!fn){ item.style.opacity = '0.4'; }
+                  item.addEventListener('mousedown', ev2=> { ev2.stopPropagation(); ev2.preventDefault(); });
+                  if(fn){ item.addEventListener('click', ev2=> { ev2.stopPropagation(); fn(); cleanup(); }); }
+                  optionsWrap.appendChild(item);
                 };
-                const cleanup = () => { menu.remove(); window.removeEventListener('click', outside, true); window.removeEventListener('keydown', esc, true); };
-                const outside = (evt: Event) => { if(menu && !menu.contains(evt.target as Node)) cleanup(); };
+                const cleanup = () => { wrapper.remove(); window.removeEventListener('click', outside, true); window.removeEventListener('keydown', esc, true); };
+                const outside = (evt: Event) => { if(wrapper && !wrapper.contains(evt.target as Node)) cleanup(); };
                 const esc = (evt: KeyboardEvent) => { if(evt.key==='Escape') cleanup(); };
                 window.addEventListener('click', outside, true);
                 window.addEventListener('keydown', esc, true);
-                addItem(e.systemName, undefined);
-                addItem('Set Destination', onSetDestination? ()=> onSetDestination(e.systemName): undefined);
-                addItem('Add Waypoint', onAddWaypoint? ()=> onAddWaypoint(e.systemName): undefined);
-                addItem('Avoid System', onAvoidSystem? ()=> onAvoidSystem(e.systemName): undefined);
-                addItem('Add Another Mark', ()=> onAddMark(e.systemName, (e as any).systemId || e.systemId));
-                document.body.appendChild(menu);
+                makeItem(e.systemName, undefined);
+                makeItem('Set Destination', onSetDestination? ()=> onSetDestination(e.systemName): undefined);
+                makeItem('Add Waypoint', onAddWaypoint? ()=> onAddWaypoint(e.systemName): undefined);
+                makeItem('Avoid System', onAvoidSystem? ()=> onAvoidSystem(e.systemName): undefined);
+                makeItem('Add Another Mark', ()=> onAddMark(e.systemName, (e as any).systemId || e.systemId));
+                inner.appendChild(optionsWrap);
+                wrapper.appendChild(inner);
+                document.body.appendChild(wrapper);
               };
               return (
                 <tr key={e.id} onContextMenu={handleRowContext}>
