@@ -420,4 +420,9 @@
 - Gates: typecheck ✅ | build ✅ | smoke ✅ (manual: open/close panel increments opens; first open increments sessions; add mark increments add counters; export/import fire respective counters; selection highlight spans full width).
 - Follow-ups: Potential future metrics for multi-select usage intensity (bulk verify/delete counts), duplicate merge count, and export mark count size distribution; optional remote sync design pending demand. Could add per-color usage distribution if legend recolor analytics needed.
 
+## 2025-09-04 – No-Op Rebuild Trigger
+- Purpose: Force remote build (clear stale cache referencing earlier missing overlay methods/exports). No functional code changes beyond this log entry.
+- Risk: None (documentation only).
+- Gates: Not applicable; serves solely as a rebuild catalyst.
+
 
