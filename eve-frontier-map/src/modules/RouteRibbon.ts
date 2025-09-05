@@ -195,11 +195,15 @@ export function createRouteRibbon(opts: RouteRibbonOptions): THREE.Group | null 
     const dist = cam.position.distanceTo(routeCenter);
     const nearD = 300.0, farD = 3500.0; let t = (dist - nearD) / (farD - nearD); if (t < 0.) t = 0.; else if (t > 1.) t = 1.;
     const maxPx = 8.0, minPx = 5.0; // thicker window
-    u.u_pxTarget.value = maxPx - (maxPx - minPx) * t;
+  const basePx = maxPx - (maxPx - minPx) * t;
+  const rt = (window as any).__efRouteThickness || 1.0;
+  u.u_pxTarget.value = basePx * Math.min(2.0, Math.max(0.5, rt));
   const now = performance.now() / 1000.0;
   u.u_time.value = now;
   // static dash toggle
   if(u.u_enableShipDash){ u.u_enableShipDash.value = (window as any).__efShowShipDash === false ? 0.0 : 1.0; }
+  // route thickness global update (written by display settings event)
+  try { (window as any).__efRouteThickness = (window as any).__efRouteThickness ?? 1.0; } catch {}
   // Pulse customization mapping
   const ps = (window as any).__efPulseSettings;
   if(ps){

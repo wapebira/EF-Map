@@ -795,6 +795,9 @@ function App() {
         (window as any).__efPulseSettings = { pulseSpeed: e?.detail?.pulseSpeed ?? 1.0, pulseHead: e?.detail?.pulseHead ?? 0.25, pulseTail: e?.detail?.pulseTail ?? 0.65, pulseWidth: e?.detail?.pulseWidth ?? 0.15, pulseBrightness: e?.detail?.pulseBrightness ?? 1.0 };
       }
       if(e?.detail?.starSizeScale != null){ (window as any).__efStarSizeScale = e.detail.starSizeScale; }
+      if(e?.detail?.routeThickness != null){
+        try { (window as any).__efRouteThickness = Math.max(0.5, Math.min(2.0, e.detail.routeThickness)); } catch {/* ignore */}
+      }
       // Apply star size scaling immediately if star field material exists
       try {
         if((window as any).__efStarSizeScale != null && starFieldRef.current){
@@ -810,6 +813,11 @@ function App() {
     try {
       const prefs = (window as any).localStorage ? JSON.parse(localStorage.getItem('efmap:prefs')||'{}') : {}; // lightweight fetch
       (window as any).__efShowShipDash = prefs.showShipDash !== false; // default true
+      if(prefs.routeThickness != null){
+        (window as any).__efRouteThickness = Math.max(0.5, Math.min(2.0, prefs.routeThickness));
+      } else {
+        (window as any).__efRouteThickness = 1.0;
+      }
     } catch { (window as any).__efShowShipDash = true; }
     window.addEventListener('ef-display-settings-changed', handler as any);
     return () => window.removeEventListener('ef-display-settings-changed', handler as any);

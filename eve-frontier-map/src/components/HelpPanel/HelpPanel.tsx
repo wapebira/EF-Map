@@ -720,6 +720,7 @@ const baseSections: SectionDef[] = [
               <li><strong>Star Size Scale:</strong> Uniformly enlarges or shrinks rendered star sprites (helps legibility on high‑DPI or when filming).</li>
               <li><strong>Pulse Brightness:</strong> Scales the luminosity of the route pulse effect without altering its timing or width.</li>
               <li><strong>Dashed Ship Segments:</strong> Toggle static dash pattern for ship (non‑gate) jumps. Off = solid continuous ribbon for all segments.</li>
+              <li><strong>Route Thickness:</strong> Multiplies the baseline screen‑space width of the active route ribbon (applies uniformly to gate + ship segments). Higher values improve visibility in dense overlaps; lower values reduce visual dominance when many UI overlays are open.</li>
               <li><strong>Reset:</strong> Returns all display sliders & toggles in this panel to defaults only (does not alter routing inputs or overlay data).</li>
             </ul>
             <p style={{marginTop:'6px'}}>Use these for subtle readability tweaks: increase star scale for dense screenshots, lower pulse brightness when overlapping multiple long routes, or disable dashes for a minimalist look.</p>
@@ -735,6 +736,7 @@ const baseSections: SectionDef[] = [
               <li>Higher star scale + bright pulse can visually dominate region/planet gradients—dial one back if colors feel washed.</li>
               <li>Disable dashes when comparing two exported screenshots for distance differences—solid lines reduce visual noise.</li>
               <li>Lower pulse brightness before entering Cinematic Mode if you plan to toggle between them; avoids stark contrast jumps.</li>
+              <li>Increase route thickness slightly (e.g. 1.2) when star size scale is high so the pulse head remains visually distinct; decrease thickness if pulse brightness is &gt;1.5 to prevent bloom wash.</li>
               <li>After experimenting, use Reset to quickly return to the baseline rendering profile.</li>
             </ul>
           </div>

@@ -1,5 +1,5 @@
 import React from 'react';
-import { getPrefs, setGateGradientSpan, setHoverPrecisionFloor, setPulseSpeed, setPulseHeadSize, setPulseTailSize, setPulseWidth, setAccent, setShowShipDash, setPulseBrightness, setStarSizeScale } from '../utils/prefs';
+import { getPrefs, setGateGradientSpan, setHoverPrecisionFloor, setPulseSpeed, setPulseHeadSize, setPulseTailSize, setPulseWidth, setAccent, setShowShipDash, setPulseBrightness, setStarSizeScale, setRouteThickness } from '../utils/prefs';
 
 export const DisplaySettingsPanel: React.FC = () => {
   const prefs = getPrefs() as any;
@@ -14,6 +14,7 @@ export const DisplaySettingsPanel: React.FC = () => {
   const [showShipDash, setShowShipDashState] = React.useState<boolean>(prefs.showShipDash !== false);
   const [pulseBrightness, setPulseBrightnessState] = React.useState<number>(prefs.pulseBrightness ?? 1.0);
   const [starSizeScale, setStarSizeScaleState] = React.useState<number>(prefs.starSizeScale ?? 1.0);
+  const [routeThickness, setRouteThicknessState] = React.useState<number>(prefs.routeThickness ?? 1.0);
 
   // Commit changes w/ debounce to reduce writes
   const commitRef = React.useRef<number | null>(null);
@@ -29,13 +30,14 @@ export const DisplaySettingsPanel: React.FC = () => {
   setAccent(accent);
   setShowShipDash(showShipDash);
   setPulseBrightness(pulseBrightness);
-  setStarSizeScale(starSizeScale);
+    setStarSizeScale(starSizeScale);
+    setRouteThickness(routeThickness);
       // Fire custom event so App.tsx can listen & update uniforms / refs immediately
-  try { window.dispatchEvent(new CustomEvent('ef-display-settings-changed', { detail:{ gateSpan, hoverFloor, pulseSpeed, pulseHead, pulseTail, pulseWidth, accent, showShipDash, pulseBrightness, starSizeScale } })); } catch {/* ignore */}
+  try { window.dispatchEvent(new CustomEvent('ef-display-settings-changed', { detail:{ gateSpan, hoverFloor, pulseSpeed, pulseHead, pulseTail, pulseWidth, accent, showShipDash, pulseBrightness, starSizeScale, routeThickness } })); } catch {/* ignore */}
     });
   };
 
-  React.useEffect(()=>{ scheduleWrite(); /* eslint-disable-next-line react-hooks/exhaustive-deps */}, [gateSpan, hoverFloor, pulseSpeed, pulseHead, pulseTail, pulseWidth, accent, showShipDash, pulseBrightness, starSizeScale]);
+  React.useEffect(()=>{ scheduleWrite(); /* eslint-disable-next-line react-hooks/exhaustive-deps */}, [gateSpan, hoverFloor, pulseSpeed, pulseHead, pulseTail, pulseWidth, accent, showShipDash, pulseBrightness, starSizeScale, routeThickness]);
 
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:'12px', fontSize:12 }}>
@@ -99,6 +101,14 @@ export const DisplaySettingsPanel: React.FC = () => {
         <small style={{ opacity:0.7 }}>Adjust rendering size of stars (visual only).</small>
       </section>
       <section>
+        <h4 style={{ margin:'4px 0 6px' }}>Route Thickness</h4>
+        <label style={{ display:'flex', flexDirection:'column', gap:4 }}>
+          <span>Thickness: {routeThickness.toFixed(2)}x</span>
+          <input type="range" min={0.5} max={2.0} step={0.05} value={routeThickness} onChange={e=> setRouteThicknessState(parseFloat(e.target.value))} />
+        </label>
+        <small style={{ opacity:0.7 }}>Scales base route pixel width window. Higher values improve visibility for presentations; lower values reduce visual dominance.</small>
+      </section>
+      <section>
         <h4 style={{ margin:'4px 0 6px' }}>Accent Color</h4>
         <label style={{ display:'flex', alignItems:'center', gap:6 }}>
           <input type="radio" name="accentColor" checked={accent==='orange'} onChange={()=> setAccentState('orange')} />
@@ -120,7 +130,7 @@ export const DisplaySettingsPanel: React.FC = () => {
       <section style={{ display:'flex', gap:8 }}>
         <button
           style={{ flex:1, background:'var(--accent)', color:'#fff', border:'none', padding:'6px 10px', borderRadius:6, cursor:'pointer', fontWeight:600, boxShadow:'0 2px 6px rgba(0,0,0,0.45)' }}
-          onClick={()=>{ setGateSpan(0.66); setHoverFloor(0.12); setPulseSpeedState(1.0); setPulseBrightnessState(1.0); setPulseHead(0.25); setPulseTail(0.65); setPulseWidthState(0.15); setStarSizeScaleState(1.0); setAccentState('orange'); setShowShipDashState(true); }}
+          onClick={()=>{ setGateSpan(0.66); setHoverFloor(0.12); setPulseSpeedState(1.0); setPulseBrightnessState(1.0); setPulseHead(0.25); setPulseTail(0.65); setPulseWidthState(0.15); setStarSizeScaleState(1.0); setRouteThicknessState(1.0); setAccentState('orange'); setShowShipDashState(true); }}
         >Reset Display Defaults</button>
         <button
           style={{ flex:1, background:'var(--accent)', color:'#fff', border:'none', padding:'6px 10px', borderRadius:6, cursor:'pointer', fontWeight:600, boxShadow:'0 2px 6px rgba(0,0,0,0.45)' }}
