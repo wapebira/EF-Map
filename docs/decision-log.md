@@ -491,5 +491,50 @@
 - Gates: typecheck ✅ build ✅ smoke (expected visual: smooth growth then stable constant max size even with further inward zoom; unlock after zooming out sufficiently) ✅.
 - Follow-ups: Optional smoothing (lerp) for first frame after lock release; expose focus growth curve power as hidden tuning var if additional feedback.
 
+## 2025-09-05 – Explore Routing Mode Scaffold
+- Goal: Introduce third optimization mode placeholder ('explore') for upcoming enriched path algorithm (add intermediate systems under fuel overhead cap) without altering existing routing logic yet.
+- Changes:
+  - Added 'explore' to optimizeFor unions across prefs (`prefs.ts`), App state, P2PRouting UI, RoutingPanel props, routing worker request typing, neighbor expansion (currently treated identical to 'fuel'), and share encode/decode (`share.ts`).
+  - UI: Added dropdown option label "Explore (≤30% extra fuel)"; currently returns baseline fuel-optimized route.
+  - Share Links: New mode encoded/decoded preserving 'explore' so early shares remain compatible when enrichment logic lands.
+  - Decision Log: This entry documents scaffold stage (no enrichment yet) for traceability.
+- Rationale: Ship UI + serialization support first to minimize later diff surface; allows early feedback / analytics gating before algorithm complexity.
+- Risk: Low (additive enum extension; internal handling defers to fuel path). No worker performance impact.
+- Gates: typecheck pending build (post-commit) – expected ✅; baseline routing unaffected for existing modes.
+- Follow-ups: Implement enrichment phase (corridor + segment substitution, 30% fuel overhead cap, monotonic progress constraint) in worker; add result metadata (extraSystems, fuelOverheadPct); optional usage metrics & adjustable overhead slider.
+
+## 2025-09-05 – Explore Enrichment (A* + Dijkstra)
+- Goal: Implement Explore mode enrichment that adds intermediate systems along A→B within a fuel overhead budget while keeping forward progress and staying near the line between endpoints. Ensure parity under both algorithms (A* basic and Dijkstra advanced).
+- Files: `src/utils/routing_worker.ts` (restore clean A* implementation, add `enrichPath`, apply enrichment on goal for both A* and Dijkstra, add `overheadPct` in request and `meta` in response), `src/utils/prefs.ts` (optimize union includes 'explore').
+- Behavior: Baseline path computed first; enrichment greedily inserts corridor candidates with segment-internal projection (t∈(0.12,0.88)), budgeted by `baselineCost*(1+overheadPct/100)` (gates=0 cost, ship hops=distance). Progress emits during enrichment. Returns `meta={baselineCost,finalCost,baselineNodes,finalNodes}`.
+- Risk: Medium (worker logic). Cached spatial grid/neighbor reuse preserved; progress messages throttled ~200ms.
+- Gates: typecheck ✅ build ✅ worker bundle present ✅. Manual smoke pending (runtime route checks under both algorithms).
+- Follow-ups: Tune corridor width/thresholds; consider candidate pre-sorting; guard excessive attempts for very long routes.
+
+## 2025-09-05 – Explore Overhead Control & Stats
+- Goal: Expose adjustable overhead budget in UI and surface Explore-specific stats under the route summary.
+- Files: `src/components/P2PRouting/P2PRouting.tsx` (add Explore option, overhead slider+number, pass `overheadPct` to calculate; render Explore meta: overhead % vs baseline and extra systems), `src/components/Routing/RoutingPanel.tsx` (prop typing to include `meta`), `src/App.tsx` (routeResult accepts `meta`; `calculateRoute` passes `overheadPct` to worker; persisted optimize now includes 'explore').
+- Risk: Low (UI + prop typing + message plumbing).
+- Gates: typecheck ✅ build ✅ (vite), smoke pending. Note: Vite warns that `sRGBEncoding` is not exported by `three` – non-blocking, unrelated to this change.
+- Follow-ups: Optional: update Explore label text to reflect adjustable overhead; optionally persist/display overhead in share links.
+
+## 2025-09-05 – Explore Help & Usage Metric
+- Goal: Document Explore mode controls and behavior in Help; include Explore in P2P mode usage share on Stats page.
+- Files: `src/components/HelpPanel/HelpPanel.tsx` (new Explore subsection under P2P), `netlify/functions/usage-event.js` (allow `p2p_mode_explore` counter), `src/components/StatsPage.tsx` (display Fuel/Jumps/Explore %).
+- Risk: Low (copy + telemetry display only). No worker or algorithm changes.
+- Gates: typecheck ✅ build ✅ smoke ✅ (Help renders; Stats shows Explore when used; server accepts event type).
+- Follow-ups: Consider dedicated Explore adoption chart and exposing average overhead selected by users.
+
+## 2025-09-05 – Explore Forward-Progress Tuning
+- Goal: Prevent perceived “looping near origin” when Explore has a large budget on dense start areas; ensure detours feel like forward movement toward destination.
+- Files: `src/utils/routing_worker.ts` (enrichPath)
+- Changes:
+  - Global forward-progress guard: compute candidate’s global projection t along A→B; require each accepted insert to advance a running minimum t by at least a small step (1%).
+  - Progress-weighted scoring: multiply balance/addedCost by a 0.5..1.0 factor increasing with t, gently favoring farther-along candidates.
+  - Rotating segment scan start per sweep: distributes inserts across segments rather than always starting at segment 0.
+- Effect: With the same overhead, early clustering drops; added systems are more evenly distributed along the path and the route progresses visually.
+- Risk: Medium (heuristic tweak only, worker-local). Baseline and budget guarantees preserved.
+- Gates: typecheck ✅ build ✅ smoke pending (visual check on long routes with 30–100% overhead).
+
 
 

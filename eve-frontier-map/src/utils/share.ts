@@ -15,7 +15,7 @@ export interface P2PShareData {
   from: string;
   to: string;
   jump: number;
-  optimize: 'fuel'|'jumps';
+  optimize: 'fuel'|'jumps'|'explore';
   algo: 'astar'|'dijkstra';
   path: string[]; // full path including endpoints
 }
@@ -89,11 +89,12 @@ export function decodeShare(hash: string): ShareData | null {
   } else return null;
   if (!raw) return null;
   if (type === 'p') {
-    const [from, to, jumpStr, optimize, algo, pathStr] = raw.split(',');
+  const [from, to, jumpStr, optimize, algo, pathStr] = raw.split(',');
     if(!from || !to || !jumpStr || !optimize || !algo || pathStr===undefined) return null;
     const jump = parseFloat(jumpStr); if(!isFinite(jump)) return null;
     const path = pathStr ? pathStr.split(';').filter(Boolean) : [];
-    return { type:'p', from, to, jump, optimize: (optimize==='fuel'?'fuel':'jumps'), algo: (algo==='dijkstra'?'dijkstra':'astar'), path };
+  const optVal: 'fuel'|'jumps'|'explore' = optimize==='fuel' ? 'fuel' : (optimize==='explore' ? 'explore' : 'jumps');
+  return { type:'p', from, to, jump, optimize: optVal, algo: (algo==='dijkstra'?'dijkstra':'astar'), path };
   } else {
     const [start, returnFlag, pathStr] = raw.split(',');
     if(!start || returnFlag===undefined || pathStr===undefined) return null;

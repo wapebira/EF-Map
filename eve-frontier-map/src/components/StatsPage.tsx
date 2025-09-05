@@ -235,7 +235,7 @@ const StatsPage: React.FC = () => {
             <StatRow label="Cancelled" value={data.counters.p2p_cancelled||0} />
             <StatRow label="Cancellation rate" value={( ()=>{ const total=data.counters.p2p_routes||0; if(!total) return '—'; const c=data.counters.p2p_cancelled||0; return ((c/total)*100).toFixed(1)+'%'; })()} />
             <StatRow label="Algo (A*/Dij)" value={( ()=>{ const a=data.counters.p2p_algo_astar||0; const d=data.counters.p2p_algo_dijkstra||0; if(!a&&!d) return '—'; const t=a+d; return `${((a/t)*100).toFixed(0)}% / ${((d/t)*100).toFixed(0)}%`; })()} />
-            <StatRow label="Mode (Fuel/Jumps)" value={( ()=>{ const f=data.counters.p2p_mode_fuel||0; const j=data.counters.p2p_mode_jumps||0; if(!f&&!j) return '—'; const t=f+j; return `${((f/t)*100).toFixed(0)}% / ${((j/t)*100).toFixed(0)}%`; })()} />
+            <StatRow label="Mode (Fuel/Jumps/Explore)" value={( ()=>{ const f=data.counters.p2p_mode_fuel||0; const j=data.counters.p2p_mode_jumps||0; const x=data.counters.p2p_mode_explore||0; const t=f+j+x; if(!t) return '—'; const pf=((f/t)*100).toFixed(0); const pj=((j/t)*100).toFixed(0); const px=((x/t)*100).toFixed(0); return `${pf}% / ${pj}% / ${px}%`; })()} />
           </section>
           {/* Scout Optimization */}
           <section style={{ background:'rgba(255,255,255,0.06)', padding:'16px 18px', border:'1px solid rgba(255,255,255,0.15)', borderRadius:10, boxShadow:'0 2px 4px rgba(0,0,0,0.45)' }}>

@@ -5,10 +5,19 @@ import ScoutOptimizer from '../ScoutOptimizer/ScoutOptimizer';
 import ReachabilitySection from './ReachabilitySection';
 
 interface RoutingPanelProps {
-  onCalculateRoute: any;
+  onCalculateRoute: (
+    from: string,
+    to: string,
+    jumpDist: number,
+    optimize: 'fuel' | 'jumps' | 'explore',
+    algorithm: 'astar' | 'dijkstra',
+    overheadPct?: number,
+    exploreCorridorPct?: number,
+    exploreProgressBiasPct?: number,
+  ) => void;
   onStopCalculation?: () => void;
   isCalculating: boolean;
-  routeResult: { path: string[] | null; error?: string } | null;
+  routeResult: { path: string[] | null; error?: string; minRequiredShipRange?: number; meta?: { baselineCost?: number; finalCost?: number; baselineNodes?: number; finalNodes?: number } } | null;
   mapData: any;
   systemNames: string[];
   progress?: { explored: number; frontier: number; elapsedMs: number; message: string } | null;
@@ -31,9 +40,9 @@ interface RoutingPanelProps {
   onOptimizedRoute?:(path:string[])=>void;
   onScoutClearRoute?:()=>void;
   initialJumpDistance?: number;
-  initialOptimizeFor?: 'fuel' | 'jumps';
+  initialOptimizeFor?: 'fuel' | 'jumps' | 'explore';
   initialAlgorithm?: 'astar' | 'dijkstra';
-  onRoutingParamChange?:(jump:number,opt:'fuel'|'jumps',algo:'astar'|'dijkstra')=>void;
+  onRoutingParamChange?:(jump:number,opt:'fuel'|'jumps'|'explore',algo:'astar'|'dijkstra')=>void;
   // Planet legend filtering props
   planetBinsActive?: boolean[];
   minPlanets?: number;

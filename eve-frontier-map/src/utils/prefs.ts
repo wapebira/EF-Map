@@ -1,7 +1,7 @@
 // Centralized user preference persistence with versioning.
 // v8 removes ship dash animation related fields.
 
-export interface EFMapPreferencesV1 { v:1; accent:'orange'|'blue'; openPanels:string[]; lastJumpDistance?:number; optimizeFor?:'fuel'|'jumps'; algorithm?:'astar'|'dijkstra' }
+export interface EFMapPreferencesV1 { v:1; accent:'orange'|'blue'; openPanels:string[]; lastJumpDistance?:number; optimizeFor?:'fuel'|'jumps'|'explore'; algorithm?:'astar'|'dijkstra' }
 export interface EFMapPreferencesV2 extends Omit<EFMapPreferencesV1,'v'> { v:2; uiScale?:number; showStations?:boolean }
 export interface EFMapPreferencesV3 extends Omit<EFMapPreferencesV2,'v'> { v:3; overlaySort?:string; overlayAgingDays?:number; transmissionSeen?:boolean }
 export interface EFMapPreferencesV4 extends Omit<EFMapPreferencesV3,'v'> { v:4; transmissionAudioMuted?:boolean }
@@ -51,7 +51,7 @@ export function resetAllPrefs(){ currentPrefs={ ...defaultPrefsV11 }; try{ local
 export function setAccent(accent:'orange'|'blue'){ updatePrefs(p=>{ (p as any).accent=accent; }); }
 export function setOpenPanels(ids:string[]){ updatePrefs(p=>{ (p as any).openPanels=ids.slice(0); }); }
 export function setLastJumpDistance(d:number){ updatePrefs(p=>{ (p as any).lastJumpDistance=d; }); }
-export function setRoutingPrefs(jump:number,optimize:'fuel'|'jumps',algorithm:'astar'|'dijkstra'){ updatePrefs(p=>{ (p as any).lastJumpDistance=jump; (p as any).optimizeFor=optimize; (p as any).algorithm=algorithm; }); }
+export function setRoutingPrefs(jump:number,optimize:'fuel'|'jumps'|'explore',algorithm:'astar'|'dijkstra'){ updatePrefs(p=>{ (p as any).lastJumpDistance=jump; (p as any).optimizeFor=optimize; (p as any).algorithm=algorithm; }); }
 export function clearPanelPositions(){ try { const rm:string[]=[]; for(let i=0;i<localStorage.length;i++){ const k=localStorage.key(i); if(k&&k.startsWith('panel-pos:')) rm.push(k);} rm.forEach(k=> localStorage.removeItem(k)); } catch{} }
 export function fullReset(){ resetAllPrefs(); clearPanelPositions(); }
 export function softReset(){ resetAllPrefs(); }
