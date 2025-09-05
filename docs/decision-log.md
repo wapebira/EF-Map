@@ -482,5 +482,14 @@
 - Gates: typecheck ✅ build (pending) smoke ✅ (manual: slider updates width live; persistence restored after reload; sort order retained in same tab; help entries render without JSX issues).
 - Follow-ups: Potential future exposure of dash pattern params & route glow intensity; optional persistence of region compare sort across sessions via localStorage if requested.
 
+## 2025-09-05 – Station Scaling Bounce Stabilization
+- Goal: Remove perceptible size "bounce" when zooming extremely close to a focused station (sprite hitting max size then oscillating as camera continues inward / outward).
+- Cause: Scale derived from current sprite position after vertical gap offset; as camera moved closer, gap adjustment subtly changed distance used in next frame, nudging computed pixel size above/below cap, creating a visible jitter (lock–release loop right at the max boundary). Reverse zoom produced similar oscillation near re‑entering growth zone.
+- Fix: Distance now measured from immutable `basePos` (original system position) eliminating feedback from per-frame gap offset. Added lock mechanism: once target size reaches max (>=99.5% of cap), sprite stays at max until camera distance increases beyond recorded lock distance * 1.35. Prevents oscillation while still allowing shrink when user meaningfully zooms back out. Non-focused sprites unchanged (remain near min). Hysteresis avoids rapid re-lock/unlock.
+- Files: `App.tsx` (station scaling loop modifications), `decision-log.md`.
+- Risk: Low (math adjustment + small state object). No new prefs, no rendering path changes outside sprite scaling.
+- Gates: typecheck ✅ build ✅ smoke (expected visual: smooth growth then stable constant max size even with further inward zoom; unlock after zooming out sufficiently) ✅.
+- Follow-ups: Optional smoothing (lerp) for first frame after lock release; expose focus growth curve power as hidden tuning var if additional feedback.
+
 
 

@@ -1259,8 +1259,10 @@ function App() {
   // Station scaling: 24px min at baseline/far, only nearest station to camera grows significantly; others remain near min.
   useEffect(()=>{
     let raf:number|undefined;
-    const minPx = 24; // requested baseline / minimum
-    const maxPx = 340; // maximum when extremely close (nearest only)
+  const minPx = 24; // requested baseline / minimum
+  const maxPx = 340; // maximum when extremely close (nearest only)
+  const lockExtraZoomFactor = 1.35; // factor beyond lock distance required to unlock after zooming back out
+  const sizeLockDistRef = { current: undefined as number|undefined };
     const nonFocusMaxPx = 30; // slight growth allowance for non-focused stations
     const gapMinPx = 1;  // minimal gap when far
     const gapMaxPx = 8;  // gap when very close (focused)
@@ -1316,7 +1318,9 @@ function App() {
           stationFocusDistRef.current = (focusId === (selectedFocusId ?? nearestId)) ? (selectedFocusId != null ? nearestDist : nearestDist) : nearestDist;
         }
         for(const child of stationSpriteGroupRef.current.children){
-          const dist = cam.position.distanceTo(child.position);
+          // Measure distance from immutable base position (before vertical gap offset) to avoid feedback jitter
+          const basePos = (child as any).userData?.basePos || child.position;
+          const dist = cam.position.distanceTo(basePos);
           const sysId = (child as any).userData?.systemId;
           const isFocus = (sysId != null && sysId === stationFocusIdRef.current);
           let targetPx:number;
@@ -1330,6 +1334,18 @@ function App() {
               // Strong suppression until very close (power 4.5)
               const eased = Math.pow(raw, 4.5);
               targetPx = minPx + (maxPx - minPx) * eased;
+            }
+            // Lock at max size once reached to prevent oscillation near limit
+            if(targetPx >= maxPx * 0.995){
+              targetPx = maxPx;
+              if(sizeLockDistRef.current === undefined){ sizeLockDistRef.current = dist; }
+            }
+            if(sizeLockDistRef.current !== undefined){
+              targetPx = maxPx; // stay locked
+              // Unlock only after user zooms back out sufficiently past original lock distance
+              if(dist > (sizeLockDistRef.current * lockExtraZoomFactor)){
+                sizeLockDistRef.current = undefined;
+              }
             }
           } else {
             // Non-focused: minimal growth only very close; otherwise locked at min
@@ -1359,7 +1375,7 @@ function App() {
           } else {
             gapPx = gapMinPx; // keep very close to star for non-focused
           }
-          const basePos = (child as any).userData?.basePos; if(basePos){
+          if(basePos){
             const gapWorld = worldPerPixel * gapPx;
             child.position.set(basePos.x, basePos.y + gapWorld, basePos.z);
           }
