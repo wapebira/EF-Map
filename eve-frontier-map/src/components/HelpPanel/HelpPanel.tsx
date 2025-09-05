@@ -707,6 +707,42 @@ const baseSections: SectionDef[] = [
     ]
   },
   {
+    id: 'display-settings',
+    title: 'Display Settings',
+    subsections: [
+      {
+        id: 'display-overview',
+        title: 'Overview',
+        content: (
+          <div>
+            <p>Fine‑tune visual emphasis without committing to full Cinematic Mode. Controls here adjust core map clarity (star size scale), route readability (pulse brightness, dash visibility), and aesthetic intensity (pulse width separately controlled elsewhere). Changes apply immediately and persist between sessions.</p>
+            <ul style={{ paddingLeft:'18px', margin:'6px 0' }}>
+              <li><strong>Star Size Scale:</strong> Uniformly enlarges or shrinks rendered star sprites (helps legibility on high‑DPI or when filming).</li>
+              <li><strong>Pulse Brightness:</strong> Scales the luminosity of the route pulse effect without altering its timing or width.</li>
+              <li><strong>Dashed Ship Segments:</strong> Toggle static dash pattern for ship (non‑gate) jumps. Off = solid continuous ribbon for all segments.</li>
+              <li><strong>Reset:</strong> Returns all display sliders & toggles in this panel to defaults only (does not alter routing inputs or overlay data).</li>
+            </ul>
+            <p style={{marginTop:'6px'}}>Use these for subtle readability tweaks: increase star scale for dense screenshots, lower pulse brightness when overlapping multiple long routes, or disable dashes for a minimalist look.</p>
+          </div>
+        )
+      },
+      {
+        id: 'display-tips',
+        title: 'Practical Tips',
+        content: (
+          <div>
+            <ul style={{ paddingLeft:'18px', margin:'6px 0' }}>
+              <li>Higher star scale + bright pulse can visually dominate region/planet gradients—dial one back if colors feel washed.</li>
+              <li>Disable dashes when comparing two exported screenshots for distance differences—solid lines reduce visual noise.</li>
+              <li>Lower pulse brightness before entering Cinematic Mode if you plan to toggle between them; avoids stark contrast jumps.</li>
+              <li>After experimenting, use Reset to quickly return to the baseline rendering profile.</li>
+            </ul>
+          </div>
+        )
+      }
+    ]
+  },
+  {
     id: 'cinematic-mode',
     title: 'Cinematic Mode',
     subsections: [

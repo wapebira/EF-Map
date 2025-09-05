@@ -1,4 +1,8 @@
-.transmission-wrapper { position:fixed; top: calc(10px + 70px); /* below top toolbar (approx height) */ right:10px; width:560px; max-width:560px; z-index:3190; font-family: 'Fira Mono','Roboto Mono','IBM Plex Mono','Cousine','Consolas',monospace; pointer-events:auto; min-height:420px; }
+.transmission-wrapper { position:fixed; top: calc(10px + 70px); /* below top toolbar (approx height) */ right:10px; width:560px; max-width:560px; z-index:3190; font-family: 'Fira Mono','Roboto Mono','IBM Plex Mono','Cousine','Consolas',monospace; pointer-events:auto; min-height:420px; transition:right .28s ease; }
+/* When help panel is open, shift left so it does not sit underneath the sliding guide. */
+:root.help-open .transmission-wrapper { right: calc((var(--help-panel-width, 0px) + 20px)); }
+/* Mobile narrow override keeps existing centering behavior; guard so shift doesn't double-apply. */
+@media (max-width: 900px){ :root.help-open .transmission-wrapper { right:50%; transform:translateX(50%); } }
 @media (max-height: 860px){ .transmission-wrapper { top: calc(10px + 64px); } }
 @media (max-width: 900px){ .transmission-wrapper { right:50%; transform:translateX(50%); } }
 .transmission-bg { position:absolute; inset:0; background-size:cover; background-position:center; filter:brightness(.55) contrast(1.05) saturate(.9); border-radius:16px; }
@@ -28,6 +32,10 @@
 .ref-code { font-size:12px; opacity:.9; background:rgba(255,255,255,0.08); padding:4px 8px; border-radius:6px; border:1px solid rgba(255,255,255,0.15); }
 .transmission-footer { font-size:10px; opacity:.55; text-align:right; margin-top:-4px; }
 @media (max-width: 520px){ .transmission-wrapper { width:90vw; max-width:90vw; } .transmission-text{ max-height:300px;} }
+
+/* Replay pill shift mirrors transmission panel shift */
+:root.help-open .tx-replay-pill { right: calc((var(--help-panel-width, 0px) + 20px)) !important; }
+@media (max-width: 900px){ :root.help-open .tx-replay-pill { right:10px !important; transform:none !important; } }
 
 /* Major glitch burst overlay */
 .tx-major-glitch { position:absolute; inset:0; background:repeating-linear-gradient(90deg, rgba(255,255,255,0.18) 0 2px, rgba(0,0,0,0.05) 2px 4px); mix-blend-mode:screen; animation: majorGlitch 220ms steps(2,start) forwards; opacity:0; pointer-events:none; border-radius:16px; }

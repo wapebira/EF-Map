@@ -467,4 +467,26 @@
 - Verification: Build succeeds; manual smoke (intro plays once, fast forward cuts audio, echo lines append silently w/ visual glitches, replay triggers fresh intro w/ audio, no unsolicited intro restart after multiple echo cycles). `window.__efTxLog` shows expected ordered events.
 - Follow-ups: If spontaneous intro re-init ever logs without a user replay_trigger, capture stack trace hook (deferred until needed). Potential metric (transmission_replay_count) if operator wants adoption analytics for replay feature.
 
+## 2025-09-05 – Display Settings Panel, Prefs v9/v10 & Static Ship Dash Simplification
+- Goal: Introduce a consolidated Display Settings panel for core map visualization tuning (separate from Cinematic Mode) and simplify ship jump differentiation by removing animated dash motion while retaining an optional static pattern. Extend preferences schema for new controls while preserving backward compatibility.
+- Scope / Features:
+  - New Panel (`display-settings`): Gate selection gradient span, ship jump dashed toggle, route pulse tuning (speed, brightness, head/tail/width), star size scale, accent color toggle, hover precision floor, display + layout reset buttons.
+  - Static Ship Dash: Removed time-based dash phase animation; shader uniform `u_enableShipDash` toggles static dash brightness modulation per non-gate hop. Eliminated legacy `animateShipDashes` / speed prefs (v8 cleanup) and added `showShipDash` (v9) for simple enable/disable.
+  - Pulse Brightness & Star Size (v10): Added `pulseBrightness` (scales `u_pulseStrength`) and `starSizeScale` (applies to base starfield PointsMaterial). Bounds clamped to safe ranges (0.2–3.0, 0.5–1.5 respectively).
+  - Pref Migrations: v8 → v9 introduces `showShipDash` default true. v9 → v10 adds brightness + star scale with defaults. Migration chain updated to hydrate missing fields while retaining user values.
+  - Panel Cascade & Alignment: Added `display-settings` to managed auto-cascade set and initial reflow alignment array so it docks with existing left cluster (routing, cinematic, region stats, compare, user overlay).
+  - Transmission & Replay Pill Shift: CSS rules shift transmission panel and replay pill left when Help panel open (`:root.help-open`) to avoid overlap with sliding guide.
+  - Help Panel: Added new "Display Settings" section (positioned between User Overlay and Cinematic Mode) with Overview + Practical Tips subsections describing controls and usage patterns.
+  - Removed Toolbar Accent Checkbox: Accent color toggle moved inside Display Settings panel to reduce toolbar clutter.
+  - Layout Reset Integration: Display panel emits `ef-request-reset-layout` to central handler (reuses existing full reset logic including panel position purge and accent default revert).
+- Files: `App.tsx` (event listener, cascade integration, replay pill transition, toolbar cleanup), `DisplaySettingsPanel.tsx` (new), `prefs.ts` (schema v9/v10 + migrations + setters), `RouteRibbon.ts` (static dash uniform + pulse brightness application), `PanelDrawer.tsx` (base default entry), `TransmissionPanel.css` (help-open shift), `HelpPanel.tsx` (docs section), `decision-log.md` (this entry).
+- Risk: Medium (touches multiple UI & rendering modules) but changes are additive or simplifying (removing animation loop dependency) with bounded shader adjustments.
+- Verification / Gates: typecheck ✅ (no new TS errors), build pending (expected ✅), smoke checklist: (1) Open Display Settings; adjust sliders → immediate visual updates (pulse head/tail/brightness respond, star size changes) (2) Toggle dashed ship segments on/off → route ship hops reflect static dashes or solid lines (3) Reset Display Defaults resets values only (panel remains) (4) Reset Layout prompts & reverts panel positions, accent color, cascades (5) Help panel open shifts transmission UI left.
+- Performance Impact: Removed per-hop dash phase calculation branch; static dashes reduce fragment arithmetic slightly. Added uniform writes & small per-frame star size update only when changed (negligible). Event listener dispatch per setting change debounced with `requestAnimationFrame`.
+- Follow-ups:
+  - Potential additional Display Settings (see suggestions list in chat): adjustable route thickness, starfield brightness, gate gradient span slider, unreachable dimming, performance light mode.
+  - Consider persisting `uAccentSpan` as user-adjustable once UX validated.
+  - Integrate a global "Restore All Visual Defaults" spanning cinematic + display if requested.
+
+
 

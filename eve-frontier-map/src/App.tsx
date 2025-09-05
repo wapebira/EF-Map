@@ -11,6 +11,7 @@ import RegionHighlighterModule, { setRegionHighlightColors } from './modules/Reg
 import RegionStatsCard, { type RegionStats } from './components/RegionStatsCard';
 import CompareRegionsPanel from './components/CompareRegionsPanel';
 import UserOverlayPanel from './components/UserOverlay/UserOverlayPanel';
+import DisplaySettingsPanel from './components/DisplaySettingsPanel';
 import { userOverlayStore } from './utils/userOverlay';
 import { OVERLAY_FEATURE_FLAG } from './utils/userOverlay.ts';
 import { UserOverlayRings } from './modules/UserOverlayRings';
@@ -765,6 +766,68 @@ function App() {
   fragmentShader: `uniform float uNear; uniform float uFar; uniform float uMinBright; uniform float uMaxBright; uniform float uBoost; uniform float uOpacityNear; uniform float uOpacityFar; uniform float uGamma; uniform float uDebug; uniform vec3 uAccentColor; uniform float uAccentSpan; varying float vDist; varying vec3 vColor; varying float vSel;\nvoid main(){\n  float t = clamp((vDist - uNear)/(uFar - uNear), 0.0, 1.0);\n  float tg = pow(t, uGamma);\n  if(uDebug > 0.5){ vec3 c1=vec3(0.2,1.0,1.0); vec3 c2=vec3(1.0,1.0,0.2); vec3 c3=vec3(1.0,0.2,1.0); vec3 colDbg = mix(mix(c1,c2,tg), c3, smoothstep(0.5,1.0,tg)); float opDbg = mix(uOpacityNear,uOpacityFar,tg); gl_FragColor = vec4(colDbg, opDbg); return; }\n  float bright = mix(uMaxBright, uMinBright, tg);\n  float op = mix(uOpacityNear, uOpacityFar, tg);\n  vec3 baseCol = clamp(vColor * bright * uBoost, 0.0, 2.0);\n  float dFromSelected = 1.0 - vSel;\n  float accentT = 1.0 - clamp(dFromSelected / uAccentSpan, 0.0, 1.0);\n  accentT = smoothstep(0.0, 1.0, accentT);\n  vec3 accentCol = clamp(uAccentColor * bright * uBoost, 0.0, 2.0);\n  vec3 finalCol = mix(baseCol, accentCol, accentT);\n  gl_FragColor = vec4(finalCol, op);\n}`
     });
     return mat;
+  }, []);
+
+  // Listen for display settings updates (accent span etc.)
+  useEffect(() => {
+    const handler = (e: any) => {
+      if (e?.detail?.gateSpan != null && stargateMaterial?.uniforms?.uAccentSpan) {
+        stargateMaterial.uniforms.uAccentSpan.value = Math.max(0.0001, e.detail.gateSpan); // avoid divide by zero
+      }
+      // Accent color toggle moved into display settings panel
+      if(e?.detail?.accent){
+        const newAccent = e.detail.accent === 'blue';
+        setAccentIsBlue(newAccent);
+      }
+      if(e?.detail?.showShipDash != null){
+        (window as any).__efShowShipDash = !!e.detail.showShipDash;
+      }
+  // Ship dash animation removed (v8) – ignore legacy fields if present
+      // Pulse customization
+      if((window as any).__efPulseSettings){
+        const ps = (window as any).__efPulseSettings;
+        if(e?.detail?.pulseSpeed != null) ps.pulseSpeed = e.detail.pulseSpeed;
+        if(e?.detail?.pulseHead != null) ps.pulseHead = e.detail.pulseHead;
+        if(e?.detail?.pulseTail != null) ps.pulseTail = e.detail.pulseTail;
+        if(e?.detail?.pulseWidth != null) ps.pulseWidth = e.detail.pulseWidth;
+        if(e?.detail?.pulseBrightness != null) ps.pulseBrightness = e.detail.pulseBrightness;
+      } else {
+        (window as any).__efPulseSettings = { pulseSpeed: e?.detail?.pulseSpeed ?? 1.0, pulseHead: e?.detail?.pulseHead ?? 0.25, pulseTail: e?.detail?.pulseTail ?? 0.65, pulseWidth: e?.detail?.pulseWidth ?? 0.15, pulseBrightness: e?.detail?.pulseBrightness ?? 1.0 };
+      }
+      if(e?.detail?.starSizeScale != null){ (window as any).__efStarSizeScale = e.detail.starSizeScale; }
+      // Apply star size scaling immediately if star field material exists
+      try {
+        if((window as any).__efStarSizeScale != null && starFieldRef.current){
+          const base = 2.6; // original size from pointsMaterial definition
+          const mat = starFieldRef.current.material as THREE.PointsMaterial;
+          const scale = Math.max(0.5, Math.min(1.5, (window as any).__efStarSizeScale));
+          mat.size = base * scale;
+        }
+      } catch {}
+      // Force route ribbon materials to pick up new uniforms next frame
+    };
+    // Initialize ship dash global from prefs once
+    try {
+      const prefs = (window as any).localStorage ? JSON.parse(localStorage.getItem('efmap:prefs')||'{}') : {}; // lightweight fetch
+      (window as any).__efShowShipDash = prefs.showShipDash !== false; // default true
+    } catch { (window as any).__efShowShipDash = true; }
+    window.addEventListener('ef-display-settings-changed', handler as any);
+    return () => window.removeEventListener('ef-display-settings-changed', handler as any);
+  }, [stargateMaterial]);
+
+  // Handle layout reset request from Display Settings panel
+  useEffect(()=>{
+    const resetHandler = () => {
+      if(window.confirm('Reset panel positions and layout?')){
+        fullReset();
+        setOpenPanels(new Set());
+        setAccentIsBlue(false);
+        setResetToken(t=> t+1);
+        setLayoutResetToken(t=> t+1);
+      }
+    };
+    window.addEventListener('ef-request-reset-layout', resetHandler);
+    return ()=> window.removeEventListener('ef-request-reset-layout', resetHandler);
   }, []);
 
 
@@ -1703,6 +1766,7 @@ function App() {
   const regionStatsDrawerRef = useRef<PanelDrawerHandle|null>(null);
   const regionCompareDrawerRef = useRef<PanelDrawerHandle|null>(null);
   const userOverlayDrawerRef = useRef<PanelDrawerHandle|null>(null);
+  const displaySettingsDrawerRef = useRef<PanelDrawerHandle|null>(null);
   // Maintain legend in open order when toggled
   useEffect(()=>{
     setOpenPanelOrder(prev=>{
@@ -1726,7 +1790,7 @@ function App() {
   const autoOrderRef = useRef<string[]>([]); // current left-to-right order of auto-managed panels
   useLayoutEffect(()=>{
     const BASE_X = 140, BASE_Y = 70, GAP_X = 24;
-  const managed = (id:string)=> id==='routing' || id==='cinematic' || id==='planet-legend' || id==='region-stats' || id==='region-compare' || id==='user-overlay';
+  const managed = (id:string)=> id==='routing' || id==='cinematic' || id==='planet-legend' || id==='region-stats' || id==='region-compare' || id==='user-overlay' || id==='display-settings';
     const active = openPanelOrder.filter(id=> managed(id) && (id==='planet-legend'? isPlanetCountActive : openPanels.has(id)));
     const prevOrder = autoOrderRef.current;
     // Remove any that are no longer active
@@ -1747,6 +1811,7 @@ function App() {
   else if(id==='region-stats' && regionStatsDrawerRef.current) regionStatsDrawerRef.current.autoPosition(target);
   else if(id==='region-compare' && regionCompareDrawerRef.current) regionCompareDrawerRef.current.autoPosition(target);
   else if(id==='user-overlay' && userOverlayDrawerRef.current) userOverlayDrawerRef.current.autoPosition(target);
+  else if(id==='display-settings' && displaySettingsDrawerRef.current) displaySettingsDrawerRef.current.autoPosition(target);
   else if(id==='planet-legend') { try { window.dispatchEvent(new CustomEvent('ef:auto-pos', { detail:{ id, target, cascade:true } })); } catch {/* ignore */} }
     };
     const compactAll = () => {
@@ -1799,7 +1864,7 @@ function App() {
 
   // Specific nudge: if user-overlay is the ONLY managed panel opened first, re-run cascade after content paint to ensure same offset adjustments.
   useEffect(()=>{
-    const managedIds = ['routing','cinematic','planet-legend','region-stats','region-compare','user-overlay'];
+  const managedIds = ['routing','cinematic','planet-legend','region-stats','region-compare','user-overlay','display-settings'];
     const activeManaged = Array.from(openPanels).filter(id=> managedIds.includes(id) || (id==='planet-legend' && isPlanetCountActive));
     if(activeManaged.length===1 && activeManaged[0]==='user-overlay'){
       // skip if user has a stored position already
@@ -4215,7 +4280,7 @@ function App() {
             // Desired left is rail right edge + small gap; fallback to base 140 if rail is very narrow (safety)
             const desiredDrawerLeft = Math.round(railRect.left + railRect.width + 6);
             const drawerTop = Math.round(railRect.top); // align to rail top (should already match base 70 after scaling)
-            const drawerIds = ['routing','cinematic','region-stats','region-compare'];
+            const drawerIds = ['routing','cinematic','region-stats','region-compare','user-overlay','display-settings'];
             drawerIds.forEach(id=>{
               const storageKey = 'panel-pos:drawer-'+id;
               if(localStorage.getItem(storageKey)) return; // user customized
@@ -4509,7 +4574,7 @@ function App() {
   {!showTransmission && hasSeenTransmission && !hideUI && (
     <button
       className="tx-replay-pill"
-      style={{ position:'fixed', top: (10 + 70 + 8)+'px', right:10, zIndex:3191, background:'rgba(0,0,0,0.55)', border:'1px solid rgba(255,255,255,0.25)', color:'#fff', padding:'6px 10px', borderRadius:20, fontSize:12, cursor:'pointer', backdropFilter:'blur(6px) saturate(150%)', letterSpacing:'.5px' }}
+      style={{ position:'fixed', top: (10 + 70 + 8)+'px', right:10, zIndex:3191, background:'rgba(0,0,0,0.55)', border:'1px solid rgba(255,255,255,0.25)', color:'#fff', padding:'6px 10px', borderRadius:20, fontSize:12, cursor:'pointer', backdropFilter:'blur(6px) saturate(150%)', letterSpacing:'.5px', transition:'right .28s ease' }}
       onClick={()=>{ 
         try {
           (window as any).__efUserReplay = true; // explicit user intent flag
@@ -4587,8 +4652,8 @@ function App() {
               { id:'distance', type:'toggle', label:'Show Distance', display:(<>Show<br/>Distance</>), icon:null, active:showDistance, onToggle:()=> setShowDistance(v=> !v) },
               { id:'region-compare', type:'panel', label:'Compare Regions', display:(<>Compare<br/>Regions</>), icon:null, active:openPanels.has('region-compare'), onSelect:()=> togglePanel('region-compare') },
               { id:'user-overlay', type:'panel', label:'User Overlay', display:(<>User<br/>Overlay</>), icon:null, active:openPanels.has('user-overlay'), onSelect:()=> togglePanel('user-overlay') },
-              // onSelect emits compare_regions_open event in togglePanel extension below
-              { id:'reset-layout', type:'panel', label:'Reset Layout', display:(<>Reset<br/>Layout</>), icon:null, active:false, onSelect:()=> { if(window.confirm('Reset panel positions and layout?')) { fullReset(); setOpenPanels(new Set()); setAccentIsBlue(false); setResetToken(t=> t+1); setLayoutResetToken(t=> t+1); } } },
+              { id:'display-settings', type:'panel', label:'Display Settings', display:(<>Display<br/>Settings</>), icon:null, active:openPanels.has('display-settings'), onSelect:()=> togglePanel('display-settings') },
+              // Reset layout moved into Display Settings panel
             ] as any}
           />
         </div>
@@ -4712,16 +4777,17 @@ function App() {
               {generatePlanetCountLegend()}
             </PlanetLegendPanel>
           )}
+          {openPanels.has('display-settings') && (
+            <PanelDrawer ref={displaySettingsDrawerRef} id="display-settings" title="Display Settings" scale={uiScale} zIndex={panelZ['display-settings']||1450} onActivate={bringToFront} onClose={(id)=> setOpenPanels(p=> { const n=new Set(p); n.delete(id); return n; })}>
+              <DisplaySettingsPanel />
+            </PanelDrawer>
+          )}
           {/* StationsPanel removed: feature rail toggle directly controls icon sprites without extra popup */}
         </>
       )}
       {/* Persistent quick controls (never hidden so user can un-hide UI; not scaled for pointer stability) */}
       <div style={{ position: 'fixed', left: 10, bottom: 10, zIndex: 2000 }}>
         <div style={{ display:'flex', gap:'10px', alignItems:'center', flexWrap:'wrap' }}>
-          <label style={{ color: 'white', backgroundColor: 'rgba(0,0,0,0.5)', padding: '6px 8px', borderRadius: '6px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <input type="checkbox" checked={accentIsBlue} onChange={(e) => setAccentIsBlue(e.target.checked)} />
-            <span style={{ fontSize: '12px' }}>Use blue accent</span>
-          </label>
           <label style={{ color: 'white', backgroundColor: 'rgba(0,0,0,0.5)', padding: '6px 8px', borderRadius: '6px', display: 'flex', alignItems: 'center', gap: '8px' }}>
             <input type="checkbox" checked={hideUI} onChange={(e)=> setHideUI(e.target.checked)} />
             <span style={{ fontSize: '12px' }}>Hide UI</span>
