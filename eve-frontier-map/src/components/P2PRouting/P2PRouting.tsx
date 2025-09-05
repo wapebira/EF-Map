@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { track } from '../../utils/usage';
 import './P2PRouting.css';
 import AutoCompleteInput from '../AutoCompleteInput/AutoCompleteInput';
@@ -193,10 +194,19 @@ const formatRouteToNotes = (path: string[], mapData: MapData, options?: NoteForm
 // --- Component Logic ---
 
 interface P2PRoutingProps {
-  onCalculateRoute: (from: string, to: string, jumpDist: number, optimize: 'fuel' | 'jumps', algorithm: 'astar' | 'dijkstra') => void;
+  onCalculateRoute: (
+    from: string,
+    to: string,
+    jumpDist: number,
+    optimize: 'fuel' | 'jumps' | 'explore',
+    algorithm: 'astar' | 'dijkstra',
+    overheadPct?: number,
+    exploreCorridorPct?: number,
+    exploreProgressBiasPct?: number,
+  ) => void;
   onStopCalculation?: () => void;
   isCalculating: boolean;
-  routeResult: { path: string[] | null; error?: string; minRequiredShipRange?: number } | null;
+  routeResult: { path: string[] | null; error?: string; minRequiredShipRange?: number; meta?: { baselineCost?: number; finalCost?: number; baselineNodes?: number; finalNodes?: number } } | null;
   mapData: MapData | null;
   systemNames: string[];
   progress?: { explored: number; frontier: number; elapsedMs: number; message: string } | null;
@@ -214,9 +224,9 @@ interface P2PRoutingProps {
   onWaypointOptimizeChange?: (v: boolean)=>void;
   embedded?: boolean; // if true, omit outer toggle wrapper and always show panel
   initialJumpDistance?: number; // persisted default
-  initialOptimizeFor?: 'fuel' | 'jumps';
+  initialOptimizeFor?: 'fuel' | 'jumps' | 'explore';
   initialAlgorithm?: 'astar' | 'dijkstra';
-  onParamChange?: (jump:number, optimize:'fuel'|'jumps', algorithm:'astar'|'dijkstra')=>void;
+  onParamChange?: (jump:number, optimize:'fuel'|'jumps'|'explore', algorithm:'astar'|'dijkstra')=>void;
 }
 
 // Minimal neutral custom select (no accent colors) for consistent option highlight across platforms
@@ -227,17 +237,54 @@ interface NeutralSelectProps<T extends string> {
 const NeutralSelect = <T extends string>({ value, onChange, options, ariaLabel, id }: NeutralSelectProps<T>) => {
   const [open, setOpen] = useState(false);
   const [hoverIdx, setHoverIdx] = useState<number>(-1);
+  const [dropUp, setDropUp] = useState(false);
+  // maxHeight managed within portalStyle
+  const [portalStyle, setPortalStyle] = useState<{ left:number; top:number; width:number; maxHeight:number }|null>(null);
   const wrapRef = useRef<HTMLDivElement|null>(null);
+  const dropdownRef = useRef<HTMLDivElement|null>(null);
 
   const currentIdx = options.findIndex(o=>o.value===value);
 
   const close = useCallback(()=>{ setOpen(false); setHoverIdx(-1); },[]);
   const openList = useCallback(()=>{ setOpen(true); setHoverIdx(currentIdx>=0?currentIdx:0); },[currentIdx]);
 
+  // Measure available viewport space and decide dropdown direction + max height
+  const measure = useCallback(()=>{
+    if(!wrapRef.current) return;
+    const rect = wrapRef.current.getBoundingClientRect();
+    const margin = 12; // breathing room from window edge
+    const below = Math.floor(window.innerHeight - rect.bottom - margin);
+    const above = Math.floor(rect.top - margin);
+    const desired = 200;
+    let useDropUp:boolean; let maxH:number; let top:number;
+    if(below >= Math.min(desired, 160)){
+      useDropUp = false; maxH = Math.max(120, Math.min(desired, below)); top = Math.floor(rect.bottom + 4);
+    } else {
+      useDropUp = true; maxH = Math.max(120, Math.min(desired, above)); top = Math.floor(rect.top - 4); // will adjust for drop-up later
+    }
+    setDropUp(useDropUp);
+    const width = Math.floor(rect.width);
+    const left = Math.floor(rect.left);
+    const finalTop = useDropUp ? Math.max(8, top - maxH) : Math.min(window.innerHeight - 8, top);
+    setPortalStyle({ left, top: finalTop, width, maxHeight: maxH });
+  },[]);
+
   useEffect(()=>{
-    if(!open) return; const handler=(e:MouseEvent)=>{ if(wrapRef.current && !wrapRef.current.contains(e.target as Node)) close(); };
-    window.addEventListener('mousedown', handler); return ()=>window.removeEventListener('mousedown', handler);
-  },[open, close]);
+    if(!open) return;
+    const onDocMouseDown = (e:MouseEvent)=>{
+      const t = e.target as Node;
+      if(wrapRef.current && wrapRef.current.contains(t)) return;
+      if(dropdownRef.current && dropdownRef.current.contains(t)) return;
+      close();
+    };
+    const onResize = ()=> measure();
+    // Measure on open and on next frame in case layout shifts
+    measure(); const raf = requestAnimationFrame(measure);
+    window.addEventListener('resize', onResize);
+    window.addEventListener('scroll', onResize, true);
+    window.addEventListener('mousedown', onDocMouseDown);
+    return ()=>{ cancelAnimationFrame(raf); window.removeEventListener('resize', onResize); window.removeEventListener('scroll', onResize, true); window.removeEventListener('mousedown', onDocMouseDown); };
+  },[open, close, measure]);
 
   const onKey = (e: React.KeyboardEvent) => {
     if(e.key==='ArrowDown'){ e.preventDefault(); if(!open) openList(); else setHoverIdx(i=> Math.min(options.length-1, (i<0?0:i)+1)); }
@@ -247,14 +294,20 @@ const NeutralSelect = <T extends string>({ value, onChange, options, ariaLabel, 
   };
 
   return (
-    <div className="neutral-select-wrapper" ref={wrapRef}>
+    <div className={`neutral-select-wrapper${open?' open':''}`} ref={wrapRef}>
       <button id={id} type="button" aria-haspopup="listbox" aria-expanded={open} aria-label={ariaLabel}
         className="neutral-select-trigger" onClick={()=> open?close():openList()} onKeyDown={onKey}>
         <span>{options.find(o=>o.value===value)?.label || ''}</span>
         <span className="neutral-select-caret" />
       </button>
-      {open && (
-        <div role="listbox" className="neutral-select-dropdown" aria-activedescendant={hoverIdx>=0?`${id}-opt-${hoverIdx}`:undefined}>
+      {open && portalStyle && createPortal(
+        <div
+          ref={dropdownRef}
+          role="listbox"
+          className={`neutral-select-dropdown${dropUp?' drop-up':''}`}
+          aria-activedescendant={hoverIdx>=0?`${id}-opt-${hoverIdx}`:undefined}
+          style={{ position:'fixed', left: portalStyle.left, top: portalStyle.top, width: portalStyle.width, maxHeight: portalStyle.maxHeight, zIndex: 4000 }}
+        >
           {options.map((o,i)=>(
             <div key={o.value} id={`${id}-opt-${i}`} role="option" aria-selected={o.value===value}
               className={`neutral-select-option${i===hoverIdx?' hover':''}${o.value===value?' selected':''}`}
@@ -263,7 +316,8 @@ const NeutralSelect = <T extends string>({ value, onChange, options, ariaLabel, 
               {o.label}
             </div>
           ))}
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
@@ -273,8 +327,11 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
   const [fromSystem, setFromSystem] = useState('');
   const [toSystem, setToSystem] = useState('');
   const [jumpDistance, setJumpDistance] = useState(String(initialJumpDistance)); // editing this must not reset from/to
-  const [optimizeFor, setOptimizeFor] = useState<'fuel' | 'jumps'>(initialOptimizeFor);
+  const [optimizeFor, setOptimizeFor] = useState<'fuel' | 'jumps' | 'explore'>(initialOptimizeFor);
   const [algorithm, setAlgorithm] = useState<'astar' | 'dijkstra'>(initialAlgorithm);
+  const [exploreOverhead, setExploreOverhead] = useState<number>(30);
+  const [exploreCorridorPct, setExploreCorridorPct] = useState<number>(18); // 5..60 default 18
+  const [exploreProgressBiasPct, setExploreProgressBiasPct] = useState<number>(50); // 0..100 default 50
   // Simple debounce helper for jump distance persistence
   const debouncePersist = useRef<{ cancel:()=>void}|null>(null);
   const schedule = (fn:()=>void, ms:number) => {
@@ -343,7 +400,16 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
       alert('Please enter a valid jump distance.');
       return;
     }
-  onCalculateRoute(fromSystem, toSystem, distance, optimizeFor, algorithm);
+  onCalculateRoute(
+    fromSystem,
+    toSystem,
+    distance,
+    optimizeFor,
+    algorithm,
+    optimizeFor==='explore'?exploreOverhead:undefined,
+    optimizeFor==='explore'?exploreCorridorPct:undefined,
+    optimizeFor==='explore'?exploreProgressBiasPct:undefined,
+  );
   // Force persistence even if user hasn't changed fields since mount
   if(onParamChange) onParamChange(distance, optimizeFor, algorithm);
   };
@@ -480,13 +546,99 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
               id="optimize-for"
               ariaLabel="Optimize For"
               value={optimizeFor}
-              onChange={(v)=> { const val=v as 'fuel'|'jumps'; setOptimizeFor(val); if(onParamChange){ const dist=parseFloat(jumpDistance); if(!isNaN(dist)) onParamChange(dist, val, algorithm); } }}
+              onChange={(v)=> { const val=v as 'fuel'|'jumps'|'explore'; setOptimizeFor(val); if(onParamChange){ const dist=parseFloat(jumpDistance); if(!isNaN(dist)) onParamChange(dist, val, algorithm); } }}
               options={[
                 { value: 'fuel', label: 'Fuel (Prefer Gates)' },
                 { value: 'jumps', label: 'Jumps' },
+                { value: 'explore', label: 'Explore (extra fuel budget)' },
               ]}
             />
           </div>
+
+          {optimizeFor==='explore' && (
+            <div className="p2p-input-group">
+              <label htmlFor="explore-overhead">Explore Overhead Budget</label>
+              <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                <input
+                  id="explore-overhead"
+                  type="range"
+                  min={5}
+                  max={100}
+                  step={5}
+                  value={exploreOverhead}
+                  onChange={(e)=> setExploreOverhead(parseInt(e.target.value))}
+                  style={{ flex:1 }}
+                />
+                <input
+                  type="number"
+                  min={0}
+                  max={200}
+                  step={1}
+                  value={exploreOverhead}
+                  onChange={(e)=>{ const v = parseInt(e.target.value); if(!isNaN(v)) setExploreOverhead(Math.max(0, Math.min(200, v))); }}
+                  style={{ width:64 }}
+                />
+                <span>%</span>
+              </div>
+              <div style={{ fontSize:11, opacity:.7, marginTop:4 }}>Caps added fuel vs baseline. Higher values allow more detours.</div>
+              <div style={{ display:'flex', flexDirection:'column', gap:6, marginTop:10 }}>
+                <label htmlFor="explore-corridor" style={{ display:'flex', justifyContent:'space-between' }}>
+                  <span>Corridor Width</span>
+                  <span style={{ opacity:.75 }}>{exploreCorridorPct}%</span>
+                </label>
+                <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                  <input
+                    id="explore-corridor"
+                    type="range"
+                    min={5}
+                    max={60}
+                    step={1}
+                    value={exploreCorridorPct}
+                    onChange={(e)=> setExploreCorridorPct(parseInt(e.target.value))}
+                    style={{ flex:1 }}
+                  />
+                  <input
+                    type="number"
+                    min={5}
+                    max={60}
+                    step={1}
+                    value={exploreCorridorPct}
+                    onChange={(e)=>{ const v = parseInt(e.target.value); if(!isNaN(v)) setExploreCorridorPct(Math.max(5, Math.min(60, v))); }}
+                    style={{ width:64 }}
+                  />
+                  <span>%</span>
+                </div>
+                <div style={{ fontSize:11, opacity:.7 }}>Controls how far detours can stray from the A→B corridor.</div>
+                <label htmlFor="explore-progress-bias" style={{ display:'flex', justifyContent:'space-between', marginTop:6 }}>
+                  <span>Progress Bias</span>
+                  <span style={{ opacity:.75 }}>{exploreProgressBiasPct}%</span>
+                </label>
+                <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                  <input
+                    id="explore-progress-bias"
+                    type="range"
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={exploreProgressBiasPct}
+                    onChange={(e)=> setExploreProgressBiasPct(parseInt(e.target.value))}
+                    style={{ flex:1 }}
+                  />
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={exploreProgressBiasPct}
+                    onChange={(e)=>{ const v = parseInt(e.target.value); if(!isNaN(v)) setExploreProgressBiasPct(Math.max(0, Math.min(100, v))); }}
+                    style={{ width:64 }}
+                  />
+                  <span>%</span>
+                </div>
+                <div style={{ fontSize:11, opacity:.7 }}>Higher values favor later detours to spread points along the route.</div>
+              </div>
+            </div>
+          )}
 
           <div className="p2p-input-group">
             <label htmlFor="algorithm-select">Algorithm</label>
@@ -567,6 +719,12 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
                 <p>Ship Jump Distance: <span>{summary.shipJumpDistance.toFixed(2)} LY</span></p>
                 {routeCalcTimeMs !== null && routeCalcTimeMs !== undefined && (
                   <p>Calculation Time: <span>{(routeCalcTimeMs/1000).toFixed(2)} s</span></p>
+                )}
+                {optimizeFor==='explore' && routeResult?.meta && (
+                  <div style={{ marginTop:6, paddingTop:6, borderTop:'1px solid #333' }}>
+                    <p style={{ margin:0 }}>Explore Overhead: <span>{(Math.max(0, (((routeResult.meta.finalCost||0)/Math.max(1e-9,(routeResult.meta.baselineCost||0)) - 1) * 100))).toFixed(1)}%</span></p>
+                    <p style={{ margin:0 }}>Extra Systems vs Baseline: <span>{Math.max(0, ((routeResult.meta.finalNodes||0) - (routeResult.meta.baselineNodes||0)))}</span></p>
+                  </div>
                 )}
               </div>
             </div>

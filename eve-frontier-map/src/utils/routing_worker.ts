@@ -10,12 +10,23 @@ interface RoutingRequest {
   fromSystemName: string;
   toSystemName: string;
   maxJumpDistance: number;
-  optimizeFor: 'fuel' | 'jumps';
+  optimizeFor: 'fuel' | 'jumps' | 'explore';
   algorithm?: 'astar' | 'dijkstra';
   avoidSystemNames?: string[]; // optional list of systems to exclude
+  overheadPct?: number; // only for explore: allowed overhead percent (e.g., 30 = 30%)
+  // Explore tuning (optional)
+  exploreCorridorPct?: number; // width as % of AB length (default 18)
+  exploreProgressBiasPct?: number; // 0..100, higher prefers later detours (default 50)
 }
 
-interface RoutingResponse { path: string[] | null; error?: string; minRequiredShipRange?: number }
+interface ExploreMeta {
+  baselineCost: number;
+  finalCost: number;
+  baselineNodes: number;
+  finalNodes: number;
+}
+
+interface RoutingResponse { path: string[] | null; error?: string; minRequiredShipRange?: number; meta?: ExploreMeta }
 
 // Simple PQ for A*
 class PriorityQueue<T> {
@@ -105,7 +116,7 @@ const getNeighbors = (
   allSystems: SolarSystem[],
   stargates: { [key: string]: Stargate },
   maxJumpDist: number,
-  optimizeFor: 'fuel' | 'jumps',
+  optimizeFor: 'fuel' | 'jumps' | 'explore',
   systemsById: { [id: number]: SolarSystem }
 ): { system: SolarSystem; cost: number }[] => {
   const cacheKey = `${system.id}:${Math.max(1, Math.floor(maxJumpDist))}:${optimizeFor}`;
@@ -132,7 +143,7 @@ const getNeighbors = (
     return neighbors;
   }
 
-  if (optimizeFor === 'fuel') {
+  if (optimizeFor === 'fuel' || optimizeFor === 'explore') {
     // Add stargate connections (these are typically sparse)
     for (const gate of Object.values(stargates)) {
       if (gate.source_system_id === system.id) {
@@ -154,6 +165,104 @@ const getNeighbors = (
   return neighbors;
 };
 
+// --- Explore enrichment helper ---
+const enrichPath = (
+  basePath: string[],
+  systems: { [k:string]: SolarSystem },
+  stargates: { [k:string]: Stargate },
+  systemsByName: { [name:string]: SolarSystem },
+  startNode: SolarSystem,
+  endNode: SolarSystem,
+  overheadPct: number,
+    avoidSet: Set<string>,
+    opts?: { corridorFactor?: number; progressBias?: number }
+): { path: string[]; meta: ExploreMeta } => {
+  const gateEdge = (a:SolarSystem,b:SolarSystem)=> Object.values(stargates).some(g => (g.source_system_id===a.id && g.destination_system_id===b.id) || (g.source_system_id===b.id && g.destination_system_id===a.id));
+  let baselineCost = 0;
+  for(let i=0;i<basePath.length-1;i++){ const A = systemsByName[basePath[i].toLowerCase()]; const B = systemsByName[basePath[i+1].toLowerCase()]; if(!A||!B) continue; baselineCost += gateEdge(A,B)?0:heuristic(A,B); }
+  const budget = baselineCost * (1 + Math.max(0, overheadPct)/100);
+  let currentCost = baselineCost;
+  let enrichedPath = [...basePath];
+  // Precompute vector start->end for corridor
+  const startPos = startNode.position; const endPos = endNode.position;
+  const ab = { x:endPos.x-startPos.x, y:endPos.y-startPos.y, z:endPos.z-startPos.z };
+  const abLen = Math.sqrt(ab.x*ab.x + ab.y*ab.y + ab.z*ab.z) || 1;
+  const abLen2 = abLen*abLen;
+    const corridorFactor = Math.max(0.02, Math.min(0.6, opts?.corridorFactor ?? 0.18));
+    const lateralThreshold = abLen * corridorFactor; // tunable width factor
+  const lateralThreshold2 = lateralThreshold*lateralThreshold;
+  const systemsList = Object.values(systems);
+  const used = new Set(enrichedPath.map(n=> n.toLowerCase()));
+  // distance^2 to AB line segment
+  const dist2ToLine = (p:Position) => {
+    const apx = p.x - startPos.x, apy = p.y - startPos.y, apz = p.z - startPos.z;
+    const t = Math.max(0, Math.min(1, (apx*ab.x + apy*ab.y + apz*ab.z)/abLen2));
+    const projx = startPos.x + ab.x*t, projy = startPos.y + ab.y*t, projz = startPos.z + ab.z*t;
+    const dx = p.x - projx, dy = p.y - projy, dz = p.z - projz; return dx*dx+dy*dy+dz*dz;
+  };
+  // Pre-filter corridor candidates not in avoid list and not already used
+  const candidateSystems = systemsList.filter(s => !used.has(s.name.toLowerCase()) && !avoidSet.has(s.name.toLowerCase()) && dist2ToLine(s.position) <= lateralThreshold2);
+  const sysLower = (n:string)=> systemsByName[n.toLowerCase()];
+  // Global forward-progress guard along AB: require each insert to advance a running minimum t
+  // Start near 0 (2% along the route) and increase after each accepted insert to prevent early clustering
+  let minGlobalT = 0.02;
+  const progressBias = Math.max(0, Math.min(1, opts?.progressBias ?? 0.5));
+  const minStepT = 0.005 + 0.025 * progressBias; // 0.5%..3.0% per accepted insert
+  // Rotating segment scan start to distribute inserts across the path
+  let sweep = 0;
+  let attempts = 0; const MAX_ATTEMPTS = 800; let improved = true;
+  while(improved && attempts < MAX_ATTEMPTS){
+    improved = false; attempts++;
+    const segCount = Math.max(0, enrichedPath.length-1);
+    const startIdx = segCount>0 ? (sweep % segCount) : 0;
+    for(let s=0;s<segCount && attempts<MAX_ATTEMPTS;s++){
+      const i = (startIdx + s) % segCount;
+      const AName = enrichedPath[i]; const BName = enrichedPath[i+1];
+      const A = sysLower(AName); const B = sysLower(BName); if(!A||!B) continue;
+      const baseSegCost = gateEdge(A,B)?0:heuristic(A,B);
+      const segVec = { x:B.position.x-A.position.x, y:B.position.y-A.position.y, z:B.position.z-A.position.z };
+      const segLen2 = segVec.x*segVec.x + segVec.y*segVec.y + segVec.z*segVec.z || 1;
+      interface InsertCandidate { name:string; addedCost:number; score:number; tGlobal:number }
+      let bestInsert: InsertCandidate | null = null;
+      for(const cand of candidateSystems){
+        if(used.has(cand.name.toLowerCase())) continue;
+        const acx = cand.position.x - A.position.x, acy=cand.position.y - A.position.y, acz=cand.position.z - A.position.z;
+        const tSeg = (acx*segVec.x + acy*segVec.y + acz*segVec.z)/segLen2;
+        if(tSeg <= 0.12 || tSeg >= 0.88) continue;
+        // Global projection t along AB for forward progress enforcement
+        const apx = cand.position.x - startPos.x, apy = cand.position.y - startPos.y, apz = cand.position.z - startPos.z;
+        const tGlobal = Math.max(0, Math.min(1, (apx*ab.x + apy*ab.y + apz*ab.z)/abLen2));
+        if(tGlobal + 1e-6 < minGlobalT + minStepT) continue; // does not advance global progress sufficiently
+        const costAC = gateEdge(A,cand)?0:heuristic(A,cand);
+        const costCB = gateEdge(cand,B)?0:heuristic(cand,B);
+        const newSegCost = costAC + costCB;
+        const added = newSegCost - baseSegCost;
+        if(added <= 0) continue;
+        const newTotal = currentCost + added;
+        if(newTotal > budget) continue;
+        const balance = 1 - Math.abs(tSeg - 0.5)*2;
+        // Progress-weighted scoring prefers candidates further along AB without ignoring balance/cost
+  const progressWeight = 0.3 + 0.7 * progressBias; // 0.3..1.0
+  const progressBoost = Math.min(1.5, 0.5 + progressWeight * tGlobal); // ~0.5..1.5 multiplier
+        const score = (balance * progressBoost) / (added + 1e-6);
+        if(!bestInsert || score > bestInsert.score){ bestInsert = { name:cand.name, addedCost: added, score, tGlobal }; }
+      }
+      if(bestInsert){
+        enrichedPath.splice(i+1,0,bestInsert.name);
+        used.add(bestInsert.name.toLowerCase());
+        currentCost += bestInsert.addedCost;
+        // Raise the global min t to the accepted candidate's t (minus a small margin)
+        minGlobalT = Math.max(minGlobalT, Math.min(1, bestInsert.tGlobal));
+        improved = true; attempts++;
+        try { (self as any).postMessage({ type:'progress', explored: attempts, frontier: enrichedPath.length, elapsedMs: Date.now(), message:`Enriched +1 (${enrichedPath.length} systems, ${Math.floor((currentCost/baselineCost-1)*100)}% overhead)` }); } catch {}
+      }
+      if(currentCost > budget*0.995) break;
+    }
+    sweep++;
+  }
+  return { path: enrichedPath, meta: { baselineCost, finalCost: currentCost, baselineNodes: basePath.length, finalNodes: enrichedPath.length } };
+};
+
 // --- A* (basic) ---
 // Fast existence probe using spatial grid + BFS (gates + ship jumps up to threshold).
 const existsPathWithin = (
@@ -167,7 +276,6 @@ const existsPathWithin = (
   if(from.id === to.id) return true;
   const allSystems = Object.values(systems);
   const cellSize = Math.max(1, Math.floor(maxJump));
-  // Build or reuse grid (reuse spatialGrids)
   let grid = spatialGrids.get(cellSize);
   if(!grid){
     grid = buildGrid(cellSize, allSystems);
@@ -176,7 +284,6 @@ const existsPathWithin = (
   const visited = new Set<number>();
   const q:number[] = [from.id];
   visited.add(from.id);
-  // Pre-build gate adjacency for fast gate expansion for this scan
   const gateAdjLocal = new Map<number, number[]>();
   for(const g of Object.values(stargates)){
     if(!gateAdjLocal.has(g.source_system_id)) gateAdjLocal.set(g.source_system_id, []);
@@ -187,11 +294,9 @@ const existsPathWithin = (
   while(q.length){
     const curId = q.shift()!;
     if(curId === to.id) return true;
-    // Gate neighbors
     for(const ng of gateAdjLocal.get(curId)||[]){
       if(!visited.has(ng)){ visited.add(ng); q.push(ng); if(ng===to.id) return true; }
     }
-    // Ship neighbors (spatial grid query)
     const cur = systemsById[curId]; if(!cur) continue;
     const ix = Math.floor(cur.position.x / cellSize);
     const iy = Math.floor(cur.position.y / cellSize);
@@ -205,9 +310,7 @@ const existsPathWithin = (
           for(const cand of bucket){
             if(cand.id === curId || visited.has(cand.id)) continue;
             const d = heuristic(cur, cand);
-            if(d <= maxJump){
-              visited.add(cand.id); q.push(cand.id); if(cand.id===to.id) return true;
-            }
+            if(d <= maxJump){ visited.add(cand.id); q.push(cand.id); if(cand.id===to.id) return true; }
           }
         }
       }
@@ -216,6 +319,7 @@ const existsPathWithin = (
   return false;
 };
 
+// --- A* (basic) ---
 const findPathAstar = (request: RoutingRequest): RoutingResponse => {
   const { systems, stargates, fromSystemName, toSystemName, maxJumpDistance, optimizeFor, avoidSystemNames } = request;
 
@@ -243,10 +347,8 @@ const findPathAstar = (request: RoutingRequest): RoutingResponse => {
   fScore[startNode.id] = heuristic(startNode, endNode);
 
   const allSystemsList = Object.values(systems);
-
   const avoidSet = new Set<string>((avoidSystemNames||[]).map(n=> n.toLowerCase()).filter(n=> n!==fromSystemName.toLowerCase() && n!==toSystemName.toLowerCase()));
 
-  // Progress instrumentation
   const startTime = Date.now();
   let lastEmit = 0;
   let exploredCount = 0;
@@ -255,7 +357,33 @@ const findPathAstar = (request: RoutingRequest): RoutingResponse => {
     const current = openSet.dequeue()!;
     exploredCount++;
 
-    if (current.id === endNode.id) return { path: reconstructPath(cameFrom, current, systemsById) };
+    if (current.id === endNode.id) {
+      const basePath = reconstructPath(cameFrom, current, systemsById);
+      if(optimizeFor !== 'explore') return { path: basePath };
+      try { (self as any).postMessage({ type:'progress', explored: basePath.length, frontier: 0, elapsedMs: Date.now(), message:'Baseline path found – enriching (Explore mode)' }); } catch {}
+      try {
+        const overhead = typeof request.overheadPct === 'number' ? request.overheadPct : 30;
+        const avoidSet2 = new Set<string>((avoidSystemNames||[]).map(n=> n.toLowerCase()));
+        const opts = {
+          corridorFactor: ((request.exploreCorridorPct ?? 18) / 100),
+          progressBias: ((request.exploreProgressBiasPct ?? 50) / 100),
+        };
+        const { path, meta } = enrichPath(basePath, systems, stargates, systemsByName, startNode, endNode, overhead, avoidSet2, opts);
+        return { path, meta };
+      } catch {
+        // Fallback: still provide baseline meta so UI can show 0% overhead and 0 extra systems
+        let baselineCost = 0;
+        for(let i=0;i<basePath.length-1;i++){
+          const A = systemsByName[basePath[i].toLowerCase()];
+          const B = systemsByName[basePath[i+1].toLowerCase()];
+          if(!A||!B) continue;
+          const isGate = Object.values(stargates).some(g => (g.source_system_id===A.id && g.destination_system_id===B.id) || (g.source_system_id===B.id && g.destination_system_id===A.id));
+          baselineCost += isGate ? 0 : heuristic(A,B);
+        }
+        const meta = { baselineCost, finalCost: baselineCost, baselineNodes: basePath.length, finalNodes: basePath.length };
+        return { path: basePath, meta };
+      }
+    }
 
     const neighbors = getNeighbors(current, allSystemsList, stargates, maxJumpDistance, optimizeFor, systemsById)
       .filter(n => !avoidSet.has(n.system.name.toLowerCase()));
@@ -270,50 +398,37 @@ const findPathAstar = (request: RoutingRequest): RoutingResponse => {
       }
     }
 
-    // Throttled progress emission every ~200ms
     const now = Date.now();
     if(now - lastEmit >= 200){
       lastEmit = now;
-      try {
-        // @ts-ignore worker context
-        self.postMessage({ type:'progress', explored: exploredCount, frontier: openSet.size(), elapsedMs: now - startTime, message: `Explored ${exploredCount} nodes` });
-      } catch { /* ignore */ }
+      try { (self as any).postMessage({ type:'progress', explored: exploredCount, frontier: openSet.size(), elapsedMs: now - startTime, message: `Explored ${exploredCount} nodes` }); } catch {}
     }
   }
 
-  // Path not found: approximate minimal required ship range by probing existence with increasing jump distance
   let minRequired: number | undefined = undefined;
   try {
     const direct = heuristic(startNode, endNode);
     if(direct <= request.maxJumpDistance + 1e-6){
-      minRequired = direct; // should have succeeded, fallback to direct
+      minRequired = direct;
     } else {
       let low = request.maxJumpDistance;
       let high = Math.min(direct, Math.max(low*2, low + 1));
-      const systemsById: { [id:number]: SolarSystem } = {}; Object.values(systems).forEach(s=> systemsById[s.id]=s);
-      // Exponential expansion
-      while(high < direct + 1e-6 && !existsPathWithin(systems, stargates, startNode, endNode, high, systemsById)){
-        low = high;
-        high = Math.min(direct, high * 2);
-        if(high >= direct - 1e-6) break;
+      const systemsByIdMap: { [id:number]: SolarSystem } = {}; Object.values(systems).forEach(s=> systemsByIdMap[s.id]=s);
+      while(high < direct + 1e-6 && !existsPathWithin(systems, stargates, startNode, endNode, high, systemsByIdMap)){
+        low = high; high = Math.min(direct, high * 2); if(high >= direct - 1e-6) break;
       }
-      let pathExistsAtHigh = existsPathWithin(systems, stargates, startNode, endNode, high, systemsById);
+      let pathExistsAtHigh = existsPathWithin(systems, stargates, startNode, endNode, high, systemsByIdMap);
       if(!pathExistsAtHigh){
-        minRequired = direct; // could not find path even at direct distance threshold
+        minRequired = direct;
       } else {
-        // Binary refine
         for(let i=0;i<7;i++){
           const mid = (low + high) / 2;
-            if(existsPathWithin(systems, stargates, startNode, endNode, mid, systemsById)){
-              high = mid;
-            } else {
-              low = mid;
-            }
+          if(existsPathWithin(systems, stargates, startNode, endNode, mid, systemsByIdMap)) high = mid; else low = mid;
         }
         minRequired = high;
       }
     }
-  } catch { /* ignore */ }
+  } catch {}
   return { path: null, error: 'No path found.', minRequiredShipRange: minRequired };
 };
 
@@ -403,7 +518,32 @@ const findPathDijkstra = (request: RoutingRequest): RoutingResponse => {
     if (visited[current.id]) continue;
     visited[current.id] = true;
 
-    if (current.id === endNode.id) return { path: reconstructPath(prev, current, systemsById) };
+    if (current.id === endNode.id) {
+      const basePath = reconstructPath(prev, current, systemsById);
+      if(optimizeFor !== 'explore') return { path: basePath };
+      try { (self as any).postMessage({ type:'progress', explored: basePath.length, frontier: 0, elapsedMs: Date.now(), message:'Baseline path found – enriching (Explore mode)' }); } catch {}
+      try {
+        const overhead = typeof request.overheadPct === 'number' ? request.overheadPct : 30;
+        const avoidSet = new Set<string>((avoidSystemNames||[]).map(n=> n.toLowerCase()));
+        const opts = {
+          corridorFactor: ((request.exploreCorridorPct ?? 18) / 100),
+          progressBias: ((request.exploreProgressBiasPct ?? 50) / 100),
+        };
+        const { path, meta } = enrichPath(basePath, systems, stargates, systemsByName, startNode, endNode, overhead, avoidSet, opts);
+        return { path, meta };
+      } catch {
+        let baselineCost = 0;
+        for(let i=0;i<basePath.length-1;i++){
+          const A = systemsByName[basePath[i].toLowerCase()];
+          const B = systemsByName[basePath[i+1].toLowerCase()];
+          if(!A||!B) continue;
+          const isGate = Object.values(stargates).some(g => (g.source_system_id===A.id && g.destination_system_id===B.id) || (g.source_system_id===B.id && g.destination_system_id===A.id));
+          baselineCost += isGate ? 0 : heuristic(A,B);
+        }
+        const meta = { baselineCost, finalCost: baselineCost, baselineNodes: basePath.length, finalNodes: basePath.length };
+        return { path: basePath, meta };
+      }
+    }
 
   const neighbors = getNeighbors(current, allSystemsList, stargates, maxJumpDistance, optimizeFor, systemsById)
     .filter(n => !avoidSet.has(n.system.name.toLowerCase()));

@@ -601,12 +601,13 @@ function App() {
   // State for P2P Routing
   const routingWorkerRef = useRef<Worker | null>(null);
   const [isCalculatingRoute, setIsCalculatingRoute] = useState(false);
-  const [routeResult, setRouteResult] = useState<{ path: string[] | null; error?: string; minRequiredShipRange?: number } | null>(null);
+  const [routeResult, setRouteResult] = useState<{ path: string[] | null; error?: string; minRequiredShipRange?: number; meta?: { baselineCost?: number; finalCost?: number; baselineNodes?: number; finalNodes?: number } } | null>(null);
   const [scoutRouteResult, setScoutRouteResult] = useState<{ path: string[] | null } | null>(null);
   const [scoutInvalidateToken, setScoutInvalidateToken] = useState(0);
   const [routeProgress, setRouteProgress] = useState<{ explored: number; frontier: number; elapsedMs: number; message: string } | null>(null);
   const [shareFeedback, setShareFeedback] = useState('');
-  const lastP2PParamsRef = useRef<{ jump:number; optimize:'fuel'|'jumps'; algo:'astar'|'dijkstra'; from?:string; to?:string }>({ jump:60, optimize:'fuel', algo:'astar' });
+  // Include 'explore' scaffold mode; behaves like 'fuel' until enrichment algorithm added.
+  const lastP2PParamsRef = useRef<{ jump:number; optimize:'fuel'|'jumps'|'explore'; algo:'astar'|'dijkstra'; from?:string; to?:string }>({ jump:60, optimize:'fuel', algo:'astar' });
 
   // New state for labels
   const hoverLabelObj = useRef<CSS2DObject | null>(null);
@@ -1609,13 +1610,13 @@ function App() {
       const worker = new Worker(new URL('./utils/routing_worker.ts', import.meta.url), { type: 'module' });
       routingWorkerRef.current = worker;
 
-      worker.onmessage = (e) => {
+    worker.onmessage = (e) => {
         const data = e.data;
         if (data && data.type === 'progress') {
           setRouteProgress({ explored: data.explored ?? 0, frontier: data.frontier ?? 0, elapsedMs: data.elapsedMs ?? 0, message: data.message ?? '' });
           return;
         }
-  const { path, error, minRequiredShipRange } = data;
+  const { path, error, minRequiredShipRange, meta } = data;
         setIsCalculatingRoute(false);
         // compute and store elapsed time if we started one
         if (routeCalcStartRef.current) {
@@ -1631,10 +1632,10 @@ function App() {
           } else {
             alert(`Routing Error: ${error}`);
           }
-          setRouteResult({ path: null, error, minRequiredShipRange });
+          setRouteResult({ path: null, error, minRequiredShipRange, meta });
           return;
         }
-        setRouteResult({ path, error: undefined });
+        setRouteResult({ path, error: undefined, meta });
         try {
           const hops = path ? Math.max(0, path.length-1) : 0;
           const algoUsed = (lastP2PParamsRef.current?.algo) || 'astar';
@@ -1916,7 +1917,7 @@ function App() {
 
   // Routing persisted param state for initial props
   const [persistedJump, setPersistedJump] = useState<number>(initialPrefsRef.current.lastJumpDistance ?? lastP2PParamsRef.current.jump);
-  const [persistedOptimize, setPersistedOptimize] = useState<'fuel'|'jumps'>(initialPrefsRef.current.optimizeFor ?? lastP2PParamsRef.current.optimize);
+  const [persistedOptimize, setPersistedOptimize] = useState<'fuel'|'jumps'|'explore'>(initialPrefsRef.current.optimizeFor ?? lastP2PParamsRef.current.optimize);
   const [persistedAlgo, setPersistedAlgo] = useState<'astar'|'dijkstra'>(initialPrefsRef.current.algorithm ?? lastP2PParamsRef.current.algo);
   // Scout ship range persists inside ScoutOptimizer component; no App-level state needed
 
@@ -1999,7 +2000,7 @@ function App() {
         setRouteProgress({ explored: data.explored ?? 0, frontier: data.frontier ?? 0, elapsedMs: data.elapsedMs ?? 0, message: data.message ?? '' });
         return;
       }
-  const { path, error, minRequiredShipRange } = data;
+  const { path, error, minRequiredShipRange, meta } = data;
       setIsCalculatingRoute(false);
       if (routeCalcStartRef.current) {
         const elapsed = Date.now() - routeCalcStartRef.current;
@@ -2013,10 +2014,10 @@ function App() {
         } else {
           alert(`Routing Error: ${error}`);
         }
-        setRouteResult({ path: null, error, minRequiredShipRange });
+        setRouteResult({ path: null, error, minRequiredShipRange, meta });
         return;
       }
-        setRouteResult({ path, error: undefined });
+        setRouteResult({ path, error: undefined, meta });
         try {
           const hops = path ? Math.max(0, path.length-1) : 0;
           const algoUsed = (lastP2PParamsRef.current?.algo) || 'astar';
@@ -2036,7 +2037,7 @@ function App() {
     };
   }, [mapData, selectSystem]);
 
-  const calculateRoute = useCallback((fromSystemName: string, toSystemName: string, maxJumpDistance: number, optimizeFor: 'fuel' | 'jumps', algorithm: 'astar' | 'dijkstra') => {
+  const calculateRoute = useCallback((fromSystemName: string, toSystemName: string, maxJumpDistance: number, optimizeFor: 'fuel' | 'jumps' | 'explore', algorithm: 'astar' | 'dijkstra', overheadPct?: number, exploreCorridorPct?: number, exploreProgressBiasPct?: number) => {
   try { (window as any).__efMarkFirstRouteStarted && (window as any).__efMarkFirstRouteStarted(); } catch {}
     try { (lastP2PParamsRef as any).current = { jump:maxJumpDistance, optimize:optimizeFor, algo:algorithm, from:fromSystemName, to:toSystemName }; } catch(e) { /* ignore */ }
     if (!mapData) { alert('Map data is not loaded yet.'); return; }
@@ -2087,13 +2088,25 @@ function App() {
 
     setIsCalculatingRoute(true); setRouteResult(null); setRouteCalcTimeMs(null); routeCalcStartRef.current = Date.now();
   const cancelRef = { value:false }; (calculateRoute as any)._cancelRef = cancelRef;
-    const fullPath: string[] = []; let segIndex = 0;
+  const fullPath: string[] = []; let segIndex = 0;
+  const segmentMetas: Array<{ baselineCost:number; finalCost:number; baselineNodes:number; finalNodes:number } | null> = [];
     const runNext = () => {
       if(cancelRef.value){ setIsCalculatingRoute(false); setRouteProgress(null); return; }
       if(segIndex >= segments.length){
         setIsCalculatingRoute(false);
         setRouteProgress(null);
-        setRouteResult({ path: fullPath });
+        let combinedMeta: { baselineCost:number; finalCost:number; baselineNodes:number; finalNodes:number } | undefined;
+        if(segmentMetas.length > 0 && (lastP2PParamsRef.current?.optimize === 'explore')){
+          let bCost = 0, fCost = 0, bNodes = 0, fNodes = 0;
+          let segsWithMeta = 0;
+          for(const m of segmentMetas){ if(m){ bCost += m.baselineCost; fCost += m.finalCost; bNodes += m.baselineNodes; fNodes += m.finalNodes; segsWithMeta++; } }
+          if(segsWithMeta > 0){
+            // Adjust node counts to account for shared junctions across segments
+            const junctions = Math.max(0, segments.length - 1);
+            combinedMeta = { baselineCost: bCost, finalCost: fCost, baselineNodes: Math.max(0, bNodes - junctions), finalNodes: Math.max(0, fNodes - junctions) };
+          }
+        }
+        setRouteResult({ path: fullPath, ...(combinedMeta ? { meta: combinedMeta } : {}) });
         try {
           const elapsed = routeCalcStartRef.current ? Date.now() - routeCalcStartRef.current : undefined;
           track({ type:'p2p_route' });
@@ -2123,10 +2136,17 @@ function App() {
       routingWorkerRef.current.onmessage = (e) => {
         const data = e.data;
         if(data && data.type==='progress') { setRouteProgress(p=> ({ ...(p||{}), ...data })); return; }
-  const { path, error, minRequiredShipRange } = data;
+  const { path, error, minRequiredShipRange, meta } = data;
         if(error || !path){
           setIsCalculatingRoute(false); setRouteProgress(null); setRouteResult({ path:null, error: error || `No path for segment ${segFrom} → ${segTo}` , minRequiredShipRange }); return;
         }
+        // capture per-segment meta (Explore mode)
+        segmentMetas[segIndex] = (meta && (lastP2PParamsRef.current?.optimize === 'explore')) ? {
+          baselineCost: meta.baselineCost ?? 0,
+          finalCost: meta.finalCost ?? 0,
+          baselineNodes: meta.baselineNodes ?? (path.length),
+          finalNodes: meta.finalNodes ?? (path.length)
+        } : null;
         if(fullPath.length){ // avoid duplicating junction node
           fullPath.push(...path.slice(1));
         } else {
@@ -2142,6 +2162,9 @@ function App() {
         maxJumpDistance,
         optimizeFor,
         algorithm,
+        overheadPct: optimizeFor==='explore' ? (typeof overheadPct==='number'? overheadPct : 30) : undefined,
+        exploreCorridorPct: optimizeFor==='explore' ? (typeof exploreCorridorPct==='number' ? exploreCorridorPct : undefined) : undefined,
+        exploreProgressBiasPct: optimizeFor==='explore' ? (typeof exploreProgressBiasPct==='number' ? exploreProgressBiasPct : undefined) : undefined,
         avoidSystemNames: avoidSystems.filter(a=> a!==segFrom && a!==segTo && !orderedWaypoints.includes(a)),
       });
     };

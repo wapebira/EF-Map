@@ -231,6 +231,8 @@ input[type=number].p2p-input { -moz-appearance: textfield; appearance: textfield
 .neutral-select-caret { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); width:0; height:0; border-left:5px solid transparent; border-right:5px solid transparent; border-top:6px solid #888; pointer-events:none; }
 .neutral-select-wrapper.open .neutral-select-caret { transform: translateY(-50%) rotate(180deg); }
 .neutral-select-dropdown { position:absolute; left:0; top:calc(100% + 4px); width:100%; background:#0f0f0f; border:1px solid #555; border-radius:4px; max-height:200px; overflow-y:auto; z-index:3000; padding:4px 0; box-shadow:0 4px 14px rgba(0,0,0,0.55); }
+.neutral-select-dropdown.drop-up { top:auto; bottom:calc(100% + 4px); box-shadow:0 -4px 14px rgba(0,0,0,0.55); }
+.neutral-select-wrapper.open .neutral-select-caret { transform: translateY(-50%) rotate(180deg); }
 .neutral-select-option { padding:6px 10px; cursor:pointer; font-size:0.85rem; color:#d4d4d4; display:flex; align-items:center; }
 .neutral-select-option.hover, .neutral-select-option:hover { background:#2a2a2a; color:#fff; }
 .neutral-select-option.selected::before { content:""; width:6px; height:6px; border-radius:50%; background:#999; margin-right:6px; }

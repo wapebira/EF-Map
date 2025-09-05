@@ -273,6 +273,26 @@ const baseSections: SectionDef[] = [
         ),
       },
       {
+        id: 'p2p-explore',
+        title: 'Explore Mode (Point‑to‑Point)',
+        content: (
+          <div>
+            <p>Explore plots A→B like normal, then opportunistically inserts extra nearby systems while staying roughly on course and under a user‑set fuel overhead budget (default 30%). It’s a fast greedy enrichment pass on top of the baseline route.</p>
+            <ul style={{ paddingLeft:'18px', margin:'6px 0' }}>
+              <li><strong>Overhead %:</strong> The total fuel cap for the enriched route versus the baseline. 30% means final distance ≤ 1.3× baseline. Gates are cost‑free; ship jumps count by LY.</li>
+              <li><strong>Corridor Width %:</strong> How far off the straight A→B axis candidates are allowed. Narrow keeps detours tight; wider permits more side visits.</li>
+              <li><strong>Progress Bias %:</strong> Bias toward adding detours later along the route to avoid clustering near the start. Higher = favors forward progress more strongly.</li>
+            </ul>
+            <p style={{ marginTop: '6px' }}><strong>How it works:</strong> After computing the baseline (A* or Dijkstra), Explore scans segments and inserts nearby systems that fit inside the corridor and budget. A forward‑progress guard ensures each accepted detour moves you along the overall A→B line.</p>
+            <ul style={{ paddingLeft:'18px', margin:'6px 0' }}>
+              <li><strong>Good for:</strong> Touring a few extra systems en route without major backtracking.</li>
+              <li><strong>Not for:</strong> Exhaustive sightseeing. It’s greedy heuristics, not an optimizer.</li>
+              <li><strong>Tips:</strong> Use Dijkstra for a stronger baseline on long trips; then apply Explore. If early clustering appears, raise Progress Bias or lower Corridor Width.</li>
+            </ul>
+          </div>
+        )
+      },
+      {
         id: 'p2p-max-jump',
         title: 'Max Jump Distance',
         content: (
