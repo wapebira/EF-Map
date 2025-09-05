@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import type { RegionStats } from './RegionStatsCard';
 
 export interface CompareRegionsPanelProps {
@@ -17,8 +17,28 @@ const numeric = (k:SortKey, a:RegionStats, b:RegionStats) => {
 };
 
 export const CompareRegionsPanel: React.FC<CompareRegionsPanelProps> = ({ regions, loading, onRequestStats, onSelectRegion }) => {
+  // Session persistence (sessionStorage) for sort order
+  const ssKey = 'efmap:compareRegionsSort';
+  const initRef = useRef(false);
   const [sortKey, setSortKey] = useState<SortKey>('systems_total');
   const [sortDir, setSortDir] = useState<1|-1>(-1); // desc default
+
+  // Load initial state once
+  useEffect(()=>{
+    if(initRef.current) return; initRef.current = true;
+    try {
+      const raw = sessionStorage.getItem(ssKey);
+      if(raw){
+        const parsed = JSON.parse(raw);
+        if(parsed && parsed.sortKey){ setSortKey(parsed.sortKey); }
+        if(parsed && (parsed.sortDir===1 || parsed.sortDir===-1)){ setSortDir(parsed.sortDir); }
+      }
+    } catch {/* ignore */}
+  }, []);
+  // Persist on change
+  useEffect(()=>{
+    try { sessionStorage.setItem(ssKey, JSON.stringify({ sortKey, sortDir })); } catch {/* ignore */}
+  }, [sortKey, sortDir]);
   const [selectedRowId, setSelectedRowId] = useState<number|null>(null);
   const handleSort = (k:SortKey) => {
     setSortKey(k); setSortDir(prev=> k===sortKey? (prev===1?-1:1) : -1);

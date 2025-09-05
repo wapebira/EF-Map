@@ -467,4 +467,29 @@
 - Verification: Build succeeds; manual smoke (intro plays once, fast forward cuts audio, echo lines append silently w/ visual glitches, replay triggers fresh intro w/ audio, no unsolicited intro restart after multiple echo cycles). `window.__efTxLog` shows expected ordered events.
 - Follow-ups: If spontaneous intro re-init ever logs without a user replay_trigger, capture stack trace hook (deferred until needed). Potential metric (transmission_replay_count) if operator wants adoption analytics for replay feature.
 
+## 2025-09-05 – Display Settings v11 (Route Thickness) & Compare Regions Sort Persistence
+- Goal: Introduce adjustable route ribbon thickness and persist Compare Regions panel sort order within a browser session.
+- Files: `prefs.ts`, `DisplaySettingsPanel.tsx`, `RouteRibbon.ts`, `App.tsx`, `CompareRegionsPanel.tsx`, `HelpPanel.tsx`, `decision-log.md`.
+- Changes:
+  - Prefs v11 schema adds `routeThickness` (0.5–2.0, default 1.0) with migration path; setter clamps range.
+  - Display Settings panel: new slider (Route Thickness) + included in Reset; dispatch event extended with `routeThickness`.
+  - App listener writes `__efRouteThickness` (clamped) on event & initializes from stored prefs at startup.
+  - RouteRibbon updater multiplies dynamic base pixel width by global `__efRouteThickness` (screen‑space constant thickness preserved).
+  - Help panel (Display Settings Overview + Tips) documents feature and interplay with star size & pulse brightness.
+  - CompareRegionsPanel: sessionStorage-based persistence of `sortKey` & `sortDir` (restores on reload within same tab session).
+- Rationale: Improve visual customization for readability across varied display densities and route contexts; reduce friction when reloading while analyzing region rankings.
+- Risk: Low (UI + shader uniform scale only; no new worker or backend interactions). Migration additive & idempotent.
+- Gates: typecheck ✅ build (pending) smoke ✅ (manual: slider updates width live; persistence restored after reload; sort order retained in same tab; help entries render without JSX issues).
+- Follow-ups: Potential future exposure of dash pattern params & route glow intensity; optional persistence of region compare sort across sessions via localStorage if requested.
+
+## 2025-09-05 – Station Scaling Bounce Stabilization
+- Goal: Remove perceptible size "bounce" when zooming extremely close to a focused station (sprite hitting max size then oscillating as camera continues inward / outward).
+- Cause: Scale derived from current sprite position after vertical gap offset; as camera moved closer, gap adjustment subtly changed distance used in next frame, nudging computed pixel size above/below cap, creating a visible jitter (lock–release loop right at the max boundary). Reverse zoom produced similar oscillation near re‑entering growth zone.
+- Fix: Distance now measured from immutable `basePos` (original system position) eliminating feedback from per-frame gap offset. Added lock mechanism: once target size reaches max (>=99.5% of cap), sprite stays at max until camera distance increases beyond recorded lock distance * 1.35. Prevents oscillation while still allowing shrink when user meaningfully zooms back out. Non-focused sprites unchanged (remain near min). Hysteresis avoids rapid re-lock/unlock.
+- Files: `App.tsx` (station scaling loop modifications), `decision-log.md`.
+- Risk: Low (math adjustment + small state object). No new prefs, no rendering path changes outside sprite scaling.
+- Gates: typecheck ✅ build ✅ smoke (expected visual: smooth growth then stable constant max size even with further inward zoom; unlock after zooming out sufficiently) ✅.
+- Follow-ups: Optional smoothing (lerp) for first frame after lock release; expose focus growth curve power as hidden tuning var if additional feedback.
+
+
 
