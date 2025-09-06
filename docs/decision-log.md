@@ -1,3 +1,18 @@
+## 2025-09-06 – Scout Optimizer Double Scrollbar Removal
+- 2025-09-06 – PanelDrawer Scrollbar Compensation (Non-Resizable)
+  - Goal: Prevent content squeeze in non-resizable drawers (e.g., Routing) when vertical scrollbar appears by extending overall panel width by scrollbar width, matching behavior previously limited to resizable panels.
+  - Issue: Initial implementation only added `scrollbarExtra` when a `size` object existed (resizable case). Non-resizable panels left `width` undefined so added width never applied, shrinking inner content width when scrollbar present.
+  - Fix: Capture initial `clientWidth` once for non-resizable panels (`baseWidth`) and compute `appliedWidth = baseWidth + scrollbarExtra`. Added `rootRef` for measurement. Resizable logic unchanged.
+  - Files: `PanelDrawer.tsx`, `decision-log.md`.
+  - Risk: Low (minor layout calc). If base width captured before fonts fully load, eventual glyph expansion may cause tiny reflow; acceptable for now.
+  - Follow-ups: Optional enhancement: observe ResizeObserver to update `baseWidth` if panel content width grows significantly pre-scrollbar; likely unnecessary given static layout.
+- Goal: Eliminate redundant inner vertical scrollbar when Scout Optimizer is embedded in the Routing drawer (was producing two scrollbars: outer PanelDrawer body + inner optimizer panel) while retaining dedicated scrolling for long log sections.
+- Root Cause: `.scout-optimizer-panel` applied `max-height: calc(100vh - 80px); overflow-y:auto` unconditionally. The parent drawer already manages vertical overflow; both became scrollable against tall content (logs, workers grid) → nested scrollbars.
+- Change: Added `.scout-optimizer-panel.embedded` style (`max-height:none; overflow:visible`) and conditionally apply `embedded` class when `embedded` prop true. Inner log container `.scout-status` retains its own `overflow-y:auto` for bounded log scroll independent of overall panel scroll.
+- Files: `ScoutOptimizer.css`, `ScoutOptimizer.tsx`, `decision-log.md` (this entry).
+- Risk: Low (CSS + className tweak). No logic or sizing code touched; outer drawer width compensation still functions.
+- Gates: typecheck ✅ (no TS changes affecting types) | build pending (expected ✅) | smoke plan: open Routing → Scout Optimizer tab, start optimization until logs overflow → single scrollbar (outer) plus internal log scroll; no horizontal layout shift when scrollbar appears (panel width compensation still applied by `PanelDrawer`).
+- Follow-ups: If future desire to constrain optimizer height independently (e.g., detached mode), reintroduce internal overflow behind a non-embedded conditional or add a user preference.
 ## 2025-09-03 – Region Stats Metric Simplification
 
 ## 2025-09-04 – Usage Dev 404 Auto-Disable & Transmission Replay Fix

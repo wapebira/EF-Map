@@ -19,6 +19,8 @@
 
 /* Constrain overall panel height to viewport */
 .scout-optimizer-panel { max-height: calc(100vh - 80px); overflow-y: auto; }
+/* When embedded inside a PanelDrawer we rely on the outer drawer scroll to avoid double scrollbars */
+.scout-optimizer-panel.embedded { max-height: none; overflow: visible; }
 .scout-input-row {
   display: flex;
   flex-direction: column;

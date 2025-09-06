@@ -10,10 +10,12 @@ interface PlanetLegendPanelProps {
   zIndex?: number;
   onActivate?: ()=>void;
   resetToken?: number;
+  isMinimized?: boolean;
+  onToggleMinimize?: ()=>void;
 }
 
 // Small secondary panel that visually matches the main drawer styling.
-const PlanetLegendPanel: React.FC<PlanetLegendPanelProps> = ({ children, onClose, anchoredBelowDrawer, scale=1, zIndex=1425, onActivate, resetToken }) => {
+const PlanetLegendPanel: React.FC<PlanetLegendPanelProps> = ({ children, onClose, anchoredBelowDrawer, scale=1, zIndex=1425, onActivate, resetToken, isMinimized=false, onToggleMinimize }) => {
   // Base position: when not cascading below a drawer we align with y=70 like drawers.
   // anchoredBelowDrawer only applies when legend is the sole panel with drawers closed.
   const base = { x: 140, y: anchoredBelowDrawer ? 70 + 340 : 70 };
@@ -43,20 +45,45 @@ const PlanetLegendPanel: React.FC<PlanetLegendPanelProps> = ({ children, onClose
     window.addEventListener('ef:auto-pos', handler as any);
     return ()=> window.removeEventListener('ef:auto-pos', handler as any);
   }, [anchoredBelowDrawer]);
+  // Scrollbar compensation similar pattern to main PanelDrawer
+  const bodyRef = React.useRef<HTMLDivElement|null>(null);
+  const [scrollbarExtra, setScrollbarExtra] = React.useState(0);
+  const measureScrollbar = React.useCallback(()=>{
+    if(!bodyRef.current || isMinimized){ setScrollbarExtra(0); return; }
+    const el = bodyRef.current;
+    const needs = el.scrollHeight > el.clientHeight + 1;
+    if(!needs){ if(scrollbarExtra!==0) setScrollbarExtra(0); return; }
+    const sbw = el.offsetWidth - el.clientWidth;
+    if(sbw>0 && Math.abs(sbw - scrollbarExtra) > 1) setScrollbarExtra(sbw);
+  }, [isMinimized, scrollbarExtra]);
+  React.useEffect(()=>{ measureScrollbar(); }, [children, measureScrollbar, isMinimized]);
+  React.useEffect(()=>{
+    if(isMinimized) return;
+    const h=()=>measureScrollbar();
+    window.addEventListener('resize', h);
+    const intId = setInterval(h, 600);
+    return ()=>{ window.removeEventListener('resize', h); clearInterval(intId); };
+  }, [measureScrollbar, isMinimized]);
+
   return (
     <div
-      className={`ef-secondary-panel ${drag.isDragging? 'dragging':''}`}
+      className={`ef-secondary-panel ${drag.isDragging? 'dragging':''} ${isMinimized? 'minimized':''}`}
       aria-label="Planet legend panel"
-  style={{ left: drag.pos.x, top: drag.pos.y, transform:`scale(${scale})`, transformOrigin:'top left', zIndex }}
+  style={{ left: drag.pos.x, top: drag.pos.y, transform:`scale(${scale})`, transformOrigin:'top left', zIndex, width: scrollbarExtra? `calc(100% + ${scrollbarExtra}px)` : undefined }}
   onMouseDown={()=> onActivate && onActivate()}
     >
       <div className="ef-secondary-head" {...drag.bind} style={{ cursor:'move' }}>
         <span className="ef-secondary-title">Planet Count Legend</span>
-        <button className="ef-drawer-close" onClick={onClose} aria-label="Close planet legend">✕</button>
+        <div style={{ display:'flex', gap:4 }}>
+          {onToggleMinimize && <button className="ef-drawer-close" onClick={(e)=>{ e.stopPropagation(); onToggleMinimize(); }} aria-label={`${isMinimized? 'Restore':'Minimize'} planet legend`}>{isMinimized? '▢':'—'}</button>}
+          <button className="ef-drawer-close" onClick={onClose} aria-label="Close planet legend">✕</button>
+        </div>
       </div>
-      <div className="ef-secondary-body">
-        {children}
-      </div>
+      {!isMinimized && (
+        <div className="ef-secondary-body" ref={bodyRef}>
+          {children}
+        </div>
+      )}
     </div>
   );
 };

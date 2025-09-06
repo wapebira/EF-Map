@@ -1,7 +1,8 @@
 import React from 'react';
 import { getPrefs, setGateGradientSpan, setHoverPrecisionFloor, setPulseSpeed, setPulseHeadSize, setPulseTailSize, setPulseWidth, setAccent, setShowShipDash, setPulseBrightness, setStarSizeScale, setRouteThickness } from '../utils/prefs';
 
-export const DisplaySettingsPanel: React.FC = () => {
+interface DisplaySettingsPanelProps { onLayoutReset?: ()=>void }
+export const DisplaySettingsPanel: React.FC<DisplaySettingsPanelProps> = ({ onLayoutReset }) => {
   const prefs = getPrefs() as any;
   // gateSpan stored internally as fraction 0..1 but UI exposes 0..100%
   const [gateSpan, setGateSpan] = React.useState<number>(Math.min(1, Math.max(0, prefs.gateGradientSpan ?? 0.66)));
@@ -134,7 +135,7 @@ export const DisplaySettingsPanel: React.FC = () => {
         >Reset Display Defaults</button>
         <button
           style={{ flex:1, background:'var(--accent)', color:'#fff', border:'none', padding:'6px 10px', borderRadius:6, cursor:'pointer', fontWeight:600, boxShadow:'0 2px 6px rgba(0,0,0,0.45)' }}
-          onClick={()=>{ window.dispatchEvent(new Event('ef-request-reset-layout')); }}
+          onClick={()=>{ window.dispatchEvent(new Event('ef-request-reset-layout')); try { onLayoutReset && onLayoutReset(); } catch {/* ignore */} }}
         >Reset Layout</button>
       </section>
     </div>
