@@ -361,6 +361,8 @@ const TransmissionPanel: React.FC<TransmissionPanelProps> = ({ onClose, onRoute,
     charIndexRef.current = 0;
     setDoneIntro(false);
     logEvent('intro_init');
+  // Telemetry: mark panel shown (open state) exactly once on intro init path
+  try { (window as any).__efTxShow && (window as any).__efTxShow(); } catch {}
     // NOTE: we now delay writing transmissionSeenHard until intro fully completes to avoid dev StrictMode second mount skipping intro.
   };
 
@@ -449,7 +451,10 @@ const TransmissionPanel: React.FC<TransmissionPanelProps> = ({ onClose, onRoute,
     initIntro();
     reshuffleEchoes();
   }
-    try { track({ type:'transmission_show' }); } catch {}
+  // Telemetry: echo-only path also signals show (open) if intro skipped
+  try { (window as any).__efTxShow && (window as any).__efTxShow(); } catch {}
+  // If this mount represents an explicit replay, emit replay metric (panel remounted with replay flag)
+  try { if(userReplay){ (window as any).__efTxReplay && (window as any).__efTxReplay(); } } catch {}
     // Audio init
     try {
       if(introModeRef.current){ // Only load audio if we will actually play intro
@@ -461,7 +466,9 @@ const TransmissionPanel: React.FC<TransmissionPanelProps> = ({ onClose, onRoute,
     } catch {/* ignore */}
 
     if(reducedMotion){
-      const introAll = fullTextRef.current; setDisplayText(introAll); setDoneIntro(true); setTyping(false); setTransmissionSeen(); scheduleNextEcho(); try { track({ type:'transmission_complete' }); } catch {}; return;
+      const introAll = fullTextRef.current; setDisplayText(introAll); setDoneIntro(true); setTyping(false); setTransmissionSeen(); scheduleNextEcho();
+      try { (window as any).__efTxIntroComplete && (window as any).__efTxIntroComplete(); } catch {}
+      return;
     }
     if(introModeRef.current){
       startTypingLoop();
@@ -553,7 +560,8 @@ const TransmissionPanel: React.FC<TransmissionPanelProps> = ({ onClose, onRoute,
           setTransmissionSeen();
           try { (window as any).localStorage.setItem('transmissionSeenHard','1'); } catch {}
           try { (window as any).__efTxIntroComplete = true; (window as any).__efTxPersist = { text: fullTextRef.current, introComplete:true, queue: echoQueueRef.current.slice(), nextDue: Date.now() + 20000 }; } catch {}
-          try { track({ type:'transmission_complete' }); } catch {};
+          // Mark intro completion (open -> echo phase) for timing metrics
+          try { (window as any).__efTxIntroComplete && (window as any).__efTxIntroComplete(); } catch {}
           // Graceful ambient termination: fade out instead of hard cut (don\u2019t sever mid-cycle)
           if(ambientRef.current){
             try {
@@ -681,6 +689,8 @@ const TransmissionPanel: React.FC<TransmissionPanelProps> = ({ onClose, onRoute,
   setTyping(true);
   startTypingEchoDelta();
   logEvent('echo_append', { line });
+  // Telemetry: count each echo message appended
+  try { (window as any).__efTxEchoMessage && (window as any).__efTxEchoMessage(); } catch {}
   // Persist immediately so even if HMR/remount during typing we resume safely.
   try { (window as any).__efTxEchoState = { text: fullTextRef.current, queue: echoQueueRef.current.slice(), nextDue: (echoTimerNextDueRef.current||0) }; } catch {}
   };
@@ -712,7 +722,12 @@ const TransmissionPanel: React.FC<TransmissionPanelProps> = ({ onClose, onRoute,
   };
 
   const handleSkip = () => {
-    if(!fast){ setFast(true); try { track({ type:'transmission_skip' }); } catch {} }
+    if(!fast){
+      setFast(true);
+      try { track({ type:'transmission_skip' }); } catch {}
+      // Only count fast-forward metrics if still in intro (not post-intro echo accelerate)
+      if(!doneIntroRef.current){ try { (window as any).__efTxFastForward && (window as any).__efTxFastForward(); } catch {} }
+    }
     // If still in intro, accelerate and also cut ambient immediately.
     if(!doneIntroRef.current){
       if(ambientRef.current){ try { ambientRef.current.pause(); ambientRef.current.currentTime = 0; } catch {} }
@@ -742,9 +757,11 @@ const TransmissionPanel: React.FC<TransmissionPanelProps> = ({ onClose, onRoute,
   }, []);
 
   const handleDismiss = () => {
+    // Telemetry close (captures open/echo accumulated + early close flag)
+    try { (window as any).__efTxDismiss && (window as any).__efTxDismiss(); } catch {}
     setShow(false);
     onClose();
-  try { track({ type:'transmission_dismiss' }); } catch {}
+    try { track({ type:'transmission_dismiss' }); } catch {}
     setTransmissionSeen();
   };
 

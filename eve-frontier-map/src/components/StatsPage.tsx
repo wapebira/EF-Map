@@ -87,6 +87,14 @@ const DESCRIPTIONS: Record<string,string> = {
   'Overlay imports':'JSON import actions (successful additions).',
   'Avg panel open time':'Average cumulative time the overlay panel remained open per engaged session.',
   'Overlay Marks Count':'Distribution of mark counts present at session snapshot time.'
+  , 'Transmission Replays':'Replay button activations (total).'
+  , 'Replay sessions':'Distinct sessions with at least one replay.'
+  , 'Closes':'Total transmission panel closes.'
+  , 'Early closes':'Closes occurring before intro completed.'
+  , 'Avg open time':'Average cumulative time the transmission panel stayed open (sessions with panel open).'
+  , 'Avg echo time':'Average time in echo (post-intro) phase (sessions with echo time).'
+  , 'Echo Messages':'Distribution of echo message counts appended per session.'
+  , 'Open Share':'Distribution of share of session time panel remained open.'
 };
 
 const StatRow: React.FC<{ label:string; value:React.ReactNode }> = ({ label, value }) => {
@@ -194,6 +202,113 @@ const StatsPage: React.FC = () => {
   const pageBg = '#0b1119'; // unified dark background
   const pageColor = '#fff';
 
+  // --- Aggregation Helpers (weekly & monthly) ---
+  interface AggregateRow { key:string; label:string; range?:string; days:number; counters:Record<string,number>; sums:Record<string,number>; }
+  const isoWeekKey = (dStr:string) => {
+    const d = new Date(dStr+'T00:00:00Z');
+    // ISO week: Thursday of this week determines year
+    const day = (d.getUTCDay()+6)%7; // 0=Mon
+    d.setUTCDate(d.getUTCDate() - day + 3); // move to Thursday
+    const thursday = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+    const yearStart = new Date(Date.UTC(thursday.getUTCFullYear(),0,1));
+    const week = Math.floor(((thursday.getTime()-yearStart.getTime())/86400000 + 10)/7); // +10 to ensure week 1 starts properly
+    const year = thursday.getUTCFullYear();
+    return { year, week };
+  };
+  const buildAggregates = useMemo(()=>{
+    if(!history.length) return { weeks:[] as AggregateRow[], months:[] as AggregateRow[] };
+    // Daily objects sorted oldest->newest currently (history reversed earlier then resorted later). We'll derive from history array directly.
+    const dailyEntries = history.map(h=>{
+      const date = (h.date? h.date.replace(/\.json$/,''): h.updatedAt.slice(0,10));
+      return { date, counters:h.counters, sums:h.sums };
+    });
+    // Weeks (ISO) group
+    const weekMap = new Map<string, AggregateRow>();
+    for(const d of dailyEntries){
+      const { year, week } = isoWeekKey(d.date);
+      const key = `${year}-W${week.toString().padStart(2,'0')}`;
+      let row = weekMap.get(key);
+      if(!row){ row = { key, label: `Week ${week}`, range: d.date, days:0, counters:{}, sums:{} }; weekMap.set(key,row); }
+      // update range as min..max
+      if(row.range){
+        const [start,end] = row.range.includes('–')? row.range.split('–'): [row.range,row.range];
+        const newStart = d.date < start ? d.date : start;
+        const newEnd = d.date > end ? d.date : end;
+        row.range = newStart===newEnd? newStart : `${newStart}–${newEnd}`;
+      }
+      row.days++;
+      for(const [k,v] of Object.entries(d.counters)){ row.counters[k]=(row.counters[k]||0)+v; }
+      for(const [k,v] of Object.entries(d.sums)){ row.sums[k]=(row.sums[k]||0)+v; }
+    }
+    const weeks = Array.from(weekMap.values()).sort((a,b)=> a.key.localeCompare(b.key)).reverse(); // newest first
+    // Months
+    const monthMap = new Map<string, AggregateRow>();
+    for(const d of dailyEntries){
+      const ym = d.date.slice(0,7); // YYYY-MM
+      let row = monthMap.get(ym);
+      if(!row){
+        const [y]=ym.split('-');
+        const monthName = new Date(`${ym}-01T00:00:00Z`).toLocaleString(undefined,{ month:'long', timeZone:'UTC' });
+        row = { key: ym, label: `${monthName} ${y}`, range: undefined, days:0, counters:{}, sums:{} };
+        monthMap.set(ym,row);
+      }
+      row.days++;
+      for(const [k,v] of Object.entries(d.counters)){ row.counters[k]=(row.counters[k]||0)+v; }
+      for(const [k,v] of Object.entries(d.sums)){ row.sums[k]=(row.sums[k]||0)+v; }
+    }
+    const months = Array.from(monthMap.values()).sort((a,b)=> a.key.localeCompare(b.key)).reverse();
+    return { weeks, months };
+  }, [history]);
+
+  const renderRollupTable = (rows:AggregateRow[], title:string) => {
+    if(!rows.length) return null;
+    // Use same columns as daily (subset) for consistency
+    return (
+      <div style={{ marginTop:34 }}>
+        <h2 style={{ fontSize:'15px', margin:'0 0 10px 0', letterSpacing:'.5px', textTransform:'uppercase', opacity:.85 }}>{title}</h2>
+        <div style={{ overflowX:'auto', border:'1px solid rgba(255,255,255,0.12)', borderRadius:10, background:'rgba(255,255,255,0.04)' }}>
+          <table style={{ borderCollapse:'collapse', width:'100%', fontSize:12 }}>
+            <thead>
+              <tr style={{ textAlign:'left', background:'rgba(255,255,255,0.06)' }}>
+                {['Period','Page loads','P2P','Baselines','Opt starts','Shares','Resolved','Avg P2P','Avg baseline','Avg active session','Avg LY saved','Total LY saved','Cinematic sessions','Copy rate %','Days'].map(h=> <th key={h} style={{ padding:'6px 8px', fontWeight:600 }}>{h}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(r=>{
+                const avgP2P = r.sums.p2p_route_time_count ? (r.sums.p2p_route_time_ms_sum / r.sums.p2p_route_time_count) : undefined;
+                const avgBase = r.sums.scout_baseline_time_count ? (r.sums.scout_baseline_time_ms_sum / r.sums.scout_baseline_time_count) : undefined;
+                const avgActive = r.sums.active_session_time_count ? (r.sums.active_session_time_ms_sum / r.sums.active_session_time_count) : undefined;
+                const avgSaved = r.sums.scout_opt_savings_count ? (r.sums.scout_opt_savings_ly_sum / r.sums.scout_opt_savings_count) : undefined;
+                const totalSaved = r.sums.scout_opt_savings_ly_sum;
+                const copyRate = (()=>{ const total=(r.counters.p2p_routes||0)+(r.counters.scout_optimizations||0); if(!total) return '—'; const copies=r.counters.route_copies||0; return ((copies/total)*100).toFixed(1); })();
+                const periodLabel = r.label + (r.range? ` (${r.range})`: '');
+                return (
+                  <tr key={r.key} style={{ borderTop:'1px solid rgba(255,255,255,0.08)' }}>
+                    <td style={{ padding:'4px 8px', opacity:0.85 }}>{periodLabel}</td>
+                    <td style={{ padding:'4px 8px' }}>{r.counters.page_loads||0}</td>
+                    <td style={{ padding:'4px 8px' }}>{r.counters.p2p_routes||0}</td>
+                    <td style={{ padding:'4px 8px' }}>{r.counters.scout_baselines||0}</td>
+                    <td style={{ padding:'4px 8px' }}>{r.counters.scout_optimizations||0}</td>
+                    <td style={{ padding:'4px 8px' }}>{r.counters.routes_shared||0}</td>
+                    <td style={{ padding:'4px 8px' }}>{r.counters.shared_resolved||0}</td>
+                    <td style={{ padding:'4px 8px' }}>{avgP2P!==undefined? formatMs(avgP2P): '—'}</td>
+                    <td style={{ padding:'4px 8px' }}>{avgBase!==undefined? formatMs(avgBase): '—'}</td>
+                    <td style={{ padding:'4px 8px' }}>{avgActive!==undefined? formatMs(avgActive): '—'}</td>
+                    <td style={{ padding:'4px 8px' }}>{avgSaved!==undefined? avgSaved.toFixed(2): '—'}</td>
+                    <td style={{ padding:'4px 8px' }}>{totalSaved!==undefined? totalSaved.toFixed(2): '—'}</td>
+                    <td style={{ padding:'4px 8px' }}>{r.counters.cinematic_sessions||0}</td>
+                    <td style={{ padding:'4px 8px' }}>{copyRate==='—'? '—' : copyRate+'%'}</td>
+                    <td style={{ padding:'4px 8px' }}>{r.days}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+
   return (
   <div style={{ maxWidth:1600, margin:'0 auto', padding:'34px 32px 80px 32px', fontFamily:'system-ui, sans-serif', color:pageColor, background:pageBg, boxSizing:'border-box' }}>
       <h1 style={{ fontSize:'28px', margin:'0 0 10px 0' }}>Usage Stats</h1>
@@ -293,6 +408,21 @@ const StatsPage: React.FC = () => {
             <StatRow label="Crypto clicks" value={data.counters.donate_crypto_clicks||0} />
             <StatRow label="Stripe CTR" value={( ()=>{ const o=data.counters.donate_modal_open||0; const s=data.counters.donate_stripe_clicks||0; if(!o) return '—'; return ((s/o)*100).toFixed(1)+'%'; })()} />
           </section>
+          {/* Transmission (Onboarding) */}
+          <section style={{ background:'rgba(255,255,255,0.06)', padding:'16px 18px', border:'1px solid rgba(255,255,255,0.15)', borderRadius:10, boxShadow:'0 2px 4px rgba(0,0,0,0.45)' }}>
+            <h2 style={{ margin:'0 0 8px 0', fontSize:'15px', letterSpacing:'.5px', textTransform:'uppercase', opacity:0.85 }}>Transmission</h2>
+            <StatRow label="Transmission shows" value={data.counters.transmission_shows||0} />
+            <StatRow label="Completes" value={data.counters.transmission_completes||0} />
+            <StatRow label="Transmission replays" value={data.counters.transmission_replays||0} />
+            <StatRow label="Replay sessions" value={data.counters.transmission_replay_sessions||0} />
+            <StatRow label="Replay rate" value={( ()=>{ const s=data.counters.transmission_shows||0; const rs=data.counters.transmission_replay_sessions||0; if(!s) return '—'; return ((rs/s)*100).toFixed(1)+'%'; })()} />
+            <StatRow label="Closes" value={data.counters.transmission_closes||0} />
+            <StatRow label="Early closes" value={data.counters.transmission_close_earlies||0} />
+            <StatRow label="Early close rate" value={( ()=>{ const cl=data.counters.transmission_closes||0; const ec=data.counters.transmission_close_earlies||0; if(!cl) return '—'; return ((ec/cl)*100).toFixed(1)+'%'; })()} />
+            <StatRow label="Avg open time" value={formatDurationAvg(data.sums.transmission_open_time_ms_sum, data.sums.transmission_open_time_count)} />
+            <StatRow label="Avg echo time" value={formatDurationAvg(data.sums.transmission_echo_time_ms_sum, data.sums.transmission_echo_time_count)} />
+            <StatRow label="Echo msgs total" value={data.counters.transmission_echo_msgs||0} />
+          </section>
           {/* User Overlay */}
           <section style={{ background:'rgba(255,255,255,0.06)', padding:'16px 18px', border:'1px solid rgba(255,255,255,0.15)', borderRadius:10, boxShadow:'0 2px 4px rgba(0,0,0,0.45)' }}>
             <h2 style={{ margin:'0 0 8px 0', fontSize:'15px', letterSpacing:'.5px', textTransform:'uppercase', opacity:0.85 }}>User Overlay</h2>
@@ -341,13 +471,17 @@ const StatsPage: React.FC = () => {
               {(()=>{ const workerKeys=Object.keys(data.counters).filter(k=> k.startsWith('opt_workers_used_')); const rows=workerKeys.sort((a,b)=> parseInt(a.split('_').pop()||'0')-parseInt(b.split('_').pop()||'0')).map(k=>({k,c:data.counters[k]||0,label:k.replace('opt_workers_used_','')})); const tot=rows.reduce((a,b)=>a+b.c,0); return <DistTable title="Workers Used" rows={rows} total={tot} />; })()}
               {(()=>{ const scaleKeys=Object.keys(data.counters).filter(k=> k.startsWith('ui_scale_')); const rows=scaleKeys.sort((a,b)=> parseInt(a.replace('ui_scale_',''))-parseInt(b.replace('ui_scale_',''))).map(k=>({k,c:data.counters[k]||0,label:k.replace('ui_scale_','')+'%'})); const tot=rows.reduce((a,b)=>a+b.c,0); return <DistTable title="UI Scale" rows={rows} total={tot} />; })()}
               {(()=>{ const keys=['marks_0','marks_1_5','marks_6_15','marks_16_30','marks_31_60','marks_61_plus']; const labelMap:{[k:string]:string}={marks_0:'0',marks_1_5:'1–5',marks_6_15:'6–15',marks_16_30:'16–30',marks_31_60:'31–60',marks_61_plus:'61+'}; const rows=keys.map(k=>({k,c:data.counters[k]||0,label:labelMap[k]})); const tot=rows.reduce((a,b)=>a+b.c,0); return <DistTable title="Overlay Marks Count" rows={rows} total={tot} />; })()}
+              {(()=>{ const keys=['res_720p','res_1080p','res_1440p','res_4k_plus']; const labelMap:{[k:string]:string}={res_720p:'≤720p',res_1080p:'1080p',res_1440p:'1440p',res_4k_plus:'4K+'}; const rows=keys.map(k=>({k,c:data.counters[k]||0,label:labelMap[k]})); const tot=rows.reduce((a,b)=>a+b.c,0); return <DistTable title="Screen Resolution" rows={rows} total={tot} />; })()}
+              {(()=>{ const keys=['cores_1_2','cores_3_4','cores_5_8','cores_9_12','cores_13_16','cores_17_plus']; const labelMap:{[k:string]:string}={cores_1_2:'1–2',cores_3_4:'3–4',cores_5_8:'5–8',cores_9_12:'9–12',cores_13_16:'13–16',cores_17_plus:'17+'}; const rows=keys.map(k=>({k,c:data.counters[k]||0,label:labelMap[k]})); const tot=rows.reduce((a,b)=>a+b.c,0); return <DistTable title="CPU Cores" rows={rows} total={tot} />; })()}
+              {(()=>{ const echoBuckets = ['echo_0','echo_1_5','echo_6_15','echo_16_30','echo_gt_30']; const rows=echoBuckets.map(k=>({k,c:data.counters[k]||0,label:k.replace('echo_','').replace('gt_','>')})); const tot=rows.reduce((a,b)=>a+b.c,0); return <DistTable title="Echo Messages" rows={rows} total={tot} />; })()}
+              {(()=>{ const shareBuckets = ['tx_share_0','tx_share_lt_10','tx_share_10_30','tx_share_30_60','tx_share_gt_60']; const labels:Record<string,string>={ tx_share_0:'0%',tx_share_lt_10:'<10%',tx_share_10_30:'10–30%',tx_share_30_60:'30–60%',tx_share_gt_60:'>60%' }; const rows=shareBuckets.map(k=>({k,c:data.counters[k]||0,label:labels[k]})); const tot=rows.reduce((a,b)=>a+b.c,0); return <DistTable title="Open Share" rows={rows} total={tot} />; })()}
             </div>
           </section>
   </div>
   </>
       )}
       <div style={{ marginTop:22, fontSize:'11px', opacity:0.5 }}>Updated: {data? new Date(data.updatedAt).toLocaleString(): '—'}</div>
-      {history.length>0 && (
+  {history.length>0 && (
         <div style={{ marginTop:30 }}>
           <h2 style={{ fontSize:'16px', margin:'0 0 10px 0' }}>Last 7 Days (Newest First)</h2>
           <div style={{ overflowX:'auto', border:'1px solid rgba(255,255,255,0.12)', borderRadius:10, background:'rgba(255,255,255,0.04)' }}>
@@ -387,6 +521,10 @@ const StatsPage: React.FC = () => {
               </tbody>
             </table>
           </div>
+          {/* Weekly Rollups (newest first) */}
+          {renderRollupTable(buildAggregates.weeks, 'Weekly Rollups (ISO Weeks – Newest First)')}
+          {/* Monthly Rollups */}
+          {renderRollupTable(buildAggregates.months, 'Monthly Rollups (Newest First)')}
         </div>
       )}
     </div>
