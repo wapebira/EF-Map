@@ -110,6 +110,9 @@ const EVENT_MAP = {
   , transmission_audio_mute: { counters: ['transmission_audio_mutes'] }
   , transmission_audio_unmute: { counters: ['transmission_audio_unmutes'] }
   , transmission_major_glitch: { counters: ['transmission_major_glitches'] }
+  // --- Environment buckets (coarse, non-identifying) ---
+  , screen_res_bucket: { countersDynamic: (b)=> { const v=b.bucket; const allowed=['res_720p','res_1080p','res_1440p','res_4k_plus']; return allowed.includes(v)? [v]: []; } }
+  , cpu_cores_bucket: { countersDynamic: (b)=> { const v=b.bucket; const allowed=['cores_1_2','cores_3_4','cores_5_8','cores_9_12','cores_13_16','cores_17_plus']; return allowed.includes(v)? [v]: []; } }
 };
 
 // Schema versioning for aggregate snapshots.

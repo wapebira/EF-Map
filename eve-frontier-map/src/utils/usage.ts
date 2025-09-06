@@ -165,6 +165,29 @@ if(typeof window !== 'undefined'){
 
   // Mark page load
   try { track({ type:'page_load' }); } catch {}
+  // Capture coarse screen width (approx monitor resolution class) & CPU core buckets once per session
+  try {
+    const w = Math.max(window.innerWidth || 0, screen?.width || 0);
+    let bucket = '';
+    if(w <= 1280) bucket = 'res_720p'; // ≤1280 wide ≈ 720p class
+    else if(w <= 1920) bucket = 'res_1080p'; // 1281–1920
+    else if(w <= 2560) bucket = 'res_1440p'; // 1921–2560 (covers 1440p typical 2560x1440)
+    else bucket = 'res_4k_plus'; // >2560 (includes 4K and ultrawide above 2560 width)
+    if(bucket) track({ type:'screen_res_bucket', bucket });
+  } catch { /* ignore */ }
+  try {
+    const cores = (navigator as any).hardwareConcurrency;
+    if(typeof cores === 'number' && cores > 0){
+      let cbucket='';
+      if(cores <= 2) cbucket='cores_1_2';
+      else if(cores <= 4) cbucket='cores_3_4';
+      else if(cores <= 8) cbucket='cores_5_8';
+      else if(cores <= 12) cbucket='cores_9_12';
+      else if(cores <= 16) cbucket='cores_13_16';
+      else cbucket='cores_17_plus';
+      track({ type:'cpu_cores_bucket', bucket: cbucket });
+    }
+  } catch { /* ignore */ }
   // We'll store last activity on window to share with track()/trackImmediate
   (window as any).___efLastAct = sessionStart;
   // Initialize segmented active timing state
