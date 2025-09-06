@@ -593,5 +593,15 @@
 - Rationale: Reduce cognitive load for non‑coder operator; ensure assistant interprets phrases like "let's start the migration" as Phase 0 token grant; pre-stage Cloudflare namespace tasks to avoid blocking later phases.
 - Follow-ups: When operator expresses readiness (any mapped phrase), assistant will (1) echo interpretation, (2) update `migration_status.json`, (3) execute Phase 0 audit checklist items.
 
+## 2025-09-06 – Stats Charts Hover Tooltips
+- Goal: Improve readability of daily trend charts (Core Usage, Engagement Rates) by displaying precise series value & date on hover.
+- Implementation: Added lightweight SVG hover interaction to `LineChart` (in `StatsCharts.tsx`): computes nearest x (date) and closest series point vertically; renders vertical crosshair, highlighted point, and dark translucent tooltip box with series label, full date, and formatted value (auto-percent for percent axes). No dependency additions.
+- Diff: ~+95 LOC (add hover state, hit-testing, tooltip rendering) in a single file.
+- Performance: O(S) per mousemove (S = number of series, currently 3) with trivial math; no re-renders outside SVG internal state; negligible impact.
+- Accessibility: Tooltip purely visual (no ARIA live region). Existing axis labels remain. Future enhancement could expose focusable data points for keyboard users if needed.
+- Risk: Low (presentation-only augmentation). Fallback when no data: hover state cleared. Works with normalized (percent) and raw count charts.
+- Gates: typecheck ✅ build ✅ smoke ✅ (local manual hover shows expected values, correct percent formatting on Engagement Rates chart).
+- Follow-ups: Optional multi-series stacked tooltip (all series values for a date), touch interaction (tap to lock), keyboard navigation (left/right arrows) if requested.
+
 
 
