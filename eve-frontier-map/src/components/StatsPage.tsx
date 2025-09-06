@@ -87,6 +87,16 @@ const DESCRIPTIONS: Record<string,string> = {
   'Overlay imports':'JSON import actions (successful additions).',
   'Avg panel open time':'Average cumulative time the overlay panel remained open per engaged session.',
   'Overlay Marks Count':'Distribution of mark counts present at session snapshot time.'
+  , 'Transmission Replays':'Replay button activations (total).'
+  , 'Replay sessions':'Distinct sessions with at least one replay.'
+  , 'Fast-forwards':'Fast-forward actions during intro.'
+  , 'Fast-forward sessions':'Distinct sessions with at least one fast-forward.'
+  , 'Closes':'Total transmission panel closes.'
+  , 'Early closes':'Closes occurring before intro completed.'
+  , 'Avg open time':'Average cumulative time the transmission panel stayed open (sessions with panel open).'
+  , 'Avg echo time':'Average time in echo (post-intro) phase (sessions with echo time).'
+  , 'Echo Messages':'Distribution of echo message counts appended per session.'
+  , 'Open Share':'Distribution of share of session time panel remained open.'
 };
 
 const StatRow: React.FC<{ label:string; value:React.ReactNode }> = ({ label, value }) => {
@@ -399,6 +409,40 @@ const StatsPage: React.FC = () => {
             <StatRow label="Stripe clicks" value={data.counters.donate_stripe_clicks||0} />
             <StatRow label="Crypto clicks" value={data.counters.donate_crypto_clicks||0} />
             <StatRow label="Stripe CTR" value={( ()=>{ const o=data.counters.donate_modal_open||0; const s=data.counters.donate_stripe_clicks||0; if(!o) return '—'; return ((s/o)*100).toFixed(1)+'%'; })()} />
+          </section>
+          {/* Transmission (Onboarding) */}
+          <section style={{ background:'rgba(255,255,255,0.06)', padding:'16px 18px', border:'1px solid rgba(255,255,255,0.15)', borderRadius:10, boxShadow:'0 2px 4px rgba(0,0,0,0.45)' }}>
+            <h2 style={{ margin:'0 0 8px 0', fontSize:'15px', letterSpacing:'.5px', textTransform:'uppercase', opacity:0.85 }}>Transmission</h2>
+            <StatRow label="Transmission shows" value={data.counters.transmission_shows||0} />
+            <StatRow label="Completes" value={data.counters.transmission_completes||0} />
+            <StatRow label="Completion rate" value={( ()=>{ const s=data.counters.transmission_shows||0; const c=data.counters.transmission_completes||0; if(!s) return '—'; return ((c/s)*100).toFixed(1)+'%'; })()} />
+            <StatRow label="Transmission replays" value={data.counters.transmission_replays||0} />
+            <StatRow label="Replay sessions" value={data.counters.transmission_replay_sessions||0} />
+            <StatRow label="Replay rate" value={( ()=>{ const s=data.counters.transmission_shows||0; const rs=data.counters.transmission_replay_sessions||0; if(!s) return '—'; return ((rs/s)*100).toFixed(1)+'%'; })()} />
+            <StatRow label="Fast-forwards" value={data.counters.transmission_fastforwards||0} />
+            <StatRow label="Fast-forward sessions" value={data.counters.transmission_fastforward_sessions||0} />
+            <StatRow label="Fast-forward rate" value={( ()=>{ const s=data.counters.transmission_shows||0; const fs=data.counters.transmission_fastforward_sessions||0; if(!s) return '—'; return ((fs/s)*100).toFixed(1)+'%'; })()} />
+            <StatRow label="Closes" value={data.counters.transmission_closes||0} />
+            <StatRow label="Early closes" value={data.counters.transmission_close_earlies||0} />
+            <StatRow label="Early close rate" value={( ()=>{ const cl=data.counters.transmission_closes||0; const ec=data.counters.transmission_close_earlies||0; if(!cl) return '—'; return ((ec/cl)*100).toFixed(1)+'%'; })()} />
+            <StatRow label="Avg open time" value={formatDurationAvg(data.sums.transmission_open_time_ms_sum, data.sums.transmission_open_time_count)} />
+            <StatRow label="Avg echo time" value={formatDurationAvg(data.sums.transmission_echo_time_ms_sum, data.sums.transmission_echo_time_count)} />
+            <StatRow label="Echo msgs total" value={data.counters.transmission_echo_msgs||0} />
+            <StatRow label="Avg echo msgs / session" value={( ()=>{ const tot=data.counters.transmission_echo_msgs||0; const sess=data.counters.transmission_shows||0; if(!tot||!sess) return '—'; return (tot/ (sess||1)).toFixed(1); })()} />
+            {/* Distributions */}
+            {(() => {
+              const echoBuckets = ['echo_0','echo_1_5','echo_6_15','echo_16_30','echo_gt_30'];
+              const echoTotal = echoBuckets.reduce((a,k)=> a + (data.counters[k]||0), 0);
+              const rows = echoBuckets.map(k=>({ k, c:data.counters[k]||0, label: k.replace('echo_','').replace('gt_','>') }));
+              return <DistTable title="Echo Messages" rows={rows} total={echoTotal} />;
+            })()}
+            {(() => {
+              const shareBuckets = ['tx_share_0','tx_share_lt_10','tx_share_10_30','tx_share_30_60','tx_share_gt_60'];
+              const labels:Record<string,string> = { tx_share_0:'0%','tx_share_lt_10':'<10%','tx_share_10_30':'10–30%','tx_share_30_60':'30–60%','tx_share_gt_60':'>60%' };
+              const total = shareBuckets.reduce((a,k)=> a + (data.counters[k]||0), 0);
+              const rows = shareBuckets.map(k=>({ k, c:data.counters[k]||0, label: labels[k] }));
+              return <div style={{ marginTop:18 }}><DistTable title="Open Share" rows={rows} total={total} /></div>;
+            })()}
           </section>
           {/* User Overlay */}
           <section style={{ background:'rgba(255,255,255,0.06)', padding:'16px 18px', border:'1px solid rgba(255,255,255,0.15)', borderRadius:10, boxShadow:'0 2px 4px rgba(0,0,0,0.45)' }}>

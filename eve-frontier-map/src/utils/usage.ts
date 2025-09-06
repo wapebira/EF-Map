@@ -111,6 +111,73 @@ if(typeof window !== 'undefined'){
   let overlayOpenStart = 0; // perf.now when last opened/resumed
   let overlayAccum = 0; // ms accumulated (excludes cinematic periods)
   let overlayMarksSnapshot = 0; // last bucketed count to avoid spam
+  // --- Transmission metrics ---
+  let txOpen = false; // panel visible
+  let txIntroComplete = false; // intro finished (echo phase active)
+  let txOpenStart = 0; // perf.now when (re)opened
+  let txEchoStart = 0; // perf.now when echo phase began
+  let txOpenAccum = 0; // accumulated open time ms
+  let txEchoAccum = 0; // accumulated echo time ms
+  let txReplayFirstSent = false;
+  let txFastForwardFirstSent = false;
+  let txEchoMsgCount = 0; // number of echo messages appended
+  // Track whether panel closed before intro finished (early close)
+  let txEarlyClose = false;
+  // Helpers exposed to TransmissionPanel via global
+  function txEnsureOpen(){
+    if(!txOpen){ txOpen = true; txOpenStart = performance.now(); }
+  }
+  function txPause(){
+    if(!txOpen) return;
+    const now = performance.now();
+    const delta = now - txOpenStart;
+    if(delta>0) txOpenAccum += delta;
+    if(txIntroComplete){
+      const echoDelta = now - txEchoStart;
+      if(echoDelta>0) txEchoAccum += echoDelta;
+      txEchoStart = now; // reset baseline
+    }
+    txOpenStart = now; // maintain baseline for potential resume calculations
+  }
+  (window as any).__efTxShow = () => { try { txEnsureOpen(); track({ type:'transmission_show' }); } catch {} };
+  (window as any).__efTxIntroComplete = () => { try {
+    if(!txIntroComplete){
+      txIntroComplete = true;
+      // start echo phase timing baseline
+      txEchoStart = performance.now();
+      track({ type:'transmission_complete' });
+    }
+  } catch {} };
+  (window as any).__efTxReplay = () => { try { track({ type:'transmission_replay' }); if(!txReplayFirstSent){ txReplayFirstSent = true; track({ type:'transmission_replay_first' }); } } catch {} };
+  (window as any).__efTxFastForward = () => { try { track({ type:'transmission_fastforward' }); if(!txFastForwardFirstSent){ txFastForwardFirstSent = true; track({ type:'transmission_fastforward_first' }); } } catch {} };
+  (window as any).__efTxDismiss = () => { try {
+    if(!txOpen) return;
+    // accumulate through close
+    txPause();
+    txOpen = false;
+    if(!txIntroComplete){ txEarlyClose = true; }
+    track({ type:'transmission_close' });
+    if(txEarlyClose) track({ type:'transmission_close_early' });
+  } catch {} };
+  (window as any).__efTxEchoMessage = () => { try { txEchoMsgCount++; track({ type:'transmission_echo_msg' }); } catch {} };
+  (window as any).__efTxPause = () => { try { txPause(); } catch {} };
+  (window as any).__efTxResume = () => { try { txEnsureOpen(); if(txIntroComplete) txEchoStart = performance.now(); } catch {} };
+
+  function txEchoMsgBucket(count:number){
+    if(count===0) return 'echo_0';
+    if(count<=5) return 'echo_1_5';
+    if(count<=15) return 'echo_6_15';
+    if(count<=30) return 'echo_16_30';
+    return 'echo_gt_30';
+  }
+  function txOpenShareBucket(openMs:number, sessionMs:number){
+    if(sessionMs<=0 || openMs<=0) return 'tx_share_0';
+    const pct = (openMs/sessionMs)*100;
+    if(pct < 10) return 'tx_share_lt_10';
+    if(pct < 30) return 'tx_share_10_30';
+    if(pct < 60) return 'tx_share_30_60';
+    return 'tx_share_gt_60';
+  }
 
   function overlayBucket(count:number){
     if(count<=0) return 'marks_0';
@@ -287,6 +354,13 @@ if(typeof window !== 'undefined'){
   // Flush overlay panel time if any
   if(overlayOpen){ overlayPause(); }
   if(overlayAccum>0){ track({ type:'overlay_panel_time', ms: Math.round(overlayAccum) }); }
+  // Transmission finalize: accumulate open time through final visibility state
+  if(txOpen){ txPause(); }
+  if(txOpenAccum>0){ track({ type:'transmission_open_time', ms: Math.round(txOpenAccum) }); }
+  if(txEchoAccum>0){ track({ type:'transmission_echo_time', ms: Math.round(txEchoAccum) }); }
+  // Buckets (echo messages & open share)
+  const echoBucket = txEchoMsgBucket(txEchoMsgCount); track({ type:'transmission_echo_msgs_bucket', bucket: echoBucket });
+  const shareBucket = txOpenShareBucket(txOpenAccum, sessionMs); track({ type:'transmission_open_share_bucket', bucket: shareBucket });
       await flush();
     } catch {}
   }

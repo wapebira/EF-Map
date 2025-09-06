@@ -385,6 +385,21 @@
 - Risk: Low (UI + prefs default only; no schema migration). Existing users retain prior volume; skip logic gated by `transmissionSeen` boolean.
 - Gates: typecheck pending | build pending | smoke plan: 1) Fresh load -> intro plays at 25% volume. 2) Dismiss -> reload -> echo-only channel appears on replay with no intro unless replay triggered. 3) Replay pill visible after reload. 4) Fast-forward still accelerates typing.
 - Follow-ups: Consider explicit replay mode prop toggling to re-run intro lines even if `transmissionSeen` (currently replay pill simply remounts component, which triggers intro since showTransmission resets). Potential metrics for echo line consumption/time.
+## 2025-09-06 – Transmission Metrics (Replay / Fast-Forward / Timing / Echo Buckets)
+- Goal: Add richer anonymous instrumentation for the Incoming Transmission window to understand engagement depth without storing content.
+- Metrics Added (client + server whitelist + stats UI section):
+  - Counters: transmission_replay (+ sessions), transmission_fastforward (+ sessions), transmission_close, transmission_close_early, transmission_echo_msg.
+  - Sums: transmission_open_time (panel visible regardless of phase), transmission_echo_time (post-intro echo phase only).
+  - Buckets: transmission_echo_msgs_bucket (echo_0, echo_1_5, echo_6_15, echo_16_30, echo_gt_30) and transmission_open_share_bucket (tx_share_0, lt_10, 10_30, 30_60, gt_60) derived at session finalize.
+- Implementation:
+  - usage.ts: Session-scoped accumulators (open + echo ms, echo msg count) with global helpers (__efTxShow/IntroComplete/Replay/FastForward/Dismiss/EchoMessage/Pause/Resume).
+  - TransmissionPanel.tsx: Hooked helpers at intro init, replay mount, intro completion, fast-forward, echo append, and dismiss.
+  - usage-event.js: Whitelisted new events (countersDynamic for buckets + sum definitions).
+  - StatsPage.tsx: New Transmission panel enumerating counts, rates (completion, replay, fast-forward, early close), averages (open & echo time), and two distributions (Echo Messages, Open Share).
+- Privacy: Only aggregate counts & coarse buckets; no textual echo content transmitted. Buckets intentionally broad (≤5, ≤15, ≤30, >30) to avoid fingerprinting very long dwell patterns.
+- Risk: Medium (cross-file client wiring + server whitelist + UI). Additive only; no schema reset required.
+- Gates: typecheck ✅ build ✅ (pending deploy) smoke ✅ (local: replay triggers replay events; fast-forward increments; early close path sets early flag; session finalize emits sums/buckets once).
+- Follow-ups: Potential future metric for average delay between echoes, or abandonment timing (time to dismissal). Could add 95th percentile client-side if distribution shape needed.
 ## 2025-09-04 – User Overlay Foundational Enhancements (Search, Sort Presets, Aging, Text Export)
 -## 2025-09-04 – User Overlay Advanced Interaction (Legend, Multi-Select, Soft Hover, Duplicate Merge)
 - Goal: Accelerate large mark list workflows (hundreds+) with rapid recolor, batch maintenance, and low-friction spatial inspection without committing selection.

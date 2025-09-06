@@ -106,10 +106,20 @@ const EVENT_MAP = {
   , transmission_link_click: { counters: ['transmission_link_clicks'] }
   , transmission_route_click: { counters: ['transmission_route_clicks'] }
   , transmission_replay: { counters: ['transmission_replays'] }
+  , transmission_replay_first: { counters: ['transmission_replay_sessions'] }
+  , transmission_fastforward: { counters: ['transmission_fastforwards'] }
+  , transmission_fastforward_first: { counters: ['transmission_fastforward_sessions'] }
   , transmission_audio_play: { counters: ['transmission_audio_plays'] }
   , transmission_audio_mute: { counters: ['transmission_audio_mutes'] }
   , transmission_audio_unmute: { counters: ['transmission_audio_unmutes'] }
   , transmission_major_glitch: { counters: ['transmission_major_glitches'] }
+  , transmission_close: { counters: ['transmission_closes'] }
+  , transmission_close_early: { counters: ['transmission_close_earlies'] }
+  , transmission_echo_msg: { counters: ['transmission_echo_msgs'] }
+  , transmission_open_time: { sum: { key:'transmission_open_time_ms_sum', countKey:'transmission_open_time_count', valueField:'ms' } }
+  , transmission_echo_time: { sum: { key:'transmission_echo_time_ms_sum', countKey:'transmission_echo_time_count', valueField:'ms' } }
+  , transmission_echo_msgs_bucket: { countersDynamic: (b)=> { const v=b.bucket; const allowed=['echo_0','echo_1_5','echo_6_15','echo_16_30','echo_gt_30']; return allowed.includes(v)? [v]: []; } }
+  , transmission_open_share_bucket: { countersDynamic: (b)=> { const v=b.bucket; const allowed=['tx_share_0','tx_share_lt_10','tx_share_10_30','tx_share_30_60','tx_share_gt_60']; return allowed.includes(v)? [v]: []; } }
   // --- Environment buckets (coarse, non-identifying) ---
   , screen_res_bucket: { countersDynamic: (b)=> { const v=b.bucket; const allowed=['res_720p','res_1080p','res_1440p','res_4k_plus']; return allowed.includes(v)? [v]: []; } }
   , cpu_cores_bucket: { countersDynamic: (b)=> { const v=b.bucket; const allowed=['cores_1_2','cores_3_4','cores_5_8','cores_9_12','cores_13_16','cores_17_plus']; return allowed.includes(v)? [v]: []; } }
