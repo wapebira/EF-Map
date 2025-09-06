@@ -89,8 +89,6 @@ const DESCRIPTIONS: Record<string,string> = {
   'Overlay Marks Count':'Distribution of mark counts present at session snapshot time.'
   , 'Transmission Replays':'Replay button activations (total).'
   , 'Replay sessions':'Distinct sessions with at least one replay.'
-  , 'Fast-forwards':'Fast-forward actions during intro.'
-  , 'Fast-forward sessions':'Distinct sessions with at least one fast-forward.'
   , 'Closes':'Total transmission panel closes.'
   , 'Early closes':'Closes occurring before intro completed.'
   , 'Avg open time':'Average cumulative time the transmission panel stayed open (sessions with panel open).'
@@ -415,34 +413,15 @@ const StatsPage: React.FC = () => {
             <h2 style={{ margin:'0 0 8px 0', fontSize:'15px', letterSpacing:'.5px', textTransform:'uppercase', opacity:0.85 }}>Transmission</h2>
             <StatRow label="Transmission shows" value={data.counters.transmission_shows||0} />
             <StatRow label="Completes" value={data.counters.transmission_completes||0} />
-            <StatRow label="Completion rate" value={( ()=>{ const s=data.counters.transmission_shows||0; const c=data.counters.transmission_completes||0; if(!s) return '—'; return ((c/s)*100).toFixed(1)+'%'; })()} />
             <StatRow label="Transmission replays" value={data.counters.transmission_replays||0} />
             <StatRow label="Replay sessions" value={data.counters.transmission_replay_sessions||0} />
             <StatRow label="Replay rate" value={( ()=>{ const s=data.counters.transmission_shows||0; const rs=data.counters.transmission_replay_sessions||0; if(!s) return '—'; return ((rs/s)*100).toFixed(1)+'%'; })()} />
-            <StatRow label="Fast-forwards" value={data.counters.transmission_fastforwards||0} />
-            <StatRow label="Fast-forward sessions" value={data.counters.transmission_fastforward_sessions||0} />
-            <StatRow label="Fast-forward rate" value={( ()=>{ const s=data.counters.transmission_shows||0; const fs=data.counters.transmission_fastforward_sessions||0; if(!s) return '—'; return ((fs/s)*100).toFixed(1)+'%'; })()} />
             <StatRow label="Closes" value={data.counters.transmission_closes||0} />
             <StatRow label="Early closes" value={data.counters.transmission_close_earlies||0} />
             <StatRow label="Early close rate" value={( ()=>{ const cl=data.counters.transmission_closes||0; const ec=data.counters.transmission_close_earlies||0; if(!cl) return '—'; return ((ec/cl)*100).toFixed(1)+'%'; })()} />
             <StatRow label="Avg open time" value={formatDurationAvg(data.sums.transmission_open_time_ms_sum, data.sums.transmission_open_time_count)} />
             <StatRow label="Avg echo time" value={formatDurationAvg(data.sums.transmission_echo_time_ms_sum, data.sums.transmission_echo_time_count)} />
             <StatRow label="Echo msgs total" value={data.counters.transmission_echo_msgs||0} />
-            <StatRow label="Avg echo msgs / session" value={( ()=>{ const tot=data.counters.transmission_echo_msgs||0; const sess=data.counters.transmission_shows||0; if(!tot||!sess) return '—'; return (tot/ (sess||1)).toFixed(1); })()} />
-            {/* Distributions */}
-            {(() => {
-              const echoBuckets = ['echo_0','echo_1_5','echo_6_15','echo_16_30','echo_gt_30'];
-              const echoTotal = echoBuckets.reduce((a,k)=> a + (data.counters[k]||0), 0);
-              const rows = echoBuckets.map(k=>({ k, c:data.counters[k]||0, label: k.replace('echo_','').replace('gt_','>') }));
-              return <DistTable title="Echo Messages" rows={rows} total={echoTotal} />;
-            })()}
-            {(() => {
-              const shareBuckets = ['tx_share_0','tx_share_lt_10','tx_share_10_30','tx_share_30_60','tx_share_gt_60'];
-              const labels:Record<string,string> = { tx_share_0:'0%','tx_share_lt_10':'<10%','tx_share_10_30':'10–30%','tx_share_30_60':'30–60%','tx_share_gt_60':'>60%' };
-              const total = shareBuckets.reduce((a,k)=> a + (data.counters[k]||0), 0);
-              const rows = shareBuckets.map(k=>({ k, c:data.counters[k]||0, label: labels[k] }));
-              return <div style={{ marginTop:18 }}><DistTable title="Open Share" rows={rows} total={total} /></div>;
-            })()}
           </section>
           {/* User Overlay */}
           <section style={{ background:'rgba(255,255,255,0.06)', padding:'16px 18px', border:'1px solid rgba(255,255,255,0.15)', borderRadius:10, boxShadow:'0 2px 4px rgba(0,0,0,0.45)' }}>
@@ -494,6 +473,8 @@ const StatsPage: React.FC = () => {
               {(()=>{ const keys=['marks_0','marks_1_5','marks_6_15','marks_16_30','marks_31_60','marks_61_plus']; const labelMap:{[k:string]:string}={marks_0:'0',marks_1_5:'1–5',marks_6_15:'6–15',marks_16_30:'16–30',marks_31_60:'31–60',marks_61_plus:'61+'}; const rows=keys.map(k=>({k,c:data.counters[k]||0,label:labelMap[k]})); const tot=rows.reduce((a,b)=>a+b.c,0); return <DistTable title="Overlay Marks Count" rows={rows} total={tot} />; })()}
               {(()=>{ const keys=['res_720p','res_1080p','res_1440p','res_4k_plus']; const labelMap:{[k:string]:string}={res_720p:'≤720p',res_1080p:'1080p',res_1440p:'1440p',res_4k_plus:'4K+'}; const rows=keys.map(k=>({k,c:data.counters[k]||0,label:labelMap[k]})); const tot=rows.reduce((a,b)=>a+b.c,0); return <DistTable title="Screen Resolution" rows={rows} total={tot} />; })()}
               {(()=>{ const keys=['cores_1_2','cores_3_4','cores_5_8','cores_9_12','cores_13_16','cores_17_plus']; const labelMap:{[k:string]:string}={cores_1_2:'1–2',cores_3_4:'3–4',cores_5_8:'5–8',cores_9_12:'9–12',cores_13_16:'13–16',cores_17_plus:'17+'}; const rows=keys.map(k=>({k,c:data.counters[k]||0,label:labelMap[k]})); const tot=rows.reduce((a,b)=>a+b.c,0); return <DistTable title="CPU Cores" rows={rows} total={tot} />; })()}
+              {(()=>{ const echoBuckets = ['echo_0','echo_1_5','echo_6_15','echo_16_30','echo_gt_30']; const rows=echoBuckets.map(k=>({k,c:data.counters[k]||0,label:k.replace('echo_','').replace('gt_','>')})); const tot=rows.reduce((a,b)=>a+b.c,0); return <DistTable title="Echo Messages" rows={rows} total={tot} />; })()}
+              {(()=>{ const shareBuckets = ['tx_share_0','tx_share_lt_10','tx_share_10_30','tx_share_30_60','tx_share_gt_60']; const labels:Record<string,string>={ tx_share_0:'0%',tx_share_lt_10:'<10%',tx_share_10_30:'10–30%',tx_share_30_60:'30–60%',tx_share_gt_60:'>60%' }; const rows=shareBuckets.map(k=>({k,c:data.counters[k]||0,label:labels[k]})); const tot=rows.reduce((a,b)=>a+b.c,0); return <DistTable title="Open Share" rows={rows} total={tot} />; })()}
             </div>
           </section>
   </div>
