@@ -2,6 +2,16 @@
 
 Purpose: This repo hosts (1) map data processing scripts (Python) for EVE Frontier star/region data, and (2) a deployable interactive web app (`eve-frontier-map/`) built with React + TypeScript + Vite and Netlify Functions for lightweight serverless features (sharing + anonymous usage stats). Follow the patterns below when adding or modifying code. This file is optimized for a "Vibe coding" workflow: the human provides intent (non‑coder) and the AI agent converts intent into safe, minimal, verifiable changes.
 
+## Operator Quick Start (Non‑Coder)
+1. Describe goal in plain language (what you want to see changed / added / fixed).
+2. Assistant replies with: checklist, assumptions (≤2), risk class, plan.
+3. You approve or adjust scope (optionally grant token if High risk or migration phase).
+4. Assistant patches code, runs typecheck/build, reports gates & follow-ups.
+5. Non-trivial decisions appended to `docs/decision-log.md` (≤10 lines each).
+6. Multi-day / migration tasks update `docs/MIGRATION_PLAN.md` & `migration_status.json` before further code.
+
+If stuck: ask for "safer alternative" or "explain tradeoffs". Avoid giving line-by-line code; just describe desired outcome.
+
 ## Architecture Overview
 - Root Python scripts + JSON assets generate / transform map data consumed by the web app. No runtime coupling – they are one‑off preprocessing utilities.
 - Frontend lives in `eve-frontier-map/`: pure client (React + TS) + in‑browser SQLite (`sql.js`) + Web Workers for heavy computation (routing / optimization) + Netlify Functions for persistence (shares, usage stats) via `@netlify/blobs` key‑value storage.
@@ -14,7 +24,7 @@ Purpose: This repo hosts (1) map data processing scripts (Python) for EVE Fronti
 
 Reference index: see `docs/README.md` for links to broader specs (`PROJECT_REQUIREMENTS.md`, cinematic spec, operational playbooks).
 
-Cloud Platform (current & upcoming): Currently deployed on Netlify Functions with `@netlify/blobs` for key-value storage. A near-term migration to Cloudflare Workers + KV / R2 / D1 is planned; avoid hard-coding Netlify-specific APIs in new logic. Isolate persistence access behind small utility helpers so swapping providers is low-risk.
+Cloud Platform (current & upcoming): Currently Netlify (Functions + Blobs). Migration to Cloudflare (Workers + KV, optional D1 later) will proceed via token-gated phases. Do not introduce new direct provider calls outside the abstraction. See `docs/MIGRATION_PLAN.md` for phased plan & tokens.
 
 ## Key Folders / Files
 - `eve-frontier-map/src/App.tsx`: top-level state & feature toggles (cinematic, panels, routing integration, event bridges to `usage.ts`).
@@ -98,17 +108,92 @@ If user asks for broad refactor, first propose smallest path to accomplish user-
 - Route note pagination regressions → keep segment-first pagination (see `P2PRouting.tsx`).
 - Worker progress spam → throttle ≥200ms (mirror existing pattern).
 
-### Cloudflare Migration Foresight
-- Netlify `@netlify/blobs` → Cloudflare KV (key-value) or Durable Objects for coordinated writes; choose KV for simple counters.
-- Batched metrics: Maintain current batching; abstract store set/get behind a helper (`src/utils/store.ts` future) to swap implementation.
-- Shares storage: Short id -> payload mapping moves from blobs to KV. Plan: namespace binding (e.g., `SHARES`) with TTL (optional). Collision avoidance logic remains.
-- Stats aggregation: Current write-amend JSON blob; on KV, store single JSON key (`current`) + daily keys (`daily/DATE`). KV eventual consistency is acceptable for counters; if strict atomic increments required later, consider Durable Object to serialize updates.
-- Potential D1 usage: If richer querying needed, migrate aggregated snapshot writes to D1 table (columns: date, counter_key, value). Keep snapshot format stable until migration token `MIGRATE STORAGE OK` introduced.
-- R2 not required unless large binary/map artifacts move server-side.
-- Avoid introducing Netlify-specific response helpers; keep handlers framework-neutral (plain fetch-style signature allows easier Workers port).
+### Cloudflare Migration Pointer
+Full phased, token-gated migration plan (audit → shadow → dual write → cutover → cleanup) lives in `docs/MIGRATION_PLAN.md`. This instructions file only carries high-level rules:
+* Never modify `_store.js` for Cloudflare without appropriate phase token (see tokens list below).
+* Keep new persistence logic behind explicit env flags until cutover phase.
+* All parity / drift metrics are documented & must pass before advancing phases.
 
-### Storage Migration Tokens (Additions)
-- `MIGRATE STORAGE OK`: Permission to introduce Cloudflare KV / D1 bindings and conditional runtime selection.
+### Migration Tokens (Phased)
+- `MIGRATE PHASE0 OK` – Audit / hardening (no runtime change)
+- `MIGRATE PHASE1 OK` – Introduce adapter skeleton (flagged)
+- `MIGRATE PHASE2 OK` – Shadow reads (dual fetch compare)
+- `MIGRATE PHASE3 OK` – Dual write (primary Netlify)
+- `MIGRATE PHASE4 OK` – Cutover (primary Cloudflare, fallback Netlify)
+- `MIGRATE CLEANUP OK` – Remove Netlify paths
+Legacy `MIGRATE STORAGE OK` treated as superseded; use phased tokens instead.
+
+Token Granting: Operator explicitly states token phrase. Assistant must echo acceptance and update `MIGRATION_PLAN.md` & `migration_status.json` before code edits.
+
+Natural Language Triggers: You do NOT need to say exact token phrases. The assistant will interpret plain English like:
+- "Let's start the migration" → treat as request for Phase 0 token.
+- "Add the adapter scaffold" / "ready for the adapter" → Phase 1.
+- "Can we compare both systems now?" / "begin shadow reads" → Phase 2.
+- "Write to both so we can test" / "dual write time" → Phase 3.
+- "Switch production to Cloudflare" / "cut over now" → Phase 4.
+- "Remove Netlify code" / "clean up leftovers" → Cleanup phase.
+If ambiguous, assistant will clarify before acting. If phrasing suggests skipping phases, assistant will propose required intermediate steps first.
+
+Cloudflare UI Help: When you indicate readiness (e.g. "Help me set up Cloudflare now"), assistant will provide step-by-step portal actions (create account, enable Workers, create KV namespace, note binding name, retrieve API token) before any code changes.
+
+Advancement Requirements (summary):
+- Phase2 exit: <0.5% drift 7 consecutive days
+- Phase3 exit: near-zero drift & <0.1% write fail
+- Phase4 exit: fallback <0.1% & latency p95 within ±15%
+### Multi-Day Task Handling
+If a task spans sessions (> ~2 hours or multiple approvals) create/update a dedicated section in either:
+- `docs/MIGRATION_PLAN.md` (for migration-related) OR
+- A new small doc (feature-specific) linked from decision log.
+Assistant must resume by reading last 20 lines of relevant doc + newest decision log entry.
+
+### Resumption Protocol
+On new session for an ongoing multi-day effort assistant does:
+1. Read `docs/migration_status.json` (if migration) and tail of `MIGRATION_PLAN.md`.
+2. Summarize current phase, remaining checklist items.
+3. Propose next micro-step (≤30 min scope) for approval.
+
+### Metrics Parity & Drift Gates
+Drift formula: |A−B| / max(B,1). Unless otherwise stated B = baseline provider (Netlify). Gates:
+- Shadow (P2): <0.5% average drift (counters & sums)
+- Dual Write (P3): <0.2% sustained
+- Pre-Cutover (enter P4): effectively 0% (allow single off-by-one during flush window)
+Violation triggers rollback actions (see Rollback Guidance).
+
+### Rollback Guidance (Quick Table)
+| Scenario | Phase | Action |
+|----------|-------|--------|
+| Drift spike >= gate | 2/3 | Freeze advancement; disable shadow/dual flags; log entry |
+| Cloudflare write errors >0.5% hour | 3 | Disable CF writes; investigate; do not advance |
+| Fallback rate >=0.5% hour | 4 | Revert primary switch commit; re-enable Netlify primary |
+| Latency regression >15% p95 | 4 | Add caching / revert; re-measure |
+
+### Risk Register Pattern
+Maintain in plan doc: `Risk | Impact | Mitigation | Trigger | Status`. Update status rather than duplicating lines in decision log (log only deltas or new risks).
+
+### When to Update Which Doc
+| Change Type | Doc |
+|-------------|-----|
+| Code decision (non-trivial) | decision-log.md |
+| Migration phase progress | MIGRATION_PLAN.md + migration_status.json |
+| Global workflow rule change | This file |
+| Tiny copy tweak / style | No doc update |
+
+### AI Output Style Shortcuts
+Assistant may label responses (plain text, no markup needed) at top with one of: `PATCH PROPOSAL`, `PHASE STATUS`, `RISK UPDATE`, `ROLLBACK ADVICE` for quick scanning.
+
+### Cloudflare UI Setup (Operator Cheat Sheet)
+The assistant can walk you through these when you say you're ready; listed here for transparency:
+1. Create / log into Cloudflare account.
+2. Enable Workers & KV (free tier sufficient initially).
+3. Create a KV Namespace for shares (suggested: `EF_SHARES`). Save its ID.
+4. Create a KV Namespace for stats (suggested: `EF_STATS`). Save its ID.
+5. (Optional early) Create separate namespace for drift diagnostics `EF_DRIFT`.
+6. Generate an API Token with permissions: Account.Workers KV Storage (Read & Write). Store securely (not committed).
+7. Decide binding names (e.g., `SHARES_KV`, `STATS_KV`). These will appear in worker config or environment mapping.
+8. Provide the namespace IDs & chosen binding names in chat (plain language fine) – assistant will scaffold adapter referencing placeholders (never committing secrets, only variable names).
+9. Later (Cutover) verify DNS routing or custom domain for Workers if serving endpoints directly (not required if still fronted by existing hosting).
+
+Secrets Handling: Do not paste full API tokens into repository. Assistant will create `.env.example` entries if needed and reference environment variables only.
 
 ### Pre-Migration Implementation Guidelines
 - Encapsulate blob operations: future helper `getStatsStore()` analog for Cloudflare; design interface now: `{ get(key), set(key,value) }`.

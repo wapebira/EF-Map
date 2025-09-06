@@ -577,5 +577,21 @@
 - Gates: typecheck ✅ build ✅ (post-change), smoke ✅ (Stats page shows new distributions after at least one session triggers events; no console errors; other metrics unaffected).
 - Follow-ups: Potential future buckets: device memory (e.g., mem_<4GB, 4_8GB, 8_16GB, 16_32GB, 32GB_plus), device pixel ratio (dpr_1, dpr_retina, dpr_ultra), and minimal GPU tier classification (basic / mid / high) via WebGL renderer info string hashing – all pending demand. Consider using these distributions to adapt default panel cascade density or auto-enable performance-saving visual settings on low-end profiles.
 
+## 2025-09-06 – Migration Planning Framework Introduction
+- Goal: Establish structured, token-gated multi-phase plan for upcoming Netlify → Cloudflare persistence migration without altering runtime behavior yet.
+- Files: `docs/MIGRATION_PLAN.md` (new), `docs/migration_status.json` (machine-readable phase state), `docs/decision-log.md` (this entry), updated forthcoming `.github/copilot-instructions.md` (pending in same change set) to reference plan (will be applied shortly).
+- Diff: + ~250 LOC new docs (plan + status JSON minimal 4 lines) | no code changes.
+- Risk: None (documentation only, no imports or runtime references consumed yet).
+- Rationale: Prevent scope creep & provide clear resume points for AI-assisted sessions; enable operator to gate each phase via explicit tokens (MIGRATE PHASE0 OK → CLEANUP OK).
+- Follow-ups: After operator grants `MIGRATE PHASE0 OK`, implement Phase 0 audit tasks and append findings; then request Phase 1 token before adapter code.
+
+## 2025-09-06 – Natural Language Migration Triggers & UI Prep Docs
+- Goal: Allow operator to initiate migration phases using plain English (no need to cite exact token strings) and provide up-front Cloudflare UI checklist for smoother onboarding.
+- Files: `.github/copilot-instructions.md` (added natural language trigger mapping + Cloudflare UI setup cheat sheet), `docs/MIGRATION_PLAN.md` (extended Phase 0 tasks with operator namespace prep), `decision-log.md` (this entry).
+- Diff: ~+55 LOC combined across docs.
+- Risk: None (documentation only).
+- Rationale: Reduce cognitive load for non‑coder operator; ensure assistant interprets phrases like "let's start the migration" as Phase 0 token grant; pre-stage Cloudflare namespace tasks to avoid blocking later phases.
+- Follow-ups: When operator expresses readiness (any mapped phrase), assistant will (1) echo interpretation, (2) update `migration_status.json`, (3) execute Phase 0 audit checklist items.
+
 
 
