@@ -1737,6 +1737,16 @@ function App() {
   const [addOverlaySystem, setAddOverlaySystem] = useState<{ id:number; name:string }|null>(null);
   // Z-index management for draggable panels
   const [panelZ, setPanelZ] = useState<Record<string, number>>({});
+  // Minimized panels (retain feature activation while hiding body). Persist lightweight in localStorage (separate from prefs schema to avoid version bump).
+  const [minimizedPanels, setMinimizedPanels] = useState<Set<string>>(()=>{
+    if(typeof window==='undefined') return new Set();
+    try { const raw = localStorage.getItem('efmap:minPanels'); if(raw){ const arr = JSON.parse(raw); if(Array.isArray(arr)) return new Set(arr as string[]); } } catch {}
+    return new Set();
+  });
+  const persistMinPanels = (next:Set<string>)=>{ try { localStorage.setItem('efmap:minPanels', JSON.stringify(Array.from(next))); } catch {} };
+  const toggleMinimize = (id:string)=>{
+    setMinimizedPanels(prev=> { const n=new Set(prev); if(n.has(id)) n.delete(id); else n.add(id); persistMinPanels(n); return n; });
+  };
   const topZRef = useRef(1500);
   const bringToFront = (id:string) => {
     setPanelZ(prev=> { const next={...prev}; topZRef.current +=1; next[id]= topZRef.current; return next; });
@@ -4365,7 +4375,7 @@ function App() {
   return (
     <>
       {/* Region Stats PanelDrawer (managed cascade) */}
-      {isRegionHighlighterActive && regionStatsVisible && openPanels.has('region-stats') && (
+    {isRegionHighlighterActive && regionStatsVisible && openPanels.has('region-stats') && (
         <PanelDrawer
           ref={regionStatsDrawerRef}
           id="region-stats"
@@ -4375,6 +4385,8 @@ function App() {
           onActivate={bringToFront}
           onClose={(id)=> { setOpenPanels(p=> { const n=new Set(p); n.delete(id); return n; }); setRegionStatsVisible(false); }}
           resetToken={layoutResetToken}
+      isMinimized={minimizedPanels.has('region-stats')}
+      onToggleMinimize={toggleMinimize}
         >
           <RegionStatsCard regionName={activeRegionName} stats={regionStatsLoading && !activeRegionStats ? null : activeRegionStats} />
         </PanelDrawer>
@@ -4392,6 +4404,8 @@ function App() {
           resizable
           initialSize={{ width: 900, height: 520 }}
           minSize={{ width: 640, height: 320 }}
+          isMinimized={minimizedPanels.has('region-compare')}
+          onToggleMinimize={toggleMinimize}
         >
           <CompareRegionsPanel
             regions={Object.values(mapData?.regions||{}).map(r=> ({ id:r.id, name:r.name, stats: regionCompareStats[r.id]||null }))}
@@ -4473,7 +4487,7 @@ function App() {
           />
         </PanelDrawer>
       )}
-      {OVERLAY_FEATURE_FLAG && openPanels.has('user-overlay') && (
+    {OVERLAY_FEATURE_FLAG && openPanels.has('user-overlay') && (
         <PanelDrawer
           ref={userOverlayDrawerRef}
           id="user-overlay"
@@ -4486,6 +4500,8 @@ function App() {
           resizable
           initialSize={{ width: 780, height: 480 }}
           minSize={{ width: 520, height: 320 }}
+      isMinimized={minimizedPanels.has('user-overlay')}
+      onToggleMinimize={toggleMinimize}
         >
           <UserOverlayPanel
             selectedSystem={highlightedSystem ? { id: highlightedSystem.id, name: highlightedSystem.name } : null}
@@ -4708,7 +4724,7 @@ function App() {
       {!hideUI && (
         <>
           {openPanels.has('routing') && (
-            <PanelDrawer ref={routingDrawerRef} id="routing" title="Routing" scale={uiScale} zIndex={panelZ['routing']||1450} onActivate={bringToFront} onClose={(id)=> setOpenPanels(p=> { const n=new Set(p); n.delete(id); return n; })} resetToken={layoutResetToken}>
+            <PanelDrawer ref={routingDrawerRef} id="routing" title="Routing" scale={uiScale} zIndex={panelZ['routing']||1450} onActivate={bringToFront} onClose={(id)=> setOpenPanels(p=> { const n=new Set(p); n.delete(id); return n; })} resetToken={layoutResetToken} isMinimized={minimizedPanels.has('routing')} onToggleMinimize={toggleMinimize}>
               <RoutingPanel
                 onCalculateRoute={calculateRoute}
                 onStopCalculation={stopCalculation}
@@ -4778,7 +4794,7 @@ function App() {
             </PanelDrawer>
           )}
           {openPanels.has('cinematic') && (
-            <PanelDrawer ref={cinematicDrawerRef} id="cinematic" title="Cinematic Mode" scale={uiScale} zIndex={panelZ['cinematic']||1450} onActivate={bringToFront} onClose={(id)=> { setOpenPanels(p=> { const n=new Set(p); n.delete(id); return n; }); setCinematicMode(false); }} resetToken={layoutResetToken}>
+            <PanelDrawer ref={cinematicDrawerRef} id="cinematic" title="Cinematic Mode" scale={uiScale} zIndex={panelZ['cinematic']||1450} onActivate={bringToFront} onClose={(id)=> { setOpenPanels(p=> { const n=new Set(p); n.delete(id); return n; }); setCinematicMode(false); }} resetToken={layoutResetToken} isMinimized={minimizedPanels.has('cinematic')} onToggleMinimize={toggleMinimize}>
               <CinematicPanel
                 starColorMode={starColorMode}
                 setStarColorMode={setStarColorMode as any}
@@ -4820,13 +4836,15 @@ function App() {
               onActivate={()=> bringToFront('planetLegend')}
               onClose={()=> setIsPlanetCountActive(false)}
               resetToken={layoutResetToken}
+              isMinimized={minimizedPanels.has('planet-legend')}
+              onToggleMinimize={()=> toggleMinimize('planet-legend')}
             >
               {generatePlanetCountLegend()}
             </PlanetLegendPanel>
           )}
           {openPanels.has('display-settings') && (
-            <PanelDrawer ref={displaySettingsDrawerRef} id="display-settings" title="Display Settings" scale={uiScale} zIndex={panelZ['display-settings']||1450} onActivate={bringToFront} onClose={(id)=> setOpenPanels(p=> { const n=new Set(p); n.delete(id); return n; })}>
-              <DisplaySettingsPanel />
+            <PanelDrawer ref={displaySettingsDrawerRef} id="display-settings" title="Display Settings" scale={uiScale} zIndex={panelZ['display-settings']||1450} onActivate={bringToFront} onClose={(id)=> setOpenPanels(p=> { const n=new Set(p); n.delete(id); return n; })} isMinimized={minimizedPanels.has('display-settings')} onToggleMinimize={toggleMinimize}>
+              <DisplaySettingsPanel onLayoutReset={()=> { setMinimizedPanels(new Set()); try { localStorage.removeItem('efmap:minPanels'); } catch {}; }} />
             </PanelDrawer>
           )}
           {/* StationsPanel removed: feature rail toggle directly controls icon sprites without extra popup */}

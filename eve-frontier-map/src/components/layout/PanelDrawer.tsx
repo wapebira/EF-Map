@@ -17,6 +17,9 @@ interface PanelDrawerProps {
   initialSize?: { width:number; height:number };
   minSize?: { width:number; height:number };
   maxSize?: { width?:number; height?:number };
+  // Minimization support
+  isMinimized?: boolean;
+  onToggleMinimize?: (id:string)=>void;
 }
 
 export interface PanelDrawerHandle {
@@ -32,7 +35,7 @@ const baseDefaults: Record<string,{x:number;y:number}> = {
   'display-settings': { x:140, y:70 },
 };
 
-const PanelDrawer = forwardRef<PanelDrawerHandle, PanelDrawerProps>(({ id, title, onClose, children, defaultPos, scale=1, zIndex=1450, onActivate, resetToken, resizable=false, initialSize, minSize, maxSize }, ref) => {
+const PanelDrawer = forwardRef<PanelDrawerHandle, PanelDrawerProps>(({ id, title, onClose, children, defaultPos, scale=1, zIndex=1450, onActivate, resetToken, resizable=false, initialSize, minSize, maxSize, isMinimized=false, onToggleMinimize }, ref) => {
   const initial = defaultPos || baseDefaults[id] || { x:140, y:70 };
   const drag = useDraggable('drawer-'+id, initial);
   useImperativeHandle(ref, ()=>({
@@ -110,6 +113,26 @@ const PanelDrawer = forwardRef<PanelDrawerHandle, PanelDrawerProps>(({ id, title
     return ()=>{ window.removeEventListener('pointermove', onMove as any); window.removeEventListener('pointerup', onUp as any); };
   },[resizable, minW, minH, maxW, maxH, drag]);
 
+  // Scrollbar compensation: when vertical scrollbar appears, expand outer width by its width so inner content width stays stable.
+  const bodyRef = React.useRef<HTMLDivElement|null>(null);
+  const [scrollbarExtra, setScrollbarExtra] = React.useState(0);
+  const measureScrollbar = React.useCallback(()=>{
+    if(!bodyRef.current || isMinimized) { setScrollbarExtra(0); return; }
+    const el = bodyRef.current;
+    const needs = el.scrollHeight > el.clientHeight + 1; // vertical overflow
+    if(!needs){ setScrollbarExtra(0); return; }
+    const sbw = el.offsetWidth - el.clientWidth; // includes padding; difference approximates scrollbar width
+    if(sbw>0 && Math.abs(sbw - scrollbarExtra) > 1){ setScrollbarExtra(sbw); }
+  }, [isMinimized, scrollbarExtra]);
+  React.useEffect(()=>{ measureScrollbar(); }, [children, size, isMinimized, measureScrollbar]);
+  React.useEffect(()=>{
+    if(isMinimized) return; // ignore
+    const h = ()=> measureScrollbar();
+    window.addEventListener('resize', h);
+    const idInt = setInterval(h, 600); // low-frequency poll for dynamic content changes (cheap)
+    return ()=> { window.removeEventListener('resize', h); clearInterval(idInt); };
+  }, [measureScrollbar, isMinimized]);
+
   const resizeHandles = resizable ? (
     <>
       {['n','s','e','w','ne','nw','se','sw'].map(edge=>{
@@ -119,13 +142,27 @@ const PanelDrawer = forwardRef<PanelDrawerHandle, PanelDrawerProps>(({ id, title
     </>
   ): null;
 
+  // For non-resizable panels we still want scrollbar width compensation. We capture initial clientWidth once.
+  const rootRef = React.useRef<HTMLDivElement|null>(null);
+  const [baseWidth, setBaseWidth] = React.useState<number|undefined>(undefined);
+  React.useEffect(()=>{
+    if(resizable || baseWidth!==undefined) return; // only once for non-resizable
+    if(rootRef.current){ setBaseWidth(rootRef.current.clientWidth); }
+  }, [resizable, baseWidth]);
+  const appliedWidth = resizable ? (size? size.width + scrollbarExtra : undefined) : (baseWidth!==undefined ? baseWidth + (scrollbarExtra||0) : undefined);
+
   return (
-  <div className={`ef-drawer ${drag.isDragging? 'dragging':''} ${resizable? 'resizable':''}`} data-panel-id={id} aria-label={`${title||'Panel'} drawer`} style={{ left: drag.pos.x, top: drag.pos.y, transform:`scale(${scale})`, transformOrigin:'top left', zIndex, width: size? size.width: undefined, height: size? size.height: undefined }} onMouseDown={()=> onActivate && onActivate(id)}>
+  <div ref={rootRef} className={`ef-drawer ${drag.isDragging? 'dragging':''} ${resizable? 'resizable':''} ${isMinimized? 'minimized':''}`} data-panel-id={id} aria-label={`${title||'Panel'} drawer`} style={{ left: drag.pos.x, top: drag.pos.y, transform:`scale(${scale})`, transformOrigin:'top left', zIndex, width: appliedWidth, height: isMinimized? undefined : (size? size.height: undefined) }} onMouseDown={()=> onActivate && onActivate(id)}>
       <div className="ef-drawer-head" {...drag.bind} style={{ cursor:'move' }} onMouseDown={()=> onActivate && onActivate(id)}>
-  <span className="ef-drawer-title">{title}</span>
-        <button className="ef-drawer-close" onClick={()=> onClose(id)} aria-label={`Close ${title||'panel'}`}>✕</button>
+        <span className="ef-drawer-title">{title}</span>
+        <div style={{ display:'flex', gap:4 }}>
+          {onToggleMinimize && (
+            <button className="ef-drawer-close" onClick={(e)=>{ e.stopPropagation(); onToggleMinimize(id); }} aria-label={`${isMinimized? 'Restore':'Minimize'} ${title||'panel'}`}>{isMinimized? '▢':'—'}</button>
+          )}
+          <button className="ef-drawer-close" onClick={()=> onClose(id)} aria-label={`Close ${title||'panel'}`}>✕</button>
+        </div>
       </div>
-      <div className="ef-drawer-body">{children}</div>
+  {!isMinimized && <div className="ef-drawer-body" ref={bodyRef}>{children}</div>}
       {resizeHandles}
     </div>
   );

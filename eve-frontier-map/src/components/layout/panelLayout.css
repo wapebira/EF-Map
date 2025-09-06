@@ -15,6 +15,9 @@
 .ef-drawer-close { background:transparent; border:none; color:#eee; font-size:14px; cursor:pointer; padding:4px 6px; border-radius:4px; }
 .ef-drawer-close:hover { background:rgba(255,255,255,0.1); }
 .ef-drawer-body { overflow:auto; padding:12px 16px 4px; display:flex; flex-direction:column; gap:14px; }
+.ef-drawer.minimized { height:auto !important; padding-bottom:4px; }
+.ef-drawer.minimized .ef-drawer-head { border-bottom:none; padding-bottom:6px; }
+.ef-drawer.minimized .ef-drawer-body { display:none !important; }
 /* Resizable handles */
 .ef-drawer.resizable { max-width:none; max-height:none; }
 .ef-resize-handle { position:absolute; background:transparent; z-index:10; }
@@ -41,6 +44,9 @@
 /* Secondary panel styling (planet legend) */
 .ef-secondary-panel { position:absolute; left:76px; top:70px; width:280px; background:linear-gradient(180deg, rgba(30,30,32,0.78) 0%, rgba(18,18,20,0.78) 55%, rgba(12,12,14,0.78) 100%); border:1px solid rgba(255,255,255,0.22); border-radius:14px; backdrop-filter:blur(9px) saturate(140%); box-shadow:0 6px 24px -6px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.05) inset; z-index:1425; display:flex; flex-direction:column; max-height:calc(100vh - 60px); transition:left 220ms cubic-bezier(.4,.16,.2,1), top 220ms cubic-bezier(.4,.16,.2,1), transform 220ms cubic-bezier(.4,.16,.2,1); will-change:left, top, transform; }
 .ef-secondary-panel.dragging { transition:none !important; }
+.ef-secondary-panel.minimized { height:auto !important; padding-bottom:4px; }
+.ef-secondary-panel.minimized .ef-secondary-head { border-bottom:none; padding-bottom:6px; }
+.ef-secondary-panel.minimized .ef-secondary-body { display:none !important; }
 .ef-secondary-panel.below-drawer { top:calc(70px + 8px + var(--drawer-height, 0px)); }
 .ef-secondary-head { display:flex; align-items:center; justify-content:space-between; padding:10px 14px 8px; border-bottom:1px solid rgba(255,255,255,0.10); background:linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0)); border-top-left-radius:14px; border-top-right-radius:14px; }
 .ef-secondary-title { font-size:13px; font-weight:700; letter-spacing:.5px; }

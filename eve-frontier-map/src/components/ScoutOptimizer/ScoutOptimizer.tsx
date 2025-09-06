@@ -920,7 +920,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	}, [usePlanetCount, planetBinsActive]);
 
 	const panel = (
-		<div className={`scout-optimizer-panel ${effectiveHideInputs? 'hide-inputs':''}`}>
+		<div className={`scout-optimizer-panel ${embedded? 'embedded':''} ${effectiveHideInputs? 'hide-inputs':''}`}>
 					<div style={{display:'flex', gap:'10px', flexWrap:'wrap', alignItems:'center'}}>
 						<label style={{fontSize:'0.7rem', display:'flex', gap:4, alignItems:'center'}}>
 							<input type="checkbox" checked={effectiveHideInputs} onChange={(e)=> setHideInputsPref(e.target.checked)} /> Hide Inputs
