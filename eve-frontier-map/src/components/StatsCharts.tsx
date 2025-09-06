@@ -23,6 +23,9 @@ export const LineChart: React.FC<LineChartProps> = ({ width=360, height=160, ser
   const innerW = width - padding.l - padding.r;
   const innerH = height - padding.t - padding.b;
   const allX = series[0]?.points.map(p=>p.x) || [];
+  // Hover state
+  const [hover, setHover] = useState<null | { sx:number; sy:number; date:string; value:number; seriesLabel:string; color:string }>(null);
+  const svgRef = useRef<SVGSVGElement | null>(null);
   const valueMax = useMemo(()=>{
     if(normalize) return 1;
     let m = 0; series.forEach(s=> s.points.forEach(p=>{ if(p.y!==null && p.y>m) m=p.y; }));
@@ -44,8 +47,43 @@ export const LineChart: React.FC<LineChartProps> = ({ width=360, height=160, ser
   };
   // Y axis ticks (5)
   const ticks = Array.from({length:5}, (_,i)=> i/4);
+  // Precompute x positions for hit-testing
+  const xPositions = useMemo(()=>{
+    const inset = 6; const spanCount = Math.max(allX.length-1,1); const usableW = innerW - inset*2;
+    return allX.map((_,i)=> padding.l + inset + (i/spanCount)*usableW);
+  }, [allX, innerW, padding.l]);
+
+  const handleMove = (e:React.MouseEvent)=>{
+    if(!svgRef.current) return;
+    const rect = svgRef.current.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    // Find closest x index
+    if(!xPositions.length) { setHover(null); return; }
+    let ci = 0; let bestDist = Infinity;
+    xPositions.forEach((xp,i)=>{ const d = Math.abs(mx - xp); if(d < bestDist){ bestDist=d; ci=i; } });
+    const date = allX[ci]; if(!date) { setHover(null); return; }
+    // Among series, find nearest point vertically (prefer non-null)
+    const eventY = e.clientY - rect.top;
+    type Candidate = { sx:number; sy:number; value:number; seriesLabel:string; color:string };
+    const candidates: Candidate[] = [];
+    series.forEach((s,si)=>{
+      const p = s.points[ci]; if(!p || p.y===null) return;
+      const color = s.color || chartColors[si % chartColors.length];
+      const seriesMax = normalize? Math.max(...s.points.map(pp=>pp.y||0))||1 : valueMax;
+      const val = normalize? (p.y! / seriesMax) * valueMax : p.y!;
+      const y = padding.t + innerH - (val/valueMax)*innerH;
+      const x = xPositions[ci];
+      candidates.push({ sx:x, sy:y, value:p.y||0, seriesLabel: s.label || s.id, color });
+    });
+    if(!candidates.length){ setHover(null); return; }
+    candidates.sort((a,b)=> Math.abs(a.sy - eventY) - Math.abs(b.sy - eventY));
+    const best = candidates[0];
+    setHover({ sx: best.sx, sy: best.sy, value: best.value, seriesLabel: best.seriesLabel, color: best.color, date });
+  };
+  const handleLeave = ()=> setHover(null);
+
   return (
-    <svg width={width} height={height} role="img" aria-label={yLabel||'chart'}>
+    <svg ref={svgRef} width={width} height={height} role="img" aria-label={yLabel||'chart'} onMouseMove={handleMove} onMouseLeave={handleLeave} style={{ cursor:'crosshair' }}>
       <rect x={0} y={0} width={width} height={height} fill="rgba(255,255,255,0.03)" rx={8} />
       {/* Axes */}
       {ticks.map(t=>{ const y= padding.t + innerH - t*innerH; const val = normalize? (t*100).toFixed(0)+'%' : Math.round(t*valueMax); return (
@@ -64,6 +102,30 @@ export const LineChart: React.FC<LineChartProps> = ({ width=360, height=160, ser
       })}
   {showDots && series.map((s,si)=>{ const color = s.color || chartColors[si % chartColors.length]; return s.points.map((p,i)=>{ if(p.y===null) return null; const seriesMax = normalize? Math.max(...s.points.map(pp=>pp.y||0))||1 : valueMax; const val = normalize? (p.y! / seriesMax) * valueMax : p.y!; const inset=6; const spanCount=Math.max(s.points.length-1,1); const usableW= innerW - inset*2; const x= padding.l + inset + (i/spanCount)*usableW; const y = padding.t + innerH - (val/valueMax)*innerH; return <circle key={s.id+'_'+i} cx={x} cy={y} r={2.5} fill={color} />; }); })}
       {yLabel && <text x={padding.l} y={14} fontSize={11} fill="rgba(255,255,255,0.75)" fontWeight={600}>{yLabel}</text>}
+      {/* Hover crosshair + tooltip */}
+      {hover && (
+        <g pointerEvents="none">
+          <line x1={hover.sx} x2={hover.sx} y1={padding.t} y2={height-padding.b} stroke="rgba(255,255,255,0.25)" strokeDasharray="4 3" />
+          <circle cx={hover.sx} cy={hover.sy} r={5} fill={hover.color} stroke="#fff" strokeWidth={1} />
+          {(() => {
+            const boxW = 170; const boxH = 54;
+            const pad = 8;
+            let bx = hover.sx + 10; if(bx + boxW > width - 4) bx = hover.sx - boxW - 10; if(bx < 4) bx = 4;
+            let by = hover.sy - boxH - 10; if(by < 4) by = hover.sy + 12; if(by + boxH > height - 4) by = height - boxH - 4;
+            const dateLabel = hover.date;
+            const valLabel = normalize ? hover.value.toFixed(2) : hover.value.toLocaleString();
+            // value formatting handled inline below; percentLabel removed to avoid unused var
+            return (
+              <g>
+                <rect x={bx} y={by} width={boxW} height={boxH} rx={6} fill="rgba(15,20,28,0.92)" stroke="rgba(255,255,255,0.15)" />
+                <text x={bx+pad} y={by+16} fontSize={12} fontWeight={600} fill="#fff">{hover.seriesLabel}</text>
+                <text x={bx+pad} y={by+30} fontSize={11} fill="rgba(255,255,255,0.85)">{dateLabel}</text>
+                <text x={bx+pad} y={by+44} fontSize={12} fill={hover.color} style={{ fontVariantNumeric:'tabular-nums' }}>{hover.seriesLabel.toLowerCase().includes('%') || (yLabel && yLabel.toLowerCase().includes('percent')) ? (hover.value.toFixed(1)+'%') : valLabel}</text>
+              </g>
+            );
+          })()}
+        </g>
+      )}
     </svg>
   );
 };
