@@ -38,6 +38,11 @@ Checklist:
 - [ ] (Operator) Create KV namespaces: shares (`EF_SHARES`), stats (`EF_STATS`), optional drift (`EF_DRIFT`)
 - [ ] (Operator) Produce namespace IDs & desired binding names (not secrets) in chat
 - [ ] (Assistant) Record namespace IDs & bindings in plan (no secrets), scaffold placeholder env variable names
+- [ ] Inventory build command & output dir (expected: `npm run build` -> `dist/`)
+- [ ] Audit environment variable usage (`process.env`) – list & classify (presence/absence)
+- [ ] Confirm absence (or document presence) of custom redirects/headers (none expected)
+- [ ] Note SPA nature (needs `not_found_handling: single-page-application`)
+- [ ] Add external reference link to Cloudflare Netlify migration guide (see References section)
 Exit Criteria: Checklist complete & logged.
 Rollback: N/A (no runtime change).
 
@@ -46,6 +51,11 @@ Checklist:
 - [ ] Create `cloudflareAdapter.ts` (placeholder using in-memory Map)
 - [ ] Feature flag env var `CF_ADAPTER_ENABLE=false`
 - [ ] Wire selection logic (but keep Netlify active)
+- [ ] Add `wrangler.jsonc` scaffold with: name, compatibility_date, `assets.directory="dist"`, `assets.not_found_handling="single-page-application"`
+- [ ] Insert placeholder KV namespace bindings (no real IDs until operator provides)
+- [ ] Create function mapping table (Netlify -> Cloudflare Worker route) in plan
+- [ ] Document dev workflow: `npm run build` then `npx wrangler dev` (flag disabled)
+- [ ] Validate that enabling flag without bindings fails gracefully (clear console warning, no crash)
 Exit Criteria: Build passes; toggling flag in dev shows no runtime errors.
 Rollback: Delete adapter file + selection branch.
 
@@ -114,12 +124,16 @@ Drift = |CF value - Netlify value| / max(Netlify,1). Measured on total counters 
 (Use newest at bottom)
 ```
 2025-09-06: Plan scaffold created. No runtime changes.
+2025-09-06: Augmented Phase 0 & 1 with build/env audit, wrangler scaffold, function mapping, external reference link tasks.
 ```
 
 ## 9. Tokens Granted
 (None yet)
 
 ## 10. Glossary
+- **References**
+	- Cloudflare Guide: Migrate from Netlify to Workers – https://developers.cloudflare.com/workers/static-assets/migration-guides/netlify-to-workers/ (used to augment Phase 0 & 1 tasks: build command inventory, wrangler config, assets handling, single page application not_found handling, namespace bindings, custom domain step to be executed during Cutover / Phase 4)
+
 - Shadow Read: Read second provider without serving results from it.
 - Dual Write: Write to both providers; read from primary only.
 - Drift: Relative difference between metric snapshots.
