@@ -194,6 +194,113 @@ const StatsPage: React.FC = () => {
   const pageBg = '#0b1119'; // unified dark background
   const pageColor = '#fff';
 
+  // --- Aggregation Helpers (weekly & monthly) ---
+  interface AggregateRow { key:string; label:string; range?:string; days:number; counters:Record<string,number>; sums:Record<string,number>; }
+  const isoWeekKey = (dStr:string) => {
+    const d = new Date(dStr+'T00:00:00Z');
+    // ISO week: Thursday of this week determines year
+    const day = (d.getUTCDay()+6)%7; // 0=Mon
+    d.setUTCDate(d.getUTCDate() - day + 3); // move to Thursday
+    const thursday = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+    const yearStart = new Date(Date.UTC(thursday.getUTCFullYear(),0,1));
+    const week = Math.floor(((thursday.getTime()-yearStart.getTime())/86400000 + 10)/7); // +10 to ensure week 1 starts properly
+    const year = thursday.getUTCFullYear();
+    return { year, week };
+  };
+  const buildAggregates = useMemo(()=>{
+    if(!history.length) return { weeks:[] as AggregateRow[], months:[] as AggregateRow[] };
+    // Daily objects sorted oldest->newest currently (history reversed earlier then resorted later). We'll derive from history array directly.
+    const dailyEntries = history.map(h=>{
+      const date = (h.date? h.date.replace(/\.json$/,''): h.updatedAt.slice(0,10));
+      return { date, counters:h.counters, sums:h.sums };
+    });
+    // Weeks (ISO) group
+    const weekMap = new Map<string, AggregateRow>();
+    for(const d of dailyEntries){
+      const { year, week } = isoWeekKey(d.date);
+      const key = `${year}-W${week.toString().padStart(2,'0')}`;
+      let row = weekMap.get(key);
+      if(!row){ row = { key, label: `Week ${week}`, range: d.date, days:0, counters:{}, sums:{} }; weekMap.set(key,row); }
+      // update range as min..max
+      if(row.range){
+        const [start,end] = row.range.includes('–')? row.range.split('–'): [row.range,row.range];
+        const newStart = d.date < start ? d.date : start;
+        const newEnd = d.date > end ? d.date : end;
+        row.range = newStart===newEnd? newStart : `${newStart}–${newEnd}`;
+      }
+      row.days++;
+      for(const [k,v] of Object.entries(d.counters)){ row.counters[k]=(row.counters[k]||0)+v; }
+      for(const [k,v] of Object.entries(d.sums)){ row.sums[k]=(row.sums[k]||0)+v; }
+    }
+    const weeks = Array.from(weekMap.values()).sort((a,b)=> a.key.localeCompare(b.key)).reverse(); // newest first
+    // Months
+    const monthMap = new Map<string, AggregateRow>();
+    for(const d of dailyEntries){
+      const ym = d.date.slice(0,7); // YYYY-MM
+      let row = monthMap.get(ym);
+      if(!row){
+        const [y]=ym.split('-');
+        const monthName = new Date(`${ym}-01T00:00:00Z`).toLocaleString(undefined,{ month:'long', timeZone:'UTC' });
+        row = { key: ym, label: `${monthName} ${y}`, range: undefined, days:0, counters:{}, sums:{} };
+        monthMap.set(ym,row);
+      }
+      row.days++;
+      for(const [k,v] of Object.entries(d.counters)){ row.counters[k]=(row.counters[k]||0)+v; }
+      for(const [k,v] of Object.entries(d.sums)){ row.sums[k]=(row.sums[k]||0)+v; }
+    }
+    const months = Array.from(monthMap.values()).sort((a,b)=> a.key.localeCompare(b.key)).reverse();
+    return { weeks, months };
+  }, [history]);
+
+  const renderRollupTable = (rows:AggregateRow[], title:string) => {
+    if(!rows.length) return null;
+    // Use same columns as daily (subset) for consistency
+    return (
+      <div style={{ marginTop:34 }}>
+        <h2 style={{ fontSize:'15px', margin:'0 0 10px 0', letterSpacing:'.5px', textTransform:'uppercase', opacity:.85 }}>{title}</h2>
+        <div style={{ overflowX:'auto', border:'1px solid rgba(255,255,255,0.12)', borderRadius:10, background:'rgba(255,255,255,0.04)' }}>
+          <table style={{ borderCollapse:'collapse', width:'100%', fontSize:12 }}>
+            <thead>
+              <tr style={{ textAlign:'left', background:'rgba(255,255,255,0.06)' }}>
+                {['Period','Page loads','P2P','Baselines','Opt starts','Shares','Resolved','Avg P2P','Avg baseline','Avg active session','Avg LY saved','Total LY saved','Cinematic sessions','Copy rate %','Days'].map(h=> <th key={h} style={{ padding:'6px 8px', fontWeight:600 }}>{h}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(r=>{
+                const avgP2P = r.sums.p2p_route_time_count ? (r.sums.p2p_route_time_ms_sum / r.sums.p2p_route_time_count) : undefined;
+                const avgBase = r.sums.scout_baseline_time_count ? (r.sums.scout_baseline_time_ms_sum / r.sums.scout_baseline_time_count) : undefined;
+                const avgActive = r.sums.active_session_time_count ? (r.sums.active_session_time_ms_sum / r.sums.active_session_time_count) : undefined;
+                const avgSaved = r.sums.scout_opt_savings_count ? (r.sums.scout_opt_savings_ly_sum / r.sums.scout_opt_savings_count) : undefined;
+                const totalSaved = r.sums.scout_opt_savings_ly_sum;
+                const copyRate = (()=>{ const total=(r.counters.p2p_routes||0)+(r.counters.scout_optimizations||0); if(!total) return '—'; const copies=r.counters.route_copies||0; return ((copies/total)*100).toFixed(1); })();
+                const periodLabel = r.label + (r.range? ` (${r.range})`: '');
+                return (
+                  <tr key={r.key} style={{ borderTop:'1px solid rgba(255,255,255,0.08)' }}>
+                    <td style={{ padding:'4px 8px', opacity:0.85 }}>{periodLabel}</td>
+                    <td style={{ padding:'4px 8px' }}>{r.counters.page_loads||0}</td>
+                    <td style={{ padding:'4px 8px' }}>{r.counters.p2p_routes||0}</td>
+                    <td style={{ padding:'4px 8px' }}>{r.counters.scout_baselines||0}</td>
+                    <td style={{ padding:'4px 8px' }}>{r.counters.scout_optimizations||0}</td>
+                    <td style={{ padding:'4px 8px' }}>{r.counters.routes_shared||0}</td>
+                    <td style={{ padding:'4px 8px' }}>{r.counters.shared_resolved||0}</td>
+                    <td style={{ padding:'4px 8px' }}>{avgP2P!==undefined? formatMs(avgP2P): '—'}</td>
+                    <td style={{ padding:'4px 8px' }}>{avgBase!==undefined? formatMs(avgBase): '—'}</td>
+                    <td style={{ padding:'4px 8px' }}>{avgActive!==undefined? formatMs(avgActive): '—'}</td>
+                    <td style={{ padding:'4px 8px' }}>{avgSaved!==undefined? avgSaved.toFixed(2): '—'}</td>
+                    <td style={{ padding:'4px 8px' }}>{totalSaved!==undefined? totalSaved.toFixed(2): '—'}</td>
+                    <td style={{ padding:'4px 8px' }}>{r.counters.cinematic_sessions||0}</td>
+                    <td style={{ padding:'4px 8px' }}>{copyRate==='—'? '—' : copyRate+'%'}</td>
+                    <td style={{ padding:'4px 8px' }}>{r.days}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+
   return (
   <div style={{ maxWidth:1600, margin:'0 auto', padding:'34px 32px 80px 32px', fontFamily:'system-ui, sans-serif', color:pageColor, background:pageBg, boxSizing:'border-box' }}>
       <h1 style={{ fontSize:'28px', margin:'0 0 10px 0' }}>Usage Stats</h1>
@@ -349,7 +456,7 @@ const StatsPage: React.FC = () => {
   </>
       )}
       <div style={{ marginTop:22, fontSize:'11px', opacity:0.5 }}>Updated: {data? new Date(data.updatedAt).toLocaleString(): '—'}</div>
-      {history.length>0 && (
+  {history.length>0 && (
         <div style={{ marginTop:30 }}>
           <h2 style={{ fontSize:'16px', margin:'0 0 10px 0' }}>Last 7 Days (Newest First)</h2>
           <div style={{ overflowX:'auto', border:'1px solid rgba(255,255,255,0.12)', borderRadius:10, background:'rgba(255,255,255,0.04)' }}>
@@ -389,6 +496,10 @@ const StatsPage: React.FC = () => {
               </tbody>
             </table>
           </div>
+          {/* Weekly Rollups (newest first) */}
+          {renderRollupTable(buildAggregates.weeks, 'Weekly Rollups (ISO Weeks – Newest First)')}
+          {/* Monthly Rollups */}
+          {renderRollupTable(buildAggregates.months, 'Monthly Rollups (Newest First)')}
         </div>
       )}
     </div>

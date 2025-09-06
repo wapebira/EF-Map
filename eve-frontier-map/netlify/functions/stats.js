@@ -17,7 +17,8 @@ export async function handler(event){
     const url = new URL(event?.rawUrl || 'http://local');
     const histParam = url.searchParams.get('history');
     let histDays = 0;
-    if(histParam){ histDays = Math.min(31, Math.max(1, parseInt(histParam,10)||0)); }
+  // Allow larger window (up to 120 days) so client can derive weekly/monthly aggregates without extra round trips.
+  if(histParam){ histDays = Math.min(120, Math.max(1, parseInt(histParam,10)||0)); }
     if(histDays>0){
       const today = new Date();
       for(let i=0;i<histDays;i++){
