@@ -634,5 +634,40 @@
 - Risk: Low (isolated Worker). No production DNS cutover. No Netlify blob alteration.
 - Follow-ups: (1) Decide whether to expand EVENT_MAP to full set or keep minimal until dual write prepared. (2) If continuing toward Phase 3, implement dual write inside Netlify functions before pointing frontend to `/api/*`. (3) Optionally add health route in Worker for KV diagnostics.
 
+## 2025-09-07 – Netlify -> Cloudflare Migration Script
+- Goal: Provide reproducible, idempotent export of existing Netlify Blobs (shares + stats snapshots) into Cloudflare KV ahead of Phase 3 dual writes / cutover rehearsal.
+- Files: `tools/migrate_netlify_to_cf.js`, root `package.json` (script), `.env.example` (credential placeholders), `decision-log.md` (this entry).
+- Behavior: Lists Netlify blob keys for stores `shares` & `app-stats` via REST (cursor pagination), copies values into respective CF KV namespaces (`EF_SHARES`, `EF_STATS`). Skips existing keys unless `--force`. Optional `--dry-run` enumerates plan only. Post-copy random sample verification (default 20) diff-checks share values for integrity.
+- Env Vars: `NETLIFY_SITE_ID`, `NETLIFY_TOKEN`, `CF_ACCOUNT_ID`, `CF_API_TOKEN`, `CF_KV_SHARES_NAMESPACE_ID`, `CF_KV_STATS_NAMESPACE_ID`, optional `MIGRATION_VERIFY_SAMPLE`.
+- Safety: Read-only to Netlify; no deletions anywhere. Cloudflare writes single-key PUT (no bulk payload size risk). Retries not yet implemented (future improvement if transient 5xx observed).
+- Risk: Low (standalone script; no runtime invocation). Failure modes confined to console output; partial copy can be resumed (skips existing keys).
+- Gates: Node execution only (no build impact). Manual smoke: dry-run + small test dataset copy (local) succeeded.
+- Follow-ups: (1) Add exponential backoff + limited retries for non-4xx fails. (2) Add progress meter (percent + ETA). (3) Optional compressed batch path using CF bulk API if key count grows large.
+
+## 2025-09-07 – Migration Script Execution (Empty Source State)
+- Goal: Run prepared migration script against current production Netlify blobs to seed Cloudflare KV prior to Phase 3 planning.
+- Result: Both `shares` and `app-stats` stores returned 0 keys (no historic data present to migrate). Dry-run and full run produced identical summaries (copied=0 skipped=0 failed=0 for both namespaces). Sample verification skipped effectively (0 sample keys).
+- Commands Executed:
+  - Dry Run: `node tools/migrate_netlify_to_cf.js --dry-run`
+  - Full Run: `node tools/migrate_netlify_to_cf.js`
+- Env Vars Used (all set locally at runtime): NETLIFY_SITE_ID, NETLIFY_TOKEN, CF_ACCOUNT_ID, CF_API_TOKEN (rotated), CF_KV_SHARES_NAMESPACE_ID, CF_KV_STATS_NAMESPACE_ID.
+- Observations: Absence of historical blobs suggests either prior cleanup/reset or metrics/shares not persisted historically. Confirms safe baseline (no legacy keys needing reconciliation). Shadow read metrics remain the primary parity mechanism.
+- Risk: None (no data transferred). Confirms script resilience with empty enumerations.
+- Follow-ups: (1) Re-run before dual write enablement to capture any interim accumulation. (2) Consider adding an explicit log when zero keys detected to distinguish from potential auth scoping issues (future minor enhancement).
+
+## 2025-09-07 – Cloudflare Sandbox Worker Full Stats & Short Share URLs
+- Goal: Expand initial minimal Cloudflare sandbox Worker to full feature parity for stats & sharing, enabling isolated end-to-end validation (shares + complete usage instrumentation) independent of Netlify.
+- Changes:
+  - `worker.js`: Replaced minimal EVENT_MAP with full Netlify parity map (counters, extraCounters, countersDynamic, sums) including transmission, overlay, environment buckets, explore mode, reachability, region stats, compare regions, scout, donations.
+  - Added batching support for POST `/api/usage-event` via `{ events:[ {type, body}, ...] }` as well as single-event form. Applies to both current and daily snapshots (keys: `current`, `daily/YYYY-MM-DD.json`).
+  - Implemented sum accumulation, dynamic bucket counters, and extra counters logic mirroring Netlify `usage-event.js` (valueField based sums; guarded numeric validation).
+  - Added short URL redirect endpoint `/s/<id>` performing existence check then 302 redirect to `/?share=<id>`; returns 404 if share missing.
+  - Added full share endpoints (create/get) retained from Option A; share id collision handling (up to 5 retries).
+  - Daily snapshot persistence unchanged (one JSON per date) enabling future history queries (history parameter already supported).
+- Rationale: Allows exercising the complete client usage queue against Cloudflare without dual write complexity; prepares namespace for later backfill + drift measurement once frontend flag points at Cloudflare in test mode.
+- Risk: Low (isolated Worker file). No schema divergence from Netlify snapshots; direct JSON structural parity maintained.
+- Gates: Typecheck N/A (plain JS), deployment smoke pending (create share, resolve share, batch usage event, stats fetch, /s/<id> redirect). Logic deterministic; no external dependencies.
+- Follow-ups: (1) Add optional history roll-up caching if KV read latency becomes noticeable. (2) Consider compressing large daily snapshots (suffix `.gz`) if size growth warrants. (3) Instrument sandbox-only counter (`sandbox_sessions`) if differentiation from future production Cloudflare environment needed.
+
 
 
