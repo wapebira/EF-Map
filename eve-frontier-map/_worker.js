@@ -169,13 +169,18 @@ async function handleStats(url, env){
   if(!raw) raw = JSON.stringify({ version:1, updatedAt:new Date().toISOString(), counters:{}, sums:{} });
   const histParam = url.searchParams.get('history');
   let history=[]; let histDays=0; if(histParam){ histDays=Math.min(30,Math.max(1,parseInt(histParam,10)||0)); }
+  const debug = url.searchParams.get('debug')==='1';
+  const foundKeys=[];
   if(histDays>0){
     const today = new Date();
     for(let i=0;i<histDays;i++){
       const d = new Date(today.getTime()-i*86400000).toISOString().slice(0,10);
-      const key='daily/'+d+'.json'; const dr = await env.EF_STATS.get(key); if(dr){ try { history.push(JSON.parse(dr)); } catch{} }
+      const key='daily/'+d+'.json'; const dr = await env.EF_STATS.get(key); if(dr){ foundKeys.push(key); try { history.push(JSON.parse(dr)); } catch{} }
     }
     history.reverse();
+  }
+  if(debug){
+    return json({ current: JSON.parse(raw), history, debug:{ namespaceId: env.EF_STATS._id || '(id unknown)', requestedDays: histDays, foundDailyKeys: foundKeys } });
   }
   return json({ current: JSON.parse(raw), history });
 }
