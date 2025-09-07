@@ -28,6 +28,27 @@ const shadowMetrics = {
 
 export function getShadowMetrics(){ return shadowMetrics; }
 
+// Dev convenience: if adapter flags enabled but no Cloudflare binding injected by runtime,
+// create an ephemeral in-process mock for 'shares' & 'app-stats' so shadow path exercises.
+// This runs once at import time; production build unaffected (NODE_ENV check guards warning only).
+if(CF_ADAPTER_ENABLED){
+  if(!globalThis.__CF_KV){ globalThis.__CF_KV = {}; }
+  // Only add if missing so a real binding (Wrangler/Worker) isn't overridden.
+  const ensureMock = (ns)=>{
+    if(!globalThis.__CF_KV[ns]){
+      const map = new Map();
+      globalThis.__CF_KV[ns] = {
+        async get(key){ return map.has(key) ? map.get(key) : null; },
+        async put(key, value){ map.set(key, value); },
+        async delete(key){ map.delete(key); }
+      };
+      if(process.env.NODE_ENV !== 'production') console.log(`[cf-adapter mock] Injected mock Cloudflare KV namespace "${ns}"`);
+    }
+  };
+  ensureMock(process.env.SHARE_STORE || 'shares');
+  ensureMock(process.env.STATS_STORE || 'app-stats');
+}
+
 // Internal in-memory map fallback (per name) for local dev without credentials.
 const MEMORY_STORES = new Map();
 
