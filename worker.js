@@ -185,15 +185,26 @@ async function handleStats(url, env){
   let raw = await env.EF_STATS.get('current');
   if(!raw) raw = JSON.stringify({ version:1, updatedAt:new Date().toISOString(), counters:{}, sums:{} });
   const histParam = url.searchParams.get('history');
-  let history=[]; let histDays=0; if(histParam){ histDays = Math.min(30, Math.max(1, parseInt(histParam,10)||0)); }
+  const debug = url.searchParams.get('debug')==='1';
+  let history=[]; let histDays=0; if(histParam){ histDays = Math.min(120, Math.max(1, parseInt(histParam,10)||0)); }
+  let foundKeys=[];
   if(histDays>0){
-    const today = new Date();
-    for(let i=0;i<histDays;i++){
-      const d = new Date(today.getTime()-i*86400000).toISOString().slice(0,10);
-      const key = 'daily/'+d+'.json';
-      const dr = await env.EF_STATS.get(key); if(dr){ try { history.push(JSON.parse(dr)); } catch{} }
-    }
-    history.reverse();
+    try {
+      let cursor=null; const all=[];
+      do {
+        const list = await env.EF_STATS.list({ prefix:'daily/', cursor });
+        list.keys.forEach(k=>{ if(k.name.endsWith('.json')) all.push(k.name); });
+        cursor = list.list_complete? null : list.cursor;
+      } while(cursor);
+      all.sort();
+      foundKeys = all.slice(-histDays);
+      for(const k of foundKeys){
+        const dr = await env.EF_STATS.get(k); if(dr){ try { history.push(JSON.parse(dr)); } catch{} }
+      }
+    } catch(e){ if(debug){ history.push({ error:'list_failed', message:String(e) }); } }
+  }
+  if(debug){
+    return json({ current: JSON.parse(raw), history, debug:{ mode:'list', requestedDays: histDays, foundDailyKeys: foundKeys } });
   }
   return json({ current: JSON.parse(raw), history });
 }
