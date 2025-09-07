@@ -28,6 +28,78 @@ Success Criteria:
 | 5 Cleanup | MIGRATE CLEANUP OK | Remove Netlify paths & flags | Permanent | All gates green, decision logged |
 
 ## 3. Detailed Phases
+### Branch Isolation / Sandbox Strategy (Temporary)
+Until Cloudflare reaches full parity the repository workflow is intentionally split:
+
+| Branch | Platform Deploying | Audience | Allowed Changes |
+|--------|--------------------|----------|-----------------|
+| `main` | Netlify (current production) | End users (stable) | Critical hotfixes only (avoid unless prod issue) |
+| `systemselection` | Cloudflare Pages + Worker (sandbox) | Internal testing / validation | All migration + new instrumentation + experimental UI |
+
+Rules:
+1. Do NOT merge `systemselection` into `main` until parity criteria met (below) and cutover approved.
+2. Cloudflare Pages project should point to `systemselection` branch (or manual `wrangler pages deploy` from that branch) for each test iteration.
+3. Netlify continues auto-deploying from `main`; no Cloudflare writes should alter Netlify data except via existing Netlify Functions (dual write phase not yet enabled).
+4. Migration scripts or KV seeding target Cloudflare namespaces only; no destructive ops on Netlify blobs.
+
+Parity Criteria Prior to Cutover Proposal:
+- Share create/get success rate on Cloudflare ≥ Netlify baseline (no observed failures in manual + scripted tests across varied payloads)
+- Full EVENT_MAP counters & sums accumulating on Cloudflare with no schema divergence (spot-check JSON diff vs Netlify snapshot structure)
+- Stats page (Cloudflare) renders all sections with non-zero counters after exercising features (routing, explore, transmission, overlay, reachability, region stats, compare regions, donations test clicks)
+- Short share URL `/s/<id>` redirect works end-to-end and resolves share payload in app
+- Usage batching (multi-event POST) accepted without 4xx errors
+
+Pre-Cutover Checklist (when ready to migrate production):
+1. Freeze `systemselection` (no new feature commits during cutover window)
+2. Run migration script (final sync if any Netlify-only data needs seeding) – likely no-op given live dual write not yet active
+3. Enable formal Phase 3 (dual write) if drift validation desired prior to flipping production (optional if sandbox already proven trustworthy and historical data minimal)
+4. Tag commit on `systemselection` (e.g., `cf-cutover-candidate`)
+5. Merge `systemselection` -> `main` (fast-forward preferred) and switch Cloudflare Pages production branch to `main`
+6. Update DNS / public URL (point primary domain to Cloudflare Pages) and leave Netlify in read-only standby for 48h (rollback window)
+7. After 48h with no rollback triggers, decommission Netlify site & remove Netlify-specific fallback code (Phase 5 cleanup)
+
+Rollback During Sandbox Phase:
+- Simply revert to using Netlify site (unchanged). Cloudflare sandbox issues isolated to `systemselection`; discard or fix there without user impact.
+
+Documentation Impact:
+- Decision log entry added (2025-09-07) referencing this strategy.
+- No code path changes required beyond dynamic endpoint detection already implemented (usage/share/stats) – ensures dual-environment safety.
+
+This section is temporary and will be removed at Phase 5 cleanup after successful cutover.
+
+### Operator ↔ AI CLI Workflow (Sandbox Phase)
+During the sandbox (branch `systemselection`) the non‑coder operator delegates all repository + deploy actions to the AI assistant. Assumptions & mechanics:
+
+| Aspect | Assumption / Rule |
+|--------|-------------------|
+| Branch Source | All Cloudflare Pages + Worker deploys originate from `systemselection` (never from `main` until cutover). |
+| Netlify Production | Continues auto‑deploying from `main`; AI does NOT trigger Netlify deploys directly (only via normal git push to `main` for hotfix, if approved). |
+| CLI Access | Environment provides both `wrangler` (Cloudflare) and `netlify` CLIs; credentials (API tokens, account IDs, namespace IDs) are supplied by operator via env vars or secure secrets (never committed). |
+| Token Injection | Operator can paste token/ID values on request; AI documents required variable names in response before use. |
+| Build Step | Frontend build executed via `npm run build` inside `eve-frontier-map/`; output `dist/` consumed by Pages deploy. |
+| Deploy Trigger | AI runs `wrangler pages deploy` (or `wrangler pages deploy dist --branch=systemselection`) after commit & push when operator requests new sandbox version. |
+| Auditing | Every non‑trivial deploy (code or infra) receives a brief decision‑log entry (≤10 lines) summarizing intent & diff scope. |
+| Rollback | If deploy exhibits regression, operator instructs AI to revert last commit (`git revert <sha>`) and redeploy; Netlify production unaffected. |
+
+Minimal Deploy Sequence (AI internal checklist):
+1. Apply code/doc changes.
+2. Run: typecheck + build.
+3. Commit & push to `systemselection`.
+4. (If credentials present) Run Cloudflare Pages deploy.
+5. Record decision log entry with deploy hash & summary.
+
+Credential Handling Guidelines:
+- Never store tokens in repo; use environment variables (e.g., `CF_API_TOKEN`, `CF_ACCOUNT_ID`, `NETLIFY_SITE_ID`, `NETLIFY_TOKEN`).
+- When new secret needed, AI outputs: NAME, purpose, scope (read/write), and operator supplies value in next message.
+- If secret absent at deploy time, AI halts deploy, marks todo blocked, and requests only the missing values.
+
+Verification Post‑Deploy:
+- Hit `/api/health` (or Netlify `/.netlify/functions/health`) to confirm worker responding.
+- Create a share; resolve via `/s/<id>`; check network console for 204 usage responses.
+- Visit `/stats` ensuring counters increment after interaction burst.
+
+This workflow remains until parity gates pass and cutover checklist (above) is initiated.
+
 ### Phase 0 – Hardening / Audit
 Checklist:
 - [x] Enumerate all `_store.js` call sites (only the file itself currently; helpers `getStatsStore`/`getShareStore` used in functions already abstracted)
@@ -134,6 +206,8 @@ Drift = |CF value - Netlify value| / max(Netlify,1). Measured on total counters 
 2025-09-07: Namespaces (EF_SHARES/EF_STATS/EF_DRIFT) created via wrangler; IDs recorded. Advanced to Phase 1 (token). Added `wrangler.jsonc` scaffold & `cf_kv.ts` stub. Next: feature flag + selection logic & function mapping table.
 2025-09-07: Added CF_ADAPTER_ENABLE flag logic (inactive by default) in `_store.js`; added assets SPA handling & function mapping table scaffold.
 2025-09-07: Completed Phase 0 assumptions + adapter interface docs and Phase 1 tasks (flag wiring, mappings, assets config). Phase 1 exit criteria met (no behavior change, build green). Ready to request Phase 2 token when shadow read instrumentation is desired.
+2025-09-07: (Sandbox Strategy) Decided to keep `main` branch frozen for Netlify production; use `systemselection` branch exclusively for Cloudflare sandbox deployment (Pages + Worker) until full feature & metrics parity confirmed. No merges into `main` until cutover approval. Added Branch Isolation section documenting workflow & cutover checklist.
+2025-09-07: Phase4 (cutover) executed: client fallbacks to Netlify removed (shares, usage, stats) – Cloudflare Worker /api endpoints are sole backend. Instructions file updated; migration_status advanced to phase4 with token recorded. Enter stabilization window prior to Phase5 cleanup (removal of legacy Netlify function directory). Rollback path: revert cutover commit to restore fallbacks if Worker misconfiguration discovered.
 
 ### Function Mapping Table (Phase 1 Draft)
 | Netlify Function | Current Path | Planned Worker Route | Notes |

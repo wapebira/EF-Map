@@ -199,6 +199,15 @@
   - Overlap safeguard: post-layout duplicate-left detection triggers one deferred full compact.
   - User Override: If any panel has a persisted drag position in localStorage, auto cascade skips (preserves user intent).
 - Help Panel Alignment: Final 1px adjustments (EXTRA_OFFSET=13) anchor underline flush with bottom edge of top toolbar buttons at all UI scales (50–130%).
+
+## 2025-09-07 – Cloudflare Cutover: Remove Netlify Fallbacks
+- Goal: Finalize migration by eliminating all client fallbacks to Netlify Functions (`/.netlify/functions/*`) for shares, usage, and stats; enforce Cloudflare Worker (`/api/*`) as sole backend.
+- Files: `src/utils/shortShare.ts`, `src/utils/usage.ts`, `src/components/StatsPage.tsx`, `.github/copilot-instructions.md`, `docs/migration_status.json`, `docs/MIGRATION_PLAN.md` (phase update pending), `decision-log.md` (this entry).
+- Changes: Removed fallback candidate arrays & retry logic; HTML (text/html) responses now hard errors. Updated instructions file to mark Cloudflare Pages + Worker + KV as primary and note legacy Netlify code as deprecated. Added explicit console error diagnostics when /api endpoints unavailable to surface misconfigured deploy early.
+- Diff: ~ -120 LOC (fallback paths & comments) / +40 LOC (instructions + error messages) net.
+- Risk: Medium (removal of redundancy; any deploy misconfig now surfaces immediately). Rollback plan: revert this commit to restore fallback while investigating Worker bind/deploy issue.
+- Gates: typecheck ✅ build ✅ (pending current session build) smoke (post-deploy checklist: /api/stats JSON ok, create & resolve share round trip, usage events 2xx, no network access to /.netlify/functions paths).
+- Follow-ups: Phase status update to mark `MIGRATE PHASE4 OK` granted; schedule cleanup removal of legacy Netlify function directory after short stability window (Phase CLEANUP). Potential addition: lightweight /api/health endpoint surfacing KV namespace connectivity & last snapshot write timestamp.
 - Rationale: Improve spatial predictability (no reflow surprises), reduce cognitive friction when toggling tools rapidly, and polish micro-alignment for professional feel.
 - Risk: Low (UI only, no data or worker changes). Guard clauses ensure no effect when user manually repositions panels.
 - Gates: typecheck ✅ | build ✅ | smoke ✅ (manual sequences tested: all 6 permutations of opening order; no overlaps, only new panel movement). Performance impact negligible (O(n) width checks on events only).
@@ -668,6 +677,45 @@
 - Risk: Low (isolated Worker file). No schema divergence from Netlify snapshots; direct JSON structural parity maintained.
 - Gates: Typecheck N/A (plain JS), deployment smoke pending (create share, resolve share, batch usage event, stats fetch, /s/<id> redirect). Logic deterministic; no external dependencies.
 - Follow-ups: (1) Add optional history roll-up caching if KV read latency becomes noticeable. (2) Consider compressing large daily snapshots (suffix `.gz`) if size growth warrants. (3) Instrument sandbox-only counter (`sandbox_sessions`) if differentiation from future production Cloudflare environment needed.
+
+## 2025-09-07 – Temporary Branch Isolation (systemselection Sandbox)
+- Goal: Maintain production stability on Netlify (`main` branch) while iterating Cloudflare parity (shares, full stats, short URLs) exclusively on `systemselection` branch.
+- Rationale: Avoid premature exposure of in-progress migration features; enable rapid Worker/Pages deploy cycles without impacting end users.
+- Workflow Rules: (1) No merges into `main` until parity + cutover checklist satisfied. (2) Cloudflare Pages/Worker deploys pull from `systemselection`. (3) Only critical hotfixes allowed on `main`. (4) Dynamic endpoint detection in client (usage, shares, stats) allows single codebase to operate in both environments without flags.
+- Parity Gates Before Cutover Proposal: share success, full EVENT_MAP accumulation, stats page completeness, short URL redirects, batching OK.
+- Rollback Simplicity: Discard or fix sandbox changes; `main` untouched ensures zero user disruption.
+- Diff: Documentation only (no code changes besides previous endpoint detection already landed earlier today).
+- Risk: Low (process/documentation change). Production path unchanged.
+- Follow-ups: When parity confirmed, execute cutover checklist (merge, branch switch, DNS), then proceed to Phase 5 cleanup removing legacy Netlify fallbacks.
+
+## 2025-09-07 – AI-Managed CLI Deployment Workflow
+- Goal: Formalize non-coder operator → AI assistant process for commits, pushes, and Cloudflare Pages deploys from `systemselection` using provided CLI credentials.
+- Rationale: Streamline sandbox iteration while ensuring every deploy is auditable (decision log + migration plan). Reduces manual friction and risk of missed steps.
+- Scope: Documentation only (new MIGRATION_PLAN section). No runtime logic change or environment flags added.
+- Process: Operator states intent + supplies missing env secrets. AI: (1) edits code/docs, (2) typechecks & builds, (3) commits/pushes, (4) runs `wrangler pages deploy` (if creds available), (5) logs entry. Netlify production unaffected (no pushes to `main` unless approved hotfix).
+- Risk: Low (procedural). Failure modes limited to failed build or deploy; rollback via `git revert` and redeploy.
+- Rollback: Revert latest commit hash; redeploy previous stable build. Netlify remains authoritative prod path.
+- Follow-ups: Implement automated parity drift script & integrate into daily validation; later consider adding deploy metadata (commit hash + timestamp) to `/api/health` for quick verification.
+
+## 2025-09-07 – Cloudflare API HTML Fallback Hardening
+- Goal: Prevent false-positive detection of Cloudflare /api share endpoints when the Worker isn't active (Pages served static index.html with 200 + text/html) which led to Stats page JSON parse errors (Unexpected token '<') and long share URLs (short share creation failing silently).
+- Issue: Detection logic treated any 200/400 status as success; static HTML fallback satisfied that check. Subsequent POST returned HTML, causing JSON parse failure client-side.
+- Change: `shortShare.ts` now validates `Content-Type` not containing `text/html` during detection and on create/get responses. If HTML detected, it falls back to Netlify function paths and retries once.
+- Files: `src/utils/shortShare.ts`, `decision-log.md` (this entry).
+- Risk: Low (client-only safeguard). No server behavior changes; single additional header check + retry path.
+- Gates: typecheck ✅ build (pending) expected ✅; manual smoke plan: load Cloudflare deployment prior to Worker attach, verify automatic fallback to Netlify functions yields working share short id and Stats page no longer errors.
+- Follow-ups: Apply similar HTML content-type guard to usage event & stats endpoint detection if intermittent misconfig observed; optional centralized helper for endpoint probing to reduce duplication.
+
+## 2025-09-07 – Worker Build Integration & Extended HTML Guards
+- Goal: Ensure Cloudflare Pages deployment always includes `_worker.js` and extend HTML fallback guards to stats & usage detection.
+- Changes:
+  - Added `scripts/copy-worker.cjs` run at end of `build` script to copy root `worker.js` / `_worker.js` into `dist/_worker.js` (required by Pages for functions).
+  - Updated `usage.ts` and `StatsPage.tsx` detection logic to treat `text/html` responses as invalid API endpoints (similar to earlier share fallback hardening).
+  - Ensures that an accidentally missing worker (serving SPA HTML) doesn’t get misinterpreted as a valid JSON endpoint, preventing parse errors and silent metric loss.
+- Risk: Low (build step copy + header checks). If worker intentionally absent, app gracefully continues using Netlify functions.
+- Gates: typecheck ✅ build (post-copy script local) ✅ worker file present in dist ✅.
+- Follow-ups: Potential consolidation of detection logic into a shared utility; add optional console info when fallback triggers to aid ops visibility.
+
 
 
 

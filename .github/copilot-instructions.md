@@ -1,6 +1,6 @@
 # Copilot Project Instructions (EF-Map)
 
-Purpose: This repo hosts (1) map data processing scripts (Python) for EVE Frontier star/region data, and (2) a deployable interactive web app (`eve-frontier-map/`) built with React + TypeScript + Vite and Netlify Functions for lightweight serverless features (sharing + anonymous usage stats). Follow the patterns below when adding or modifying code. This file is optimized for a "Vibe coding" workflow: the human provides intent (non‑coder) and the AI agent converts intent into safe, minimal, verifiable changes.
+Purpose: This repo hosts (1) map data processing scripts (Python) for EVE Frontier star/region data, and (2) a deployable interactive web app (`eve-frontier-map/`) built with React + TypeScript + Vite now served on Cloudflare Pages + Worker (Cloudflare KV for sharing + anonymous usage stats). Netlify function fallbacks have been removed after cutover. Follow the patterns below when adding or modifying code. This file is optimized for a "Vibe coding" workflow: the human provides intent (non‑coder) and the AI agent converts intent into safe, minimal, verifiable changes.
 
 ## Operator Quick Start (Non‑Coder)
 1. Describe goal in plain language (what you want to see changed / added / fixed).
@@ -14,23 +14,23 @@ If stuck: ask for "safer alternative" or "explain tradeoffs". Avoid giving line-
 
 ## Architecture Overview
 - Root Python scripts + JSON assets generate / transform map data consumed by the web app. No runtime coupling – they are one‑off preprocessing utilities.
-- Frontend lives in `eve-frontier-map/`: pure client (React + TS) + in‑browser SQLite (`sql.js`) + Web Workers for heavy computation (routing / optimization) + Netlify Functions for persistence (shares, usage stats) via `@netlify/blobs` key‑value storage.
+- Frontend lives in `eve-frontier-map/`: pure client (React + TS) + in‑browser SQLite (`sql.js`) + Web Workers for heavy computation (routing / optimization) + Cloudflare Worker routes (`/api/*`) backed by KV namespaces (shares, usage stats). Netlify Blobs paths have been removed (post‑cutover) – do not reintroduce.
 - Data Flow (frontend):
   1. Static DB / JSON loaded (see `public/map_data.db`, other JSON) -> app state.
   2. User interactions dispatch events; heavy pathfinding runs inside workers (`src/utils/routing_worker.ts`, `workers/*`).
-  3. Instrumentation (`src/utils/usage.ts`) batches anonymous aggregate events to `/.netlify/functions/usage-event` which updates blob snapshots; `/stats` function exposes aggregates to Stats page component.
-  4. Share creation: client compresses route state -> POST `create-share` -> returns short id -> user can later GET via `get-share`.
+   3. Instrumentation (`src/utils/usage.ts`) batches anonymous aggregate events to `/api/usage-event` which updates KV snapshots; `/api/stats` exposes aggregates to the Stats page component.
+   4. Share creation: client compresses route state -> POST `/api/create-share` -> returns short id -> client later GETs via `/api/get-share` or user visits `/s/<id>` redirect.
 - Cinematic mode: toggled global via `window.__efSetCinematic(bool)` (set inside `App.tsx`), tracked for enter/session/time metrics.
 
 Reference index: see `docs/README.md` for links to broader specs (`PROJECT_REQUIREMENTS.md`, cinematic spec, operational playbooks).
 
-Cloud Platform (current & upcoming): Currently Netlify (Functions + Blobs). Migration to Cloudflare (Workers + KV, optional D1 later) will proceed via token-gated phases. Do not introduce new direct provider calls outside the abstraction. See `docs/MIGRATION_PLAN.md` for phased plan & tokens.
+Cloud Platform: Primary platform is Cloudflare (Pages + Worker + KV). Netlify is deprecated and scheduled for removal (cleanup phase). Do not add new Netlify code; any persistence change must target the existing Cloudflare Worker & KV abstraction. See `docs/MIGRATION_PLAN.md` for residual cleanup tasks.
 
 ## Key Folders / Files
 - `eve-frontier-map/src/App.tsx`: top-level state & feature toggles (cinematic, panels, routing integration, event bridges to `usage.ts`).
 - `src/components/` panels: modular UI sections. Keep each self-contained; avoid cross-importing sibling panel internals.
-- `src/utils/usage.ts`: ONLY place to emit usage events. Add new event types here + whitelist in `netlify/functions/usage-event.js`.
-- `netlify/functions/*.js`: serverless endpoints. Pure, stateless, small. Interact with blobs via credential fallbacks (siteID+token -> implicit -> memory fallback). Mirror the defensive patterns already present.
+- `src/utils/usage.ts`: ONLY place to emit usage events. Add new event types here + whitelist in Worker EVENT_MAP (located in the Cloudflare worker file) – Netlify function whitelist removed.
+- `netlify/functions/*.js`: (Legacy) retained temporarily for historical reference until final cleanup. Do not modify; new logic goes in the Cloudflare Worker.
 - `src/utils/routing_worker.ts` & `workers/scout_optimizer_worker.ts`: long-running / heavy algorithms kept off main thread; progress messages throttled ~200ms. Follow existing message protocol: `{ type:'progress', ... }` and final result object.
 - `src/lib/sql.ts`: wrapper to lazy-init `sql.js` & open DB from ArrayBuffer. Reuse `getSql()`; do not reinitialize WASM.
 
@@ -108,19 +108,16 @@ If user asks for broad refactor, first propose smallest path to accomplish user-
 - Route note pagination regressions → keep segment-first pagination (see `P2PRouting.tsx`).
 - Worker progress spam → throttle ≥200ms (mirror existing pattern).
 
-### Cloudflare Migration Pointer
-Full phased, token-gated migration plan (audit → shadow → dual write → cutover → cleanup) lives in `docs/MIGRATION_PLAN.md`. This instructions file only carries high-level rules:
-* Never modify `_store.js` for Cloudflare without appropriate phase token (see tokens list below).
-* Keep new persistence logic behind explicit env flags until cutover phase.
-* All parity / drift metrics are documented & must pass before advancing phases.
+### Cloudflare Migration (Post-Cutover State)
+Migration phases up to cutover have completed. Active state: Cloudflare is primary; Netlify fallback removed in client code (shares, usage, stats). Remaining task: repository cleanup (remove legacy Netlify functions & adapter scaffolding) once confirmed no rollback needed. Avoid reintroducing multi-provider conditionals.
 
 ### Migration Tokens (Phased)
 - `MIGRATE PHASE0 OK` – Audit / hardening (no runtime change)
 - `MIGRATE PHASE1 OK` – Introduce adapter skeleton (flagged)
 - `MIGRATE PHASE2 OK` – Shadow reads (dual fetch compare)
 - `MIGRATE PHASE3 OK` – Dual write (primary Netlify)
-- `MIGRATE PHASE4 OK` – Cutover (primary Cloudflare, fallback Netlify)
-- `MIGRATE CLEANUP OK` – Remove Netlify paths
+- `MIGRATE PHASE4 OK` – (Achieved) Cutover (Cloudflare primary). Fallback code removed.
+- `MIGRATE CLEANUP OK` – (Pending) Purge legacy Netlify files & doc sections.
 Legacy `MIGRATE STORAGE OK` treated as superseded; use phased tokens instead.
 
 Token Granting: Operator explicitly states token phrase. Assistant must echo acceptance and update `MIGRATION_PLAN.md` & `migration_status.json` before code edits.

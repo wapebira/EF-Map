@@ -2,3 +2,12 @@ node_modules/
 
 # YoYo AI version control directory
 .yoyo/
+
+# Local Netlify folder
+.netlify
+
+# Temporary / credential artifacts (should not be committed)
+temp_pat.txt
+temp_site_id.txt
+tmp_cf_*.txt
+

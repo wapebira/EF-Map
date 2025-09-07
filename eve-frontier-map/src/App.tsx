@@ -1931,13 +1931,14 @@ function App() {
   const [persistedAlgo, setPersistedAlgo] = useState<'astar'|'dijkstra'>(initialPrefsRef.current.algorithm ?? lastP2PParamsRef.current.algo);
   // Scout ship range persists inside ScoutOptimizer component; no App-level state needed
 
-  // Apply shared route from URL hash (supports short form #s=ID) once map data is loaded
+  // Apply shared route from URL hash or query (?share=ID from /s/<id> redirect) once map data is loaded
   useEffect(()=>{
     if(!isLoaded || !mapData) return;
     if(initialHashAppliedRef.current) return;
     initialHashAppliedRef.current = true;
+    const params = new URLSearchParams(window.location.search);
+    const qShareId = params.get('share');
     const hash = window.location.hash;
-    if(!hash) return;
     const systemsByLower = new Map<string, SolarSystem>(Object.values(mapData.solar_systems).map(s=> [s.name.toLowerCase(), s]));
     const apply = (share:any)=>{
       if(!share) return;
@@ -1959,6 +1960,23 @@ function App() {
       }
       const startSys = systemsByLower.get(share.path[0].toLowerCase()); if(startSys) selectSystem(startSys);
     };
+    // Highest priority: query param (?share=ID) produced by /s/<id> redirect
+    if(qShareId){
+      fetchShortShare(qShareId).then(full=>{
+        if(!full) return;
+        const share = decodeShare('#'+full);
+        apply(share);
+        try { track({ type:'share_resolved' }); } catch {}
+        // Replace URL: drop ?share= and set hash to encoded long share for consistency
+        try {
+          const u = new URL(window.location.href);
+          u.searchParams.delete('share');
+          if(full) u.hash = '#'+full; // persist long form
+          history.replaceState(null,'', u.pathname + (u.search?('?'+u.searchParams.toString()):'') + (u.hash||''));
+        } catch {/* ignore */}
+      }).catch(()=>{/* ignore */});
+      return; // do not process hash further
+    }
     if(hash.startsWith('#s=')){
       const id = hash.slice(3);
       if(id){
@@ -1966,6 +1984,9 @@ function App() {
           if(!full) return;
           const share = decodeShare('#'+full);
           apply(share);
+          try { track({ type:'share_resolved' }); } catch {}
+          // Replace short hash with long form for consistency
+          try { history.replaceState(null,'', window.location.pathname + window.location.search + '#'+full); } catch {/* ignore */}
         }).catch(()=>{/* ignore */});
       }
     } else {
