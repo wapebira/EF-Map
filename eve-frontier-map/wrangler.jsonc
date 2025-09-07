@@ -9,6 +9,14 @@
   "pages_build_output_dir": "dist",
   "kv_namespaces": [
   { "binding": "EF_SHARES", "id": "93333a061a734ceca8da9f055cf189d1" },
-  { "binding": "EF_STATS", "id": "cccc1a708dd74aa8aabd91c8bfc33c3f" }
+  { "binding": "EF_STATS", "id": "cccc1a708dd74aa8aabd91c8bfc33c3f" },
+  { "binding": "EF_STATS_OLD", "id": "32c9bc0ca7c840d293d2d9c3c806fd79" }
+  ],
+  "d1_databases": [
+    {
+      "binding": "INDEX_DB",
+      "database_name": "ef_index",
+      "database_id": "cfc8fecb-9fe1-4ad0-98ed-525772d13ff0" // provisioned 2025-09-07 (feature/indexer)
+    }
   ]
 }

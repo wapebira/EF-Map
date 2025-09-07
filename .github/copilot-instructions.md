@@ -230,3 +230,70 @@ Secrets Handling: Do not paste full API tokens into repository. Assistant will c
 - Keep serverless functions < ~150 lines, no external state besides blobs, return 4xx on validation errors early.
 
 (End) – Provide feedback if additional sections (e.g., tests, optimizer internals) should be documented.
+
+## Cloudflare Platform & CLI Preference
+The project is now fully operated on Cloudflare (Pages + Workers + KV). Operational preference: perform all feasible platform actions via CLI / API (Wrangler) instead of the Cloudflare dashboard UI.
+
+### Assistant CLI Execution Policy (Explicit)
+This section codifies a hard requirement from the operator: the assistant MUST directly run every Cloudflare / Wrangler CLI command that does not require pasting or revealing a secret value. The operator will manually paste any secret when prompted (e.g., `wrangler pages secret put`). Do NOT ask the operator to run a command the assistant can execute. Do NOT instruct use of the Cloudflare web UI when an equivalent Wrangler command exists unless:
+- The Wrangler command genuinely lacks required functionality, AND
+- The limitation is stated clearly with a short justification.
+
+Operational Rules:
+1. Default to executing (not just printing) non-secret commands: deployments, listings, KV key reads/writes (safe sample data), D1 migrations, namespace inspection.
+2. Secret Entry Boundary: For commands that prompt for a secret, the assistant initiates the command; the operator pastes the secret at the prompt locally (assistant never requests or echoes secret contents).
+3. No UI Deferral: Avoid telling user to click in the dashboard unless Wrangler/API route is missing. Provide citation ("Wrangler lacks <action> as of vX.Y").
+4. Batch & Verify: After running 3–5 related CLI actions, summarize outcomes (namespace IDs, deployment URLs, counts) before proceeding.
+5. Idempotence First: For potentially destructive commands (purges, deletes) first run a dry-run / listing variant and show planned impact.
+6. Error Handling: On command failure, attempt one focused retry if transient (network, 5xx). If still failing, surface exact stderr + next options.
+7. Logging Hygiene: Never log or store secret tokens; redact if accidentally echoed.
+
+Escalation Examples:
+- Acceptable: "Running wrangler pages deployment list to confirm preview alias… (executed)".
+- NOT acceptable: "Please run wrangler pages deployment list" (assistant could run it).
+
+Violation Handling: If a response inadvertently asks the operator to run a runnable command, the assistant must (next message) self-correct and execute it.
+
+This policy supersedes any prior ambiguous guidance about asking for manual execution; it is now explicit and mandatory.
+
+### Wrangler Usage Guidelines
+- Always attempt KV key listing, reads, writes, deletes, namespace inspection, and script uploads with Wrangler / direct REST API calls.
+- Prefer adding small maintenance scripts under `tools/` (Node, CommonJS) for repeatable KV maintenance (imports, cleanup, migrations) rather than manual UI edits.
+- When needing to inspect data, first try: `wrangler kv key list`, `wrangler kv key get`, or authenticated REST calls; fall back to UI only if API surface lacks the needed capability.
+- For ad-hoc diagnostics, include minimal structured JSON output (avoid verbose dumps) and clean up any temporary scripts after task closure if they are one-off.
+
+### API Tokens & Scope
+- Default expectation: A Cloudflare API token with Workers KV read/write + Workers Scripts (if publishing) scope is available via environment variables (`CF_API_TOKEN` / `CLOUDFLARE_API_TOKEN`).
+- If an action is blocked by insufficient scope (e.g., need to create/delete namespaces, adjust bindings, or manage account-level settings), clearly state required additional permissions and request a higher-scope token from the operator. Do not attempt partial work that could leave inconsistent state.
+- Never commit secrets. Reference them through env vars; if a new variable is required, document it in a brief note (or `.env.example` if the variable will persist) and sanitize any logs.
+
+### Binding & Namespace Discipline
+- Before performing data migrations/backfills, explicitly confirm (or programmatically verify) that the namespace ID you will modify matches the one currently bound in the deployed Pages environment for that binding name (e.g., `EF_STATS`).
+- If mismatch is discovered (authoritative vs placeholder namespace), propose one of: (1) rebind to authoritative namespace, (2) copy data to the bound namespace via script. Default recommendation: copy, to avoid immediate binding changes in production unless operator directs otherwise.
+
+### Maintenance Script Pattern
+- Scripts should support DRY_RUN via `DRY_RUN=1` env var and log a concise summary: `{ mode, copied, skipped, deleted, errors }`.
+- Reuse global fetch (Node ≥18) instead of adding dependencies.
+- Keep each script ≤ ~120 LoC; if larger, split helper functions or justify in decision log.
+
+### Escalation Protocol (CLI Tasks)
+1. Describe intended platform change (namespace creation, binding switch, bulk purge) and potential impact.
+2. Validate token capabilities via a harmless list call; if unauthorized, request expanded token specifying exact scopes.
+3. Execute scripted change with DRY_RUN first when destructive (deletes/purges), show plan, then run live after approval.
+4. Post-change: verify via API + (if relevant) user-facing endpoint (e.g., `/api/stats?history=...`).
+
+### Prohibited / Caution
+- Do not reintroduce Netlify fallback logic.
+- Avoid manual UI edits that are not mirrored in a script or documented; if a UI-only change is unavoidable, record it in `docs/decision-log.md` with date and rationale.
+
+This section ensures the assistant defaults to reproducible, scriptable Cloudflare operations and requests explicit permission before any scope escalation.
+
+### Manual CLI Preview Deploy Protocol (Experimental / Indexer Features)
+To validate new backend endpoints (e.g., indexer `/api/indexer-*`) without affecting production custom domains, all assistant-led deploys happen as Cloudflare Pages preview deployments until operator approves promotion:
+- Build: `npm run build` ensures `_worker.js` copied into `dist/`.
+- Deploy Preview: `wrangler pages deploy dist --project-name <project> --branch <feature-branch>` (creates random ID URL + stable alias `https://<feature-branch>.<project>.pages.dev`).
+- Isolation Guarantee: Production environment (serving apex/custom domains) is untouched; only an additional Preview row appears in `wrangler pages deployment list`.
+- Secrets: Feature branch previews need secrets explicitly set with `wrangler pages secret put NAME --project-name <project> --branch <feature-branch>`; production secrets are not auto-shared.
+- Verification: Health/admin endpoints exercised exclusively via preview URL; decision log updated with deploy id + validated endpoints.
+- Rollback: Delete or redeploy preview (no production impact). Merge to main/production branch triggers production deploy when ready.
+- Rationale: Prevents accidental schema/data writes or auth exposure on public domain while iterating migrations or indexer logic.
