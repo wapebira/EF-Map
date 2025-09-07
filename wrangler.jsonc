@@ -2,8 +2,7 @@
 // Note: No routes yet; we only define KV namespaces so adapter work can proceed.
 // Future phases will add routes for share + stats endpoints behind flags.
 {
-  "name": "ef-map-placeholder", // placeholder worker name (not directly deployed while using Pages)
-  "main": "worker.js", // retained for standalone worker dev; Pages uses _worker.js
+  "name": "ef-map-placeholder", // placeholder; Pages uses _worker.js automatically
   "compatibility_date": "2025-09-07",
   // Updated KV namespace IDs after creating fresh namespaces via CLI.
   "kv_namespaces": [
@@ -12,13 +11,9 @@
     { "binding": "EF_DRIFT", "id": "4f87b8b5b23744ed920a10a8f8efffad" }
   ],
   // For Pages, specify the build output dir so Wrangler can unify config if desired.
-  "pages_build_output_dir": "eve-frontier-map/dist",
-  "assets": {
-    "directory": "eve-frontier-map/dist",
-    "not_found_handling": "single-page-application"
-  },
+  "pages_build_output_dir": "eve-frontier-map/dist"
   // Future additions:
   // - variables / feature flag bindings
   // - routes if switching back to direct Worker deployment
-  "observability": { "enabled": false }
+  // Observability unsupported in Pages config (removed)
 }
