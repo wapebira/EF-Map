@@ -234,6 +234,10 @@ export default {
   if(p === '/api/usage-event') return handleUsageEvent(req, env);
   if(p === '/api/stats') return handleStats(url, env);
     // Fallback to assets (static site) – will serve SPA.
-    return env.ASSETS.fetch(req);
+  const resp = await env.ASSETS.fetch(req);
+  // Add diagnostic header so we can confirm this worker variant is serving responses.
+  const newHeaders = new Headers(resp.headers);
+  newHeaders.set('X-Stats-Impl','root-list-v1');
+  return new Response(resp.body, { status: resp.status, statusText: resp.statusText, headers: newHeaders });
   }
 };
