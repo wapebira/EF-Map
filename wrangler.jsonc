@@ -2,21 +2,23 @@
 // Note: No routes yet; we only define KV namespaces so adapter work can proceed.
 // Future phases will add routes for share + stats endpoints behind flags.
 {
-  "name": "ef-map-placeholder", // placeholder worker name (not yet deployed)
-  "main": "worker.js", // will be replaced when actual worker entry added
+  "name": "ef-map-placeholder", // placeholder worker name (not directly deployed while using Pages)
+  "main": "worker.js", // retained for standalone worker dev; Pages uses _worker.js
   "compatibility_date": "2025-09-07",
+  // Updated KV namespace IDs after creating fresh namespaces via CLI.
   "kv_namespaces": [
-    { "binding": "EF_SHARES", "id": "30e6ce90c90e44719a4eae3f25132e82" },
-    { "binding": "EF_STATS", "id": "cccc1a708dd74aa8aabd91c8bfc33c3f" },
+    { "binding": "EF_SHARES", "id": "93333a061a734ceca8da9f055cf189d1" },
+    { "binding": "EF_STATS", "id": "32c9bc0ca7c840d293d2d9c3c806fd79" },
     { "binding": "EF_DRIFT", "id": "4f87b8b5b23744ed920a10a8f8efffad" }
   ],
+  // For Pages, specify the build output dir so Wrangler can unify config if desired.
+  "pages_build_output_dir": "eve-frontier-map/dist",
   "assets": {
     "directory": "eve-frontier-map/dist",
     "not_found_handling": "single-page-application"
   },
-  // We will later add:
-  // - route or pages_build_output_dir once we explore using Pages or direct Worker
-  // - vars / env bindings for feature flags (e.g., CF_ADAPTER_ENABLED)
-  // - d1_databases if we adopt D1 (not in scope now)
+  // Future additions:
+  // - variables / feature flag bindings
+  // - routes if switching back to direct Worker deployment
   "observability": { "enabled": false }
 }
