@@ -30,6 +30,21 @@ try {
     fs.copyFileSync(sibling, siblingDest);
     console.log('[copy-worker] Copied', sibling, '->', siblingDest);
   }
+  // Copy migrations directory (if present at repo root) into dist so ASSETS fetch can serve SQL files.
+  const migrationsSrc = path.join(path.dirname(src), 'migrations');
+  if(fs.existsSync(migrationsSrc) && fs.lstatSync(migrationsSrc).isDirectory()){
+    const migrationsDest = path.join(dist, 'migrations');
+    if(!fs.existsSync(migrationsDest)) fs.mkdirSync(migrationsDest, { recursive:true });
+    const entries = fs.readdirSync(migrationsSrc);
+    for(const file of entries){
+      const from = path.join(migrationsSrc, file);
+      const to = path.join(migrationsDest, file);
+      if(fs.lstatSync(from).isFile()){
+        fs.copyFileSync(from, to);
+      }
+    }
+    console.log('[copy-worker] Copied migrations ->', migrationsDest);
+  }
 } catch(e){
   console.error('[copy-worker] copy failed', e);
   process.exit(1);

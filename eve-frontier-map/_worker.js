@@ -95,6 +95,106 @@ const EVENT_MAP = new Map(Object.entries({
   cpu_cores_bucket: { countersDynamic: (b)=> { const v=b.bucket; const allowed=['cores_1_2','cores_3_4','cores_5_8','cores_9_12','cores_13_16','cores_17_plus']; return allowed.includes(v)? [v]: []; } }
 }));
 
+// ---- Indexer (D1) Endpoints (feature/indexer) ----
+// Mirrors logic in root worker.js so Pages deployment has the same API.
+// Requires D1 binding INDEX_DB and secret INDEXER_ADMIN_TOKEN.
+const WORLD_API_BASE = 'https://world-api-stillness.live.tech.evefrontier.com';
+
+async function handleIndexerHealth(env){
+  if(!env.INDEX_DB){
+    return json({ status:'disabled', reason:'INDEX_DB binding missing' });
+  }
+  try {
+    const probe = await env.INDEX_DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='world_version'").all();
+    if(!probe.results || probe.results.length === 0){
+      return json({ status:'uninitialized', world:null });
+    }
+    const { results } = await env.INDEX_DB.prepare("SELECT version_number, world_address, contracts_version FROM world_version WHERE archived_at IS NULL ORDER BY version_number DESC LIMIT 1").all();
+    return json({ status:'ok', world: results?.[0] || null });
+  } catch(e){
+    return json({ status:'error', error:String(e) });
+  }
+}
+
+async function handleIndexerMigrate(req, env){
+  if(req.method !== 'POST') return json({ error:'Method Not Allowed' },405);
+  const token = req.headers.get('X-Indexer-Admin');
+  if(!token || token !== (env.INDEXER_ADMIN_TOKEN||'')) return json({ error:'Unauthorized' },401);
+  if(!env.INDEX_DB) return json({ error:'INDEX_DB binding missing' },500);
+  await env.INDEX_DB.exec("CREATE TABLE IF NOT EXISTS _migrations (id TEXT PRIMARY KEY, applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)");
+  const migrationList = ['001_init'];
+  const appliedRes = await env.INDEX_DB.prepare("SELECT id FROM _migrations").all();
+  const applied = new Set((appliedRes?.results||[]).map(r=>r.id));
+  const executed=[]; const skipped=[];
+  for(const m of migrationList){
+    if(applied.has(m)){ skipped.push(m); continue; }
+    const path = `/migrations/${m}.sql`;
+    try {
+      const sqlResp = await env.ASSETS.fetch(new Request(new URL(path, req.url).toString(), req));
+      if(!sqlResp.ok){ return json({ error:'Migration file fetch failed', migration:m, status: sqlResp.status },500); }
+      const sqlText = await sqlResp.text();
+      await env.INDEX_DB.exec(sqlText);
+      await env.INDEX_DB.prepare("INSERT INTO _migrations (id) VALUES (?)").bind(m).run();
+      executed.push(m);
+    } catch(e){
+      return json({ error:'Migration failed', migration:m, message:String(e), executed, skipped });
+    }
+  }
+  return json({ status:'migrated', executed, skipped });
+}
+
+async function handleIndexerBootstrap(req, env){
+  if(req.method !== 'POST') return json({ error:'Method Not Allowed' },405);
+  const token = req.headers.get('X-Indexer-Admin');
+  if(!token || token !== (env.INDEXER_ADMIN_TOKEN||'')) return json({ error:'Unauthorized' },401);
+  if(!env.INDEX_DB) return json({ error:'INDEX_DB binding missing' },500);
+  let cfg; try {
+    const resp = await fetch(WORLD_API_BASE + '/config');
+    if(!resp.ok) return json({ error:'config_fetch_failed', status: resp.status },502);
+    cfg = await resp.json();
+  } catch(e){ return json({ error:'config_fetch_error', message:String(e) },502); }
+  const worldAddress = cfg?.contracts?.world?.address || '';
+  const contractsVersion = cfg?.contractsVersion || '';
+  if(!worldAddress) return json({ error:'missing_world_address' },500);
+  try {
+    const currentRes = await env.INDEX_DB.prepare("SELECT id, version_number, world_address, contracts_version FROM world_version WHERE archived_at IS NULL ORDER BY version_number DESC LIMIT 1").all();
+    const current = currentRes.results?.[0] || null;
+    if(!current){
+      await env.INDEX_DB.prepare("INSERT INTO world_version (version_number, world_address, contracts_version) VALUES (1, ?, ?)").bind(worldAddress, contractsVersion).run();
+      const inserted = await env.INDEX_DB.prepare("SELECT id, version_number, world_address, contracts_version FROM world_version WHERE archived_at IS NULL ORDER BY version_number DESC LIMIT 1").all();
+      return json({ action:'initialized', world: inserted.results?.[0]||null });
+    }
+    if(current.world_address.toLowerCase() === worldAddress.toLowerCase()){
+      if(current.contracts_version !== contractsVersion){
+        await env.INDEX_DB.prepare("UPDATE world_version SET contracts_version=? WHERE id=?").bind(contractsVersion, current.id).run();
+        return json({ action:'version_updated', world: { ...current, contracts_version: contractsVersion } });
+      }
+      return json({ action:'no_change', world: current });
+    }
+    const newVersion = (current.version_number||0)+1;
+    await env.INDEX_DB.prepare("UPDATE world_version SET archived_at=CURRENT_TIMESTAMP WHERE archived_at IS NULL").run();
+    await env.INDEX_DB.prepare("INSERT INTO world_version (version_number, world_address, contracts_version) VALUES (?, ?, ?)").bind(newVersion, worldAddress, contractsVersion).run();
+    const latest = await env.INDEX_DB.prepare("SELECT id, version_number, world_address, contracts_version FROM world_version WHERE archived_at IS NULL ORDER BY version_number DESC LIMIT 1").all();
+    return json({ action:'version_bumped', world: latest.results?.[0]||null });
+  } catch(e){
+    return json({ error:'bootstrap_failed', message:String(e) });
+  }
+}
+
+// Temporary debug: report whether secret is bound (no actual value leak)
+function handleIndexerSecretDebug(env){
+  const val = env.INDEXER_ADMIN_TOKEN || '';
+  const info = val ? {
+    present: true,
+    length: val.length,
+    startsWith: val.slice(0,4),
+    endsWith: val.slice(-4),
+    sha256: (()=>{ try { return Array.from(new Uint8Array(crypto.subtle.digestSync ? crypto.subtle.digestSync('SHA-256', new TextEncoder().encode(val)) : []))
+      .map(b=>b.toString(16).padStart(2,'0')).join('').slice(0,16)+'…'; } catch { return 'unavailable'; } })()
+  } : { present:false };
+  return json({ secret: info });
+}
+
 function upgradeSnapshot(s){
   if(!s.version || s.version < SCHEMA_VERSION){
     if(s.sums){ delete s.sums.scout_baseline_time_ms_sum; delete s.sums.scout_baseline_time_count; }
@@ -193,6 +293,49 @@ async function handleStats(url, env){
   return json({ current: JSON.parse(raw), history });
 }
 
+async function handleListStats(env){
+  if(!env.EF_STATS) return json({ error:'EF_STATS KV not bound' },500);
+  const out={ daily:[], other:[] };
+  try { let cursor=null; do { const list = await env.EF_STATS.list({ cursor }); list.keys.forEach(k=>{ if(k.name.startsWith('daily/')) out.daily.push(k.name); else out.other.push(k.name); }); cursor = list.list_complete? null : list.cursor; } while(cursor); out.daily.sort(); out.other.sort(); } catch(e){ return json({ error:'list_failed', message:String(e) },500); }
+  return json(out);
+}
+
+async function handleDebugKV(url, env){
+  const limit = parseInt(url.searchParams.get('limit')||'50',10);
+  const prefix = url.searchParams.get('prefix')||'';
+  try { const list = await env.EF_STATS.list({ prefix, limit: Math.min(1000, Math.max(1, limit)) }); return json({ keys: list.keys.map(k=>({ name:k.name, expiration:k.expiration, metadata:k.metadata })), list_complete: list.list_complete }); } catch(e){ return json({ error:'debug_failed', message:String(e) },500); }
+}
+
+async function handleMigrateHistory(url, env){
+  if(!env.EF_STATS_OLD) return json({ error:'EF_STATS_OLD not bound' },500);
+  const confirm = url.searchParams.get('confirm')==='1';
+  const dry = url.searchParams.get('dry')==='1';
+  let copied=0, skipped=0, existing=0, errors=[]; const toCopy=[];
+  try {
+    let cursor=null; const oldKeys=[];
+    do { const list = await env.EF_STATS_OLD.list({ prefix:'daily/', cursor }); list.keys.forEach(k=>{ if(k.name.endsWith('.json')) oldKeys.push(k.name); }); cursor = list.list_complete? null : list.cursor; } while(cursor);
+    oldKeys.sort();
+    for(const k of oldKeys){ const cur = await env.EF_STATS.get(k); if(cur){ existing++; continue; } toCopy.push(k); }
+    if(!confirm){ return json({ mode:'plan', toCopyCount: toCopy.length, existing, note:'Re-run with ?confirm=1 to execute. Use &dry=1 to simulate.' }); }
+    for(const k of toCopy){ try { const v = await env.EF_STATS_OLD.get(k); if(!v){ skipped++; continue; } if(!dry) await env.EF_STATS.put(k, v); copied++; } catch(e){ errors.push({ key:k, message:String(e) }); } }
+  } catch(e){ return json({ error:'migrate_failed', message:String(e) },500); }
+  return json({ mode: dry? 'dry-run':'migrated', copied, skipped, existing, errors });
+}
+
+async function handleListStats(env){
+  if(!env.EF_STATS) return json({ error:'EF_STATS KV not bound' },500);
+  const out={ daily:[], other:[] };
+  try {
+    let cursor=null; do {
+      const list = await env.EF_STATS.list({ cursor });
+      list.keys.forEach(k=>{ if(k.name.startsWith('daily/')) out.daily.push(k.name); else out.other.push(k.name); });
+      cursor = list.list_complete? null : list.cursor;
+    } while(cursor);
+    out.daily.sort(); out.other.sort();
+  } catch(e){ return json({ error:'list_failed', message:String(e) },500); }
+  return json(out,200);
+}
+
 function json(obj,status=200){ return new Response(JSON.stringify(obj),{ status, headers:{ 'Content-Type':'application/json','Cache-Control':'no-store' } }); }
 
 export default {
@@ -201,7 +344,14 @@ export default {
     if(p === '/api/create-share') return handleCreateShare(req, env);
     if(p === '/api/get-share') return handleGetShare(url, env);
     if(p === '/api/usage-event') return handleUsageEvent(req, env);
-    if(p === '/api/stats') return handleStats(url, env);
+  if(p === '/api/stats') return handleStats(url, env);
+  if(p === '/api/list-stats') return handleListStats(env);
+  if(p === '/api/debug-kv') return handleDebugKV(url, env);
+  if(p === '/api/migrate-history') return handleMigrateHistory(url, env);
+  if(p === '/api/indexer-health') return handleIndexerHealth(env);
+  if(p === '/api/indexer-migrate') return handleIndexerMigrate(req, env);
+  if(p === '/api/indexer-bootstrap') return handleIndexerBootstrap(req, env);
+  if(p === '/api/indexer-secret-debug') return handleIndexerSecretDebug(env);
     const resp = await env.ASSETS.fetch(req);
     const h = new Headers(resp.headers); h.set('X-Stats-Impl','pages-list-v1');
     return new Response(resp.body,{ status:resp.status, statusText:resp.statusText, headers:h });

@@ -131,6 +131,145 @@ const EVENT_MAP = {
   ingestion_error: { counters:['ingestion_errors'] }
 };
 
+// --- Indexer / Migration Scaffold (feature/indexer branch) ---
+// NOTE: D1 binding (e.g., INDEX_DB) not yet declared in wrangler.jsonc; endpoints are inert until binding added.
+const WORLD_API_BASE = 'https://world-api-stillness.live.tech.evefrontier.com'; // TODO: make configurable via env var if multiple environments needed
+async function handleIndexerHealth(env){
+  if(!env.INDEX_DB){
+    return json({ status:'disabled', reason:'INDEX_DB binding missing' });
+  }
+  try {
+    // Probe for world_version existence
+    const probe = await env.INDEX_DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='world_version'").all();
+    if(!probe.results || probe.results.length === 0){
+      return json({ status:'uninitialized', world:null });
+    }
+    const { results } = await env.INDEX_DB.prepare("SELECT version_number, world_address, contracts_version FROM world_version WHERE archived_at IS NULL ORDER BY version_number DESC LIMIT 1").all();
+    return json({ status:'ok', world: results?.[0] || null });
+  } catch(e){
+    return json({ status:'error', error: String(e) });
+  }
+}
+
+// (Fallback token removed after initial migration bootstrap)
+
+async function handleIndexerMigrate(req, env){
+  if(req.method !== 'POST') return json({ error:'Method Not Allowed' },405);
+  const token = req.headers.get('X-Indexer-Admin');
+  const expected = (env.INDEXER_ADMIN_TOKEN||'').trim();
+  const provided = (token||'').trim();
+  if(!provided || provided !== expected) return json({ error:'Unauthorized' },401);
+  if(!env.INDEX_DB) return json({ error:'INDEX_DB binding missing' },500);
+  // Simple idempotent executor: runs all migrations in numeric order; tracks applied via world_version.version_number presence NOT sufficient → create _migrations table.
+  await env.INDEX_DB.exec("CREATE TABLE IF NOT EXISTS _migrations (id TEXT PRIMARY KEY, applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)");
+  const migrationList = ['001_init'];
+  const appliedRes = await env.INDEX_DB.prepare("SELECT id FROM _migrations").all();
+  const applied = new Set((appliedRes?.results||[]).map(r=>r.id));
+  const executed=[]; const skipped=[];
+  for(const m of migrationList){
+    if(applied.has(m)){ skipped.push(m); continue; }
+    const path = `/migrations/${m}.sql`;
+    try {
+      const origin = new URL(req.url).origin;
+      const sqlResp = await env.ASSETS.fetch(origin + path);
+      if(!sqlResp.ok){ return json({ error:'Migration file fetch failed', migration:m, status: sqlResp.status },500); }
+      let sqlText = await sqlResp.text();
+      sqlText = sqlText.replace(/\r\n/g,'\n');
+      if(sqlText.charCodeAt(0)===0xFEFF) sqlText = sqlText.slice(1);
+      // Remove meta lines starting with '.' entirely before execution
+      const cleaned = sqlText.split('\n').filter(l=>!l.trim().startsWith('.')).join('\n');
+      try {
+        await env.INDEX_DB.exec(cleaned);
+      } catch(primaryErr){
+        // Fallback: naive split on semicolons outside strings
+        const fallbackStatements = [
+          `CREATE TABLE IF NOT EXISTS world_version (\n  id INTEGER PRIMARY KEY AUTOINCREMENT,\n  version_number INTEGER NOT NULL UNIQUE,\n  world_address TEXT NOT NULL,\n  contracts_version TEXT DEFAULT '',\n  cycle_start TIMESTAMP NULL,\n  started_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,\n  archived_at TIMESTAMP NULL\n);`,
+          `CREATE INDEX IF NOT EXISTS idx_world_version_active ON world_version(archived_at);`,
+          `CREATE TABLE IF NOT EXISTS smart_assembly (\n  id TEXT PRIMARY KEY,\n  world_version INTEGER NOT NULL REFERENCES world_version(id) ON DELETE RESTRICT,\n  type TEXT NOT NULL,\n  state TEXT NOT NULL,\n  name TEXT DEFAULT '',\n  system_id INTEGER NOT NULL,\n  owner_address TEXT NOT NULL,\n  owner_name TEXT DEFAULT '',\n  type_id INTEGER,\n  energy_usage INTEGER DEFAULT 0,\n  hash TEXT NOT NULL,\n  last_seen_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,\n  updated_at TIMESTAMP NULL\n);`,
+          `CREATE INDEX IF NOT EXISTS idx_smart_assembly_world ON smart_assembly(world_version);`,
+            `CREATE INDEX IF NOT EXISTS idx_smart_assembly_type_state ON smart_assembly(type, state);`,
+            `CREATE INDEX IF NOT EXISTS idx_smart_assembly_system ON smart_assembly(system_id);`,
+          `CREATE TABLE IF NOT EXISTS smart_gate_direction (\n  gate_id TEXT NOT NULL REFERENCES smart_assembly(id) ON DELETE CASCADE,\n  world_version INTEGER NOT NULL REFERENCES world_version(id) ON DELETE RESTRICT,\n  origin_system_id INTEGER NOT NULL,\n  destination_system_id INTEGER NOT NULL,\n  linked BOOLEAN NOT NULL DEFAULT 0,\n  online BOOLEAN NOT NULL DEFAULT 0,\n  traversal_cost INTEGER NOT NULL DEFAULT 0,\n  last_change_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,\n  PRIMARY KEY (gate_id, origin_system_id, destination_system_id)\n);`,
+          `CREATE INDEX IF NOT EXISTS idx_gate_direction_world ON smart_gate_direction(world_version);`,
+          `CREATE INDEX IF NOT EXISTS idx_gate_direction_origin ON smart_gate_direction(origin_system_id);`,
+          `CREATE INDEX IF NOT EXISTS idx_gate_direction_dest ON smart_gate_direction(destination_system_id);`,
+          `CREATE TABLE IF NOT EXISTS gate_acl (\n  gate_id TEXT NOT NULL REFERENCES smart_assembly(id) ON DELETE CASCADE,\n  world_version INTEGER NOT NULL REFERENCES world_version(id) ON DELETE RESTRICT,\n  wallet_address TEXT NOT NULL,\n  access_level TEXT NOT NULL DEFAULT 'allow',\n  expires_at TIMESTAMP NULL,\n  added_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,\n  PRIMARY KEY (gate_id, wallet_address)\n);`,
+          `CREATE INDEX IF NOT EXISTS idx_gate_acl_world ON gate_acl(world_version);`,
+          `CREATE TABLE IF NOT EXISTS gate_access_cache (\n  gate_id TEXT NOT NULL REFERENCES smart_assembly(id) ON DELETE CASCADE,\n  world_version INTEGER NOT NULL REFERENCES world_version(id) ON DELETE RESTRICT,\n  visibility_class TEXT NOT NULL,\n  tribe_id TEXT NOT NULL DEFAULT '',\n  direction_origin_system_id INTEGER NOT NULL DEFAULT 0,\n  direction_destination_system_id INTEGER NOT NULL DEFAULT 0,\n  snapshot_version INTEGER NOT NULL,\n  computed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,\n  PRIMARY KEY (gate_id, visibility_class, tribe_id, direction_origin_system_id, direction_destination_system_id)\n);`,
+          `CREATE INDEX IF NOT EXISTS idx_gate_access_cache_world ON gate_access_cache(world_version);`,
+          `CREATE INDEX IF NOT EXISTS idx_gate_access_cache_tribe ON gate_access_cache(tribe_id);`,
+          `CREATE TABLE IF NOT EXISTS structure_generic (\n  id TEXT PRIMARY KEY REFERENCES smart_assembly(id) ON DELETE CASCADE,\n  world_version INTEGER NOT NULL REFERENCES world_version(id) ON DELETE RESTRICT,\n  visibility TEXT NOT NULL DEFAULT 'public',\n  org_id TEXT NULL,\n  meta_json TEXT NULL\n);`,
+          `CREATE TABLE IF NOT EXISTS adjacency_snapshot_meta (\n  id INTEGER PRIMARY KEY AUTOINCREMENT,\n  world_version INTEGER NOT NULL REFERENCES world_version(id) ON DELETE RESTRICT,\n  snapshot_version INTEGER NOT NULL,\n  gate_edge_count INTEGER NOT NULL,\n  published_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,\n  build_duration_ms INTEGER NOT NULL,\n  coalesced_events INTEGER NOT NULL DEFAULT 0\n);`,
+          `CREATE INDEX IF NOT EXISTS idx_adj_snapshot_world ON adjacency_snapshot_meta(world_version);`,
+          `CREATE UNIQUE INDEX IF NOT EXISTS u_adj_snapshot_world_version ON adjacency_snapshot_meta(world_version, snapshot_version);`,
+          `CREATE TABLE IF NOT EXISTS indexer_run (\n  id INTEGER PRIMARY KEY AUTOINCREMENT,\n  world_version INTEGER NOT NULL REFERENCES world_version(id) ON DELETE RESTRICT,\n  run_started_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,\n  run_finished_at TIMESTAMP NULL,\n  mode TEXT NOT NULL,\n  assemblies_scanned INTEGER DEFAULT 0,\n  rows_added INTEGER DEFAULT 0,\n  rows_updated INTEGER DEFAULT 0,\n  rows_removed INTEGER DEFAULT 0,\n  gate_edges_rebuilt INTEGER DEFAULT 0,\n  snapshot_version INTEGER NULL,\n  error_count INTEGER DEFAULT 0,\n  notes TEXT NULL\n);`,
+          `CREATE INDEX IF NOT EXISTS idx_indexer_run_world ON indexer_run(world_version);`,
+          `CREATE INDEX IF NOT EXISTS idx_indexer_run_mode ON indexer_run(mode);`
+        ];
+        for(let i=0;i<fallbackStatements.length;i++){
+          const stmt = fallbackStatements[i];
+          try { await env.INDEX_DB.prepare(stmt).run(); } catch(e){ return json({ error:'Migration failed', migration:m, message:String(e), fallbackIndex:i, statement:stmt.slice(0,160) },500); }
+        }
+      }
+      await env.INDEX_DB.prepare("INSERT INTO _migrations (id) VALUES (?)").bind(m).run();
+      executed.push(m);
+    } catch(e){
+      return json({ error:'Migration failed', migration:m, message:String(e), executed, skipped });
+    }
+  }
+  return json({ status:'migrated', executed, skipped });
+}
+
+// Bootstrap or advance world_version based on /config world address + contractsVersion.
+// POST /api/indexer-bootstrap  (admin token required)
+// Behavior:
+//   - If no active world_version: insert version_number=1
+//   - If active exists and world_address unchanged: update contracts_version if changed (no version bump)
+//   - If world_address changed: archive existing active rows (set archived_at) and insert new version_number=prev+1
+// Returns: { action, world }
+async function handleIndexerBootstrap(req, env){
+  if(req.method !== 'POST') return json({ error:'Method Not Allowed' },405);
+  const token = req.headers.get('X-Indexer-Admin');
+  const expected = (env.INDEXER_ADMIN_TOKEN||'').trim();
+  const provided = (token||'').trim();
+  if(!provided || provided !== expected) return json({ error:'Unauthorized' },401);
+  if(!env.INDEX_DB) return json({ error:'INDEX_DB binding missing' },500);
+  let cfgRaw; try {
+    const resp = await fetch(WORLD_API_BASE + '/config');
+    if(!resp.ok) return json({ error:'config_fetch_failed', status:resp.status },502);
+    cfgRaw = await resp.json();
+  } catch(e){ return json({ error:'config_fetch_error', message:String(e) },502); }
+  const cfg = Array.isArray(cfgRaw) ? cfgRaw[0] : cfgRaw;
+  const worldAddress = cfg?.contracts?.world?.address || '';
+  const contractsVersion = cfg?.contractsVersion || '';
+  if(!worldAddress) return json({ error:'missing_world_address' },500);
+  try {
+    const currentRes = await env.INDEX_DB.prepare("SELECT id, version_number, world_address, contracts_version FROM world_version WHERE archived_at IS NULL ORDER BY version_number DESC LIMIT 1").all();
+    const current = currentRes.results?.[0] || null;
+    if(!current){
+      // insert first
+      await env.INDEX_DB.prepare("INSERT INTO world_version (version_number, world_address, contracts_version) VALUES (1, ?, ?)").bind(worldAddress, contractsVersion).run();
+      const inserted = await env.INDEX_DB.prepare("SELECT id, version_number, world_address, contracts_version FROM world_version WHERE archived_at IS NULL ORDER BY version_number DESC LIMIT 1").all();
+      return json({ action:'initialized', world: inserted.results?.[0]||null });
+    }
+    if(current.world_address.toLowerCase() === worldAddress.toLowerCase()){
+      if(current.contracts_version !== contractsVersion){
+        await env.INDEX_DB.prepare("UPDATE world_version SET contracts_version=? WHERE id=?").bind(contractsVersion, current.id).run();
+        return json({ action:'version_updated', world: { ...current, contracts_version: contractsVersion } });
+      }
+      return json({ action:'no_change', world: current });
+    }
+    // world address changed -> archive and insert new version_number = previous + 1
+    const newVersion = (current.version_number||0)+1;
+    await env.INDEX_DB.prepare("UPDATE world_version SET archived_at=CURRENT_TIMESTAMP WHERE archived_at IS NULL").run();
+    await env.INDEX_DB.prepare("INSERT INTO world_version (version_number, world_address, contracts_version) VALUES (?, ?, ?)").bind(newVersion, worldAddress, contractsVersion).run();
+    const latest = await env.INDEX_DB.prepare("SELECT id, version_number, world_address, contracts_version FROM world_version WHERE archived_at IS NULL ORDER BY version_number DESC LIMIT 1").all();
+    return json({ action:'version_bumped', world: latest.results?.[0]||null });
+  } catch(e){
+    return json({ error:'bootstrap_failed', message:String(e) });
+  }
+}
+
 function upgradeSnapshot(s){
   if(!s.version || s.version < SCHEMA_VERSION){
     if(s.sums){ delete s.sums.scout_baseline_time_ms_sum; delete s.sums.scout_baseline_time_count; }
@@ -209,6 +348,40 @@ async function handleStats(url, env){
   return json({ current: JSON.parse(raw), history });
 }
 
+// Migration: copy missing daily snapshots from EF_STATS_OLD -> EF_STATS (idempotent)
+async function handleMigrateHistory(url, env){
+  if(!env.EF_STATS_OLD) return json({ error:'EF_STATS_OLD not bound' },500);
+  const confirm = url.searchParams.get('confirm')==='1';
+  const dry = url.searchParams.get('dry')==='1';
+  let copied=0, skipped=0, existing=0, errors=[]; const toCopy=[];
+  try {
+    let cursor=null; const oldKeys=[];
+    do {
+      const list = await env.EF_STATS_OLD.list({ prefix:'daily/', cursor });
+      list.keys.forEach(k=>{ if(k.name.endsWith('.json')) oldKeys.push(k.name); });
+      cursor = list.list_complete? null : list.cursor;
+    } while(cursor);
+    oldKeys.sort();
+    for(const k of oldKeys){
+      const cur = await env.EF_STATS.get(k);
+      if(cur){ existing++; continue; }
+      toCopy.push(k);
+    }
+    if(!confirm){
+      return json({ mode:'plan', toCopyCount: toCopy.length, existing, note:'Re-run with ?confirm=1 to execute. Use &dry=1 to simulate writes.' });
+    }
+    for(const k of toCopy){
+      try {
+        const v = await env.EF_STATS_OLD.get(k);
+        if(!v){ skipped++; continue; }
+        if(!dry) await env.EF_STATS.put(k, v);
+        copied++;
+      } catch(e){ errors.push({ key:k, message:String(e) }); }
+    }
+  } catch(e){ return json({ error:'migrate_failed', message:String(e) },500); }
+  return json({ mode: dry? 'dry-run':'migrated', copied, skipped, existing, errors });
+}
+
 function json(obj, status=200){ return new Response(JSON.stringify(obj), { status, headers:{ 'Content-Type':'application/json','Cache-Control':'no-store' } }); }
 
 export default {
@@ -233,6 +406,31 @@ export default {
   if(p === '/api/get-share') return handleGetShare(url, env);
   if(p === '/api/usage-event') return handleUsageEvent(req, env);
   if(p === '/api/stats') return handleStats(url, env);
+  if(p === '/api/migrate-history') return handleMigrateHistory(url, env);
+  if(p === '/api/indexer-health') return handleIndexerHealth(env);
+  if(p === '/api/indexer-migrate') return handleIndexerMigrate(req, env);
+  if(p === '/api/indexer-bootstrap') return handleIndexerBootstrap(req, env);
+    // Temporary diagnostic endpoints (will remove after history verification)
+    if(p === '/api/list-stats'){
+      try {
+        const out={ daily:[], other:[] };
+        let cursor=null; do {
+          const list = await env.EF_STATS.list({ cursor });
+          list.keys.forEach(k=>{ if(k.name.startsWith('daily/')) out.daily.push(k.name); else out.other.push(k.name); });
+          cursor = list.list_complete? null : list.cursor;
+        } while(cursor);
+        out.daily.sort(); out.other.sort();
+        return json(out);
+      } catch(e){ return json({ error:'list_failed', message:String(e) },500); }
+    }
+    if(p === '/api/debug-kv'){
+      const limit = parseInt(url.searchParams.get('limit')||'50',10);
+      const prefix = url.searchParams.get('prefix')||'';
+      try {
+        const list = await env.EF_STATS.list({ prefix, limit: Math.min(1000, Math.max(1, limit)) });
+        return json({ keys: list.keys.map(k=>({ name:k.name, expiration:k.expiration, metadata:k.metadata })), list_complete: list.list_complete });
+      } catch(e){ return json({ error:'debug_failed', message:String(e) },500); }
+    }
     // Fallback to assets (static site) – will serve SPA.
   const resp = await env.ASSETS.fetch(req);
   // Add diagnostic header so we can confirm this worker variant is serving responses.
