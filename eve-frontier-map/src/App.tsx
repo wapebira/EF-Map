@@ -1931,14 +1931,15 @@ function App() {
   const [persistedAlgo, setPersistedAlgo] = useState<'astar'|'dijkstra'>(initialPrefsRef.current.algorithm ?? lastP2PParamsRef.current.algo);
   // Scout ship range persists inside ScoutOptimizer component; no App-level state needed
 
-  // Apply shared route from URL hash or query (?share=ID from /s/<id> redirect) once map data is loaded
+  // Apply shared route from URL hash, query (?share=ID), or persistent short path /s/<id> once map data is loaded
   useEffect(()=>{
     if(!isLoaded || !mapData) return;
     if(initialHashAppliedRef.current) return;
     initialHashAppliedRef.current = true;
     const params = new URLSearchParams(window.location.search);
-    const qShareId = params.get('share');
-    const hash = window.location.hash;
+  const qShareId = params.get('share');
+  const hash = window.location.hash;
+  const pathMatch = window.location.pathname.startsWith('/s/') ? window.location.pathname.slice(3).replace(/[^A-Za-z0-9_-]/g,'') : '';
     const systemsByLower = new Map<string, SolarSystem>(Object.values(mapData.solar_systems).map(s=> [s.name.toLowerCase(), s]));
     const apply = (share:any)=>{
       if(!share) return;
@@ -1946,7 +1947,14 @@ function App() {
       if(!allExist || share.path.length < 2) return;
       if(share.type==='p'){
         lastP2PParamsRef.current = { jump: share.jump, optimize: share.optimize, algo: share.algo, from: share.from, to: share.to };
-  setRouteResult({ path: share.path });
+        // Populate persisted UI state (jump/optimize/algo + destination) so inputs reflect shared settings
+        try {
+          setPersistedJump(share.jump);
+          setPersistedOptimize(share.optimize);
+          setPersistedAlgo(share.algo);
+          if(share.to){ setLastDestinationSystemName(share.to); }
+        } catch { /* ignore */ }
+        setRouteResult({ path: share.path });
   // (legacy setActivePanel call removed)
   ensurePanel('routing');
       } else if(share.type==='s') {
@@ -1960,22 +1968,28 @@ function App() {
       }
       const startSys = systemsByLower.get(share.path[0].toLowerCase()); if(startSys) selectSystem(startSys);
     };
-    // Highest priority: query param (?share=ID) produced by /s/<id> redirect
+    // Highest priority: explicit ?share= (legacy redirect style retained for backward compat)
     if(qShareId){
       fetchShortShare(qShareId).then(full=>{
         if(!full) return;
         const share = decodeShare('#'+full);
         apply(share);
         try { track({ type:'share_resolved' }); } catch {}
-        // Replace URL: drop ?share= and set hash to encoded long share for consistency
-        try {
-          const u = new URL(window.location.href);
-          u.searchParams.delete('share');
-          if(full) u.hash = '#'+full; // persist long form
-          history.replaceState(null,'', u.pathname + (u.search?('?'+u.searchParams.toString()):'') + (u.hash||''));
-        } catch {/* ignore */}
+        // Do NOT rewrite to long form; simply drop the query param to keep canonical short form semantics minimal
+        try { const u = new URL(window.location.href); u.searchParams.delete('share'); history.replaceState(null,'', u.pathname + (u.search?('?'+u.searchParams.toString()):'')); } catch {/* ignore */}
       }).catch(()=>{/* ignore */});
       return; // do not process hash further
+    }
+    // Next: persistent short share path /s/<id>
+    if(pathMatch){
+      fetchShortShare(pathMatch).then(full=>{
+        if(!full) return;
+        const share = decodeShare('#'+full);
+        apply(share);
+        try { track({ type:'share_resolved' }); } catch {}
+        // Intentionally do NOT rewrite URL to long hash; keep /s/<id> visible for sharing consistency
+      }).catch(()=>{/* ignore */});
+      return;
     }
     if(hash.startsWith('#s=')){
       const id = hash.slice(3);

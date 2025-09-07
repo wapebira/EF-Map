@@ -27,7 +27,16 @@ export async function createShortShare(encoded: string): Promise<string> {
   if(!shareBaseCreate) await detectShareEndpoints();
   if(!shareBaseCreate) throw new Error('Share endpoint unavailable');
   const res = await fetch(shareBaseCreate, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ data: encoded }) });
-  if (!res.ok) throw new Error(`Create failed ${res.status}`);
+  if (!res.ok){
+    try {
+      if(res.headers.get('content-type')?.includes('application/json')){
+        const errJson = await res.json();
+        console.warn('[share] create failed', res.status, errJson);
+        throw new Error(`Create failed ${res.status}${errJson?.error?': '+errJson.error:''}`);
+      }
+    } catch {/* ignore parse */}
+    throw new Error(`Create failed ${res.status}`);
+  }
   const ct = res.headers.get('content-type')||'';
   if(ct.includes('text/html')) throw new Error('Invalid HTML response for create-share');
   const json = await res.json();

@@ -4,7 +4,7 @@
 //   GET  /api/get-share?id=ID     -> { data }
 //   POST /api/usage-event         -> accepts single {type, ...} or { events:[{type, body}, ...] }
 //   GET  /api/stats[?history=7]   -> { current, history:[] }
-//   GET  /s/<id>                  -> 302 to /?share=<id> (short share URL)
+//   GET  /s/<id>                  -> Serve SPA index (no redirect) and let client resolve short id in-place
 // Namespaces (bindings via wrangler.jsonc): EF_SHARES, EF_STATS
 // Mirrors Netlify usage-event EVENT_MAP (anonymized metrics). No PII stored.
 
@@ -126,7 +126,9 @@ const EVENT_MAP = {
   transmission_echo_msgs_bucket: { countersDynamic: (b)=> { const v=b.bucket; const allowed=['echo_0','echo_1_5','echo_6_15','echo_16_30','echo_gt_30']; return allowed.includes(v)? [v]:[]; } },
   transmission_open_share_bucket: { countersDynamic: (b)=> { const v=b.bucket; const allowed=['tx_share_0','tx_share_lt_10','tx_share_10_30','tx_share_30_60','tx_share_gt_60']; return allowed.includes(v)? [v]:[]; } },
   screen_res_bucket: { countersDynamic: (b)=> { const v=b.bucket; const allowed=['res_720p','res_1080p','res_1440p','res_4k_plus']; return allowed.includes(v)? [v]:[]; } },
-  cpu_cores_bucket: { countersDynamic: (b)=> { const v=b.bucket; const allowed=['cores_1_2','cores_3_4','cores_5_8','cores_9_12','cores_13_16','cores_17_plus']; return allowed.includes(v)? [v]:[]; } }
+  cpu_cores_bucket: { countersDynamic: (b)=> { const v=b.bucket; const allowed=['cores_1_2','cores_3_4','cores_5_8','cores_9_12','cores_13_16','cores_17_plus']; return allowed.includes(v)? [v]:[]; } },
+  // Internal diagnostic counter: increments if an event ingestion exception occurs (never emitted by client)
+  ingestion_error: { counters:['ingestion_errors'] }
 };
 
 function upgradeSnapshot(s){
@@ -165,7 +167,16 @@ async function handleUsageEvent(req, env){
   const dailyKey = 'daily/' + day + '.json';
   const daily = await loadSnapshot(env.EF_STATS, dailyKey); upgradeSnapshot(daily);
   let appliedAny=false;
-  for(const evt of events){ if(typeof evt.type !== 'string') continue; if(!EVENT_MAP[evt.type]) continue; const ok1 = applyEvent(current, evt.type, evt.body||{}); const ok2 = applyEvent(daily, evt.type, evt.body||{}); if(ok1 && ok2) appliedAny=true; }
+  for(const evt of events){
+    try {
+      if(typeof evt.type !== 'string') continue; if(!EVENT_MAP[evt.type]) continue;
+      const ok1 = applyEvent(current, evt.type, evt.body||{});
+      const ok2 = applyEvent(daily, evt.type, evt.body||{});
+      if(ok1 && ok2) appliedAny=true;
+    } catch(e){
+      try { applyEvent(current, 'ingestion_error', {}); applyEvent(daily, 'ingestion_error', {}); appliedAny=true; } catch{/* ignore */}
+    }
+  }
   if(appliedAny){ await env.EF_STATS.put('current', JSON.stringify(current)); await env.EF_STATS.put(dailyKey, JSON.stringify(daily)); }
   return new Response(null,{ status:204 });
 }
@@ -193,17 +204,18 @@ export default {
   async fetch(req, env, ctx){
     const url = new URL(req.url);
     const p = url.pathname;
-    // Short share redirect /s/<id>
+    // Short share persistent path /s/<id>: serve index.html without redirect so URL stays short.
     if(p.startsWith('/s/')){
       const id = p.slice(3).replace(/[^A-Za-z0-9_-]/g,'');
-      if(id){
-        // Optionally confirm existence (best-effort)
-        const exists = await env.EF_SHARES.get(id);
-        if(exists !== null){
-          return Response.redirect(url.origin + '/?share=' + id, 302);
-        }
-      }
-      return new Response('Not found', { status:404 });
+      if(!id) return new Response('Not found',{ status:404 });
+      // Best-effort existence check (avoid 404 after app boot). If not found -> 404 now.
+      const exists = await env.EF_SHARES.get(id);
+      if(exists === null) return new Response('Not found', { status:404 });
+      // Re-map request to root so SPA bootstraps; keep original URL (no history rewrite from server).
+      const rootUrl = new URL(req.url); rootUrl.pathname = '/'; rootUrl.search = '';
+      const indexResp = await env.ASSETS.fetch(new Request(rootUrl.toString(), req));
+      // Return as-is; client will detect window.location.pathname /s/<id> and fetch share.
+      return indexResp;
     }
   // Cloudflare-only endpoints post-cutover (Netlify fallbacks removed)
   if(p === '/api/create-share') return handleCreateShare(req, env);
