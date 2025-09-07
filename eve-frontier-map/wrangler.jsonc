@@ -1,7 +1,7 @@
 // Project-level Wrangler config for Cloudflare Pages deployment
 // Ensures KV namespaces bind during `wrangler pages deploy` from this subdirectory.
 {
-  "name": "ef-map-cli-app",
+  "name": "ef-map",
   "compatibility_date": "2025-09-07",
   "pages_build_output_dir": "dist",
   "kv_namespaces": [
