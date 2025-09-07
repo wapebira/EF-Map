@@ -168,7 +168,7 @@ async function handleStats(url, env){
   let raw = await env.EF_STATS.get('current');
   if(!raw) raw = JSON.stringify({ version:1, updatedAt:new Date().toISOString(), counters:{}, sums:{} });
   const histParam = url.searchParams.get('history');
-  let history=[]; let histDays=0; if(histParam){ histDays=Math.min(30,Math.max(1,parseInt(histParam,10)||0)); }
+  let history=[]; let histDays=0; if(histParam){ histDays=Math.min(120,Math.max(1,parseInt(histParam,10)||0)); }
   const debug = url.searchParams.get('debug')==='1';
   let foundKeys=[];
   if(histDays>0){
@@ -198,11 +198,12 @@ function json(obj,status=200){ return new Response(JSON.stringify(obj),{ status,
 export default {
   async fetch(req, env, ctx){
     const url = new URL(req.url); const p = url.pathname;
-    if(p === '/api/create-share' || p === '/.netlify/functions/create-share') return handleCreateShare(req, env);
-    if(p === '/api/get-share' || p === '/.netlify/functions/get-share') return handleGetShare(url, env);
-    if(p === '/api/usage-event' || p === '/.netlify/functions/usage-event') return handleUsageEvent(req, env);
-    if(p === '/api/stats' || p === '/.netlify/functions/stats') return handleStats(url, env);
-  // Static asset fallback (ensure we don't accidentally swallow API errors):
-  return env.ASSETS.fetch(req);
+    if(p === '/api/create-share') return handleCreateShare(req, env);
+    if(p === '/api/get-share') return handleGetShare(url, env);
+    if(p === '/api/usage-event') return handleUsageEvent(req, env);
+    if(p === '/api/stats') return handleStats(url, env);
+    const resp = await env.ASSETS.fetch(req);
+    const h = new Headers(resp.headers); h.set('X-Stats-Impl','pages-list-v1');
+    return new Response(resp.body,{ status:resp.status, statusText:resp.statusText, headers:h });
   }
 };

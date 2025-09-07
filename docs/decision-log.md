@@ -792,3 +792,14 @@
 
 
 
+## 2025-09-07 – Unified Pages Worker Implementation (History & Diagnostic Header)
+- Goal: Remove ambiguity between root `worker.js` and `eve-frontier-map/_worker.js` ensuring Cloudflare Pages serves the list-based stats history implementation with verifiable diagnostics.
+- Changes: Modified `eve-frontier-map/_worker.js` to (1) extend max history to 120 days, (2) drop legacy `/.netlify/functions/*` route fallbacks, (3) add `X-Stats-Impl: pages-list-v1` header on non-API asset responses, (4) standardize API matching strictly on `/api/*` paths.
+- Rationale: Live `/api/stats?history=8` responses lacked debug indicators & only returned a single day despite 8 daily keys in KV, implying Pages was executing a different worker file. Consolidation prevents drift and enables straightforward validation via response header and expanded history window.
+- Risk: Low (pure routing & header adjustments). Rollback: reintroduce fallback paths or restore prior file version if multi-provider support needed.
+- Gates: Build includes `_worker.js` in `dist`; post-deploy curl root expecting header; `/api/stats?history=8` expected >=8 entries (after binding uses authoritative namespace).
+- Follow-ups: Once verified, optionally remove diagnostic header or migrate to a `/api/health` endpoint returning `{ impl:"pages-list-v1", historyDays:n }`; consider deleting unused root `worker.js` to reduce future confusion.
+
+
+
+
