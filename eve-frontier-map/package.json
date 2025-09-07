@@ -7,7 +7,7 @@
     "dev": "vite",
     "dev:netlify": "netlify dev",
     "build": "tsc -b && vite build",
-  "deploy": "echo 'Cloudflare Pages deploy step (no-op)'",
+    "deploy": "echo 'Cloudflare Pages deploy step (no-op)'",
     "typecheck": "tsc -b",
     "lint": "eslint .",
     "preview": "vite preview",
@@ -19,29 +19,30 @@
   "dependencies": {
     "@netlify/blobs": "^8.1.0",
     "@types/three": "^0.179.0",
+    "lucide-react": "^0.460.0",
     "lz-string": "^1.5.0",
+    "qrcode": "^1.5.4",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
-  "lucide-react": "^0.460.0",
     "sql.js": "^1.10.2",
-    "three": "^0.179.1",
-    "qrcode": "^1.5.4"
+    "three": "^0.179.1"
   },
   "devDependencies": {
-    "netlify-cli": "^17.34.1",
-    "wrangler": "^3.87.0",
     "@eslint/js": "^9.33.0",
+    "@types/qrcode": "^1.5.5",
     "@types/react": "^19.1.10",
     "@types/react-dom": "^19.1.7",
     "@types/sql.js": "*",
-    "@types/qrcode": "^1.5.5",
     "@vitejs/plugin-react": "^5.0.0",
     "eslint": "^9.33.0",
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.20",
     "globals": "^16.3.0",
+    "netlify-cli": "^17.34.1",
+    "node-fetch": "^3.3.2",
     "typescript": "~5.8.3",
     "typescript-eslint": "^8.39.1",
-    "vite": "^7.1.2"
+    "vite": "^7.1.2",
+    "wrangler": "^4.34.0"
   }
 }

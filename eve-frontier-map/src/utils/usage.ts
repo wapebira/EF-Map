@@ -4,6 +4,9 @@
 interface UsageEventBase { type: string; [k:string]: any }
 
 const QUEUE: UsageEventBase[] = [];
+// Resolve API base once (Cloudflare Pages exposes /api/*). We attempt /api first then fallback.
+let USAGE_ENDPOINT: string | null = null; // chosen path including leading slash
+let triedDetect = false;
 let flushTimer: any = null;
 const FLUSH_INTERVAL = 5000; // batch every 5s
 const MAX_BATCH = 12;
@@ -16,14 +19,31 @@ function scheduleFlush(){
   flushTimer = setTimeout(()=>{ flushTimer = null; flush(); }, FLUSH_INTERVAL);
 }
 
+async function detectEndpoint(){
+  if(triedDetect) return;
+  triedDetect = true;
+  const candidates = ['/api/usage-event','/.netlify/functions/usage-event'];
+  for(const c of candidates){
+    try {
+      // Lightweight HEAD/OPTIONS not guaranteed; send empty POST with invalid type to elicit 400/405 quickly
+      const res = await fetch(c, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ type:'__ping__' }) });
+      if(res.ok || res.status===400 || res.status===405){ USAGE_ENDPOINT = c; return; }
+    } catch { /* ignore */ }
+  }
+  // If detection fails we still fallback to legacy path (Netlify) so disable logic can trigger
+  USAGE_ENDPOINT = '/.netlify/functions/usage-event';
+}
+
 async function flush(){
   if(disabledDueToMissingEndpoint){ QUEUE.length = 0; return; }
   if(!QUEUE.length) return;
+  if(!USAGE_ENDPOINT){ await detectEndpoint(); }
   const batch = QUEUE.splice(0, MAX_BATCH);
   // send sequentially (functions are cheap) to keep server logic simple
   for(const evt of batch){
     try {
-      const res = await fetch('/.netlify/functions/usage-event', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(evt) });
+      const endpoint = USAGE_ENDPOINT || '/.netlify/functions/usage-event';
+      const res = await fetch(endpoint, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(evt) });
       if(!res.ok && typeof window !== 'undefined'){
         // Development aid: log unknown event types or errors (non-intrusive)
         if(res.status === 400){
@@ -83,16 +103,12 @@ export async function flushNow(){
 // Send a single critical event immediately; falls back to queued if network fails
 export async function trackImmediate(evt: UsageEventBase){
   if(disabledDueToMissingEndpoint){ return; }
+  if(!USAGE_ENDPOINT){ await detectEndpoint(); }
   try {
-    const res = await fetch('/.netlify/functions/usage-event', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(evt) });
-    if(!res.ok){
-      track(evt); // fallback enqueue
-    } else {
-      noteActivity();
-    }
-  } catch {
-    track(evt);
-  }
+    const endpoint = USAGE_ENDPOINT || '/.netlify/functions/usage-event';
+    const res = await fetch(endpoint, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(evt) });
+    if(!res.ok){ track(evt); } else { noteActivity(); }
+  } catch { track(evt); }
 }
 
 // Page visibility flush for best-effort delivery

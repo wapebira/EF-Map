@@ -166,7 +166,20 @@ const StatsPage: React.FC = () => {
     const fetchData = async () => {
       try {
   // Request up to 30 days of history (server caps at 31). Graph section (added later) consumes this.
-  const res = await fetch('/.netlify/functions/stats?history=30');
+  // Dynamic endpoint resolution: prefer /api/stats when available (Cloudflare Pages), fallback to Netlify path.
+  async function fetchWithFallback(){
+    const paths = ['/api/stats?history=30','/.netlify/functions/stats?history=30'];
+    let lastErr: any = null;
+    for(const p of paths){
+      try {
+        const r = await fetch(p);
+        if(r.ok){ return r; }
+        lastErr = new Error('HTTP '+r.status);
+      } catch(e){ lastErr = e; }
+    }
+    if(lastErr) throw lastErr; throw new Error('Failed');
+  }
+  const res = await fetchWithFallback();
         if(!res.ok) throw new Error('Failed');
         const json = await res.json();
         if(cancelled) return;

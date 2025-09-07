@@ -33,7 +33,7 @@ import HelpPanel from './components/HelpPanel/HelpPanel';
 import { loadPrefs, setAccent, setOpenPanels as persistOpenPanels, setRoutingPrefs, fullReset, getPrefs, softReset, setUiScale as persistUiScale, setShowStations as persistShowStations } from './utils/prefs';
 import { track } from './utils/usage';
 import { encodeShare, decodeShare } from './utils/share';
-import { createShortShare, fetchShortShare } from './utils/shortShare';
+import { createShortShare, fetchShortShare, buildShortRedirectUrl } from './utils/shortShare';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import DonateCryptoModal from './components/DonateCryptoModal';
 import { Suspense, lazy } from 'react';
@@ -4589,7 +4589,8 @@ function App() {
             setShareFeedback('Saving...');
             const id = await createShortShare(encoded);
             try { track({ type:'share_created' }); } catch {}
-            const shortUrl = window.location.origin + window.location.pathname + window.location.search + '#s=' + id;
+            // Prefer canonical short redirect path /s/<id>
+            const shortUrl = buildShortRedirectUrl(id);
             await navigator.clipboard.writeText(shortUrl);
             setShareFeedback('Copied');
           } catch {
