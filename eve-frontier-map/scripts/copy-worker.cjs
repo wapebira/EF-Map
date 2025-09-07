@@ -23,6 +23,13 @@ const dest = path.join(dist, '_worker.js');
 try {
   fs.copyFileSync(src, dest);
   console.log('[copy-worker] Copied', src, '->', dest);
+  // If the exported worker depends on sibling worker.js (re-export pattern), also copy it.
+  const sibling = path.join(path.dirname(src), 'worker.js');
+  if(fs.existsSync(sibling)){
+    const siblingDest = path.join(dist, 'worker.js');
+    fs.copyFileSync(sibling, siblingDest);
+    console.log('[copy-worker] Copied', sibling, '->', siblingDest);
+  }
 } catch(e){
   console.error('[copy-worker] copy failed', e);
   process.exit(1);
