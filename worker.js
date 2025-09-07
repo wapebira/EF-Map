@@ -335,8 +335,10 @@ async function handleStats(url, env){
         list.keys.forEach(k=>{ if(k.name.endsWith('.json')) all.push(k.name); });
         cursor = list.list_complete? null : list.cursor;
       } while(cursor);
-      all.sort();
-      foundKeys = all.slice(-histDays);
+  all.sort();
+  // Filter out accidental duplicate keys with double .json extension (daily/YYYY-MM-DD.json.json)
+  const filtered = all.filter(k=>!k.endsWith('.json.json'));
+  foundKeys = filtered.slice(-histDays);
       for(const k of foundKeys){
         const dr = await env.EF_STATS.get(k); if(dr){ try { history.push(JSON.parse(dr)); } catch{} }
       }

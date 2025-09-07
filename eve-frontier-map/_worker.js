@@ -280,8 +280,10 @@ async function handleStats(url, env){
         list.keys.forEach(k=>{ if(k.name.endsWith('.json')) all.push(k.name); });
         cursor = list.list_complete? null : list.cursor;
       } while(cursor);
-      all.sort(); // daily/YYYY-MM-DD.json lexicographically sorts oldest -> newest.
-      foundKeys = all.slice(-histDays);
+  all.sort(); // daily/YYYY-MM-DD.json lexicographically sorts oldest -> newest.
+  // Remove duplicate keys accidentally written with an extra .json suffix (daily/DATE.json.json)
+  const filtered = all.filter(k=>!k.endsWith('.json.json'));
+  foundKeys = filtered.slice(-histDays);
       for(const k of foundKeys){
         const dr = await env.EF_STATS.get(k); if(dr){ try { const obj=JSON.parse(dr); history.push(obj); } catch{} }
       }

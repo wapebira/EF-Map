@@ -1,3 +1,11 @@
+## 2025-09-07 – Stats Duplicate Daily Keys Cleanup
+- Goal: Remove visual double counting on Stats page caused by duplicate KV keys with pattern daily/YYYY-MM-DD.json.json alongside correct daily/YYYY-MM-DD.json.
+- Files: `worker.js`, `eve-frontier-map/_worker.js` (added filter ignoring *.json.json), production KV namespace (deleted duplicate keys).
+- Diff: ~8 LoC added (filter logic + comment) plus this log entry.
+- Risk: Low (read-path only; ignores clearly malformed keys). Does not alter write logic.
+- Gates: typecheck N/A (JS workers), build pending; runtime validated via key deletion + /api/stats after deploy.
+- Follow-ups: Optionally remove legacy EF_STATS_OLD binding & migrate-history endpoint once confirmed no further historical backfill needed.
+
 ## 2025-09-06 – Scout Optimizer Double Scrollbar Removal
 ## 2025-09-07 – Indexer Migration Execution, Bootstrap & Fallback Token Removal
 - Goal: Successfully apply initial D1 schema (migration 001_init), initialize `world_version` via external world API `/config`, and remove temporary insecure fallback admin token used to bypass preview secret absence.
