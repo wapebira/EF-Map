@@ -737,6 +737,49 @@
 - Follow-ups: Apply similar HTML content-type guard to usage event & stats endpoint detection if intermittent misconfig observed; optional centralized helper for endpoint probing to reduce duplication.
 
 ## 2025-09-07 – Worker Build Integration & Extended HTML Guards
+## 2025-09-07 – Netlify Stats Mirror Attempt & CF Rate Limit
+## 2025-09-07 – Netlify Stats Mirror Success (Workers Paid)
+## 2025-09-07 – Stats Daily Key Rename & History Fallback
+## 2025-09-07 – Cloudflare KV Namespace Consolidation
+- Goal: Ensure Pages + worker deployments read the same historical stats (8 days) and prevent drift due to duplicate KV namespaces.
+- Finding: Two EF_STATS namespaces existed:
+  - cccc1a708dd74aa8aabd91c8bfc33c3f (worker-EF_STATS) – contained current + 8 daily snapshots.
+  - 32c9bc0ca7c840d293d2d9c3c806fd79 (ef-map-placeholder-EF_STATS) – held only current + today’s daily key.
+- Action: Updated `wrangler.jsonc` binding EF_STATS id to cccc1a708dd74aa8aabd91c8bfc33c3f (authoritative). Diagnostic scripts (`diagnose_cf_kv.js`, `kv_namespace_counts.js`) confirm 8 daily keys present.
+- Rationale: Avoid copying partial data; simpler to point build config at fully populated namespace.
+- Follow-up: Optionally delete unused placeholder namespace (32c9bc0c...) in Cloudflare dashboard after verifying Stats page renders full 8‑day history.
+
+- Goal: Make previously mirrored Netlify daily stats visible in Cloudflare Stats page (history missing due to key naming bug).
+- Issue: Mirror script created daily keys with double extension `daily/YYYY-MM-DD.json.json`; worker expected `daily/YYYY-MM-DD.json`, so `/api/stats?history=*` returned empty history.
+- Changes:
+  - Added `tools/fix_stats_keys.js` one-off script to rename malformed keys (8 daily snapshots) to correct form; all renamed successfully (`renamed:8 skipped:0`).
+  - Patched `worker.js` `handleStats` to (a) raise max history window to 120 days (parity with legacy Netlify) and (b) include fallback attempt for `.json.json` keys (defensive for any future stray entries) before removal.
+  - Verification: Post-rename dump (`tools/dump_cf_stats_kv.js`) shows keys: current + 8 daily with single `.json`; sample counters intact (non-zero page_loads/p2p_routes etc.).
+- Risk: Low (idempotent rename; worker fallback additive). If a deploy races while rename mid-flight, fallback logic would still surface data.
+- Follow-ups: (1) Optionally remove fallback branch after a few days once confident no malformed keys remain. (2) Patch mirror script to avoid duplicating `.json` (already implicit lesson; ensure future scripts use single extension). (3) Reload Stats page to confirm charts now populate with 8 days history.
+
+## 2025-09-07 – Duplicate Wrangler Config Causing Binding Drift
+- Goal: Resolve missing stats history on Pages deployment after updating root `wrangler.jsonc` EF_STATS id.
+- Finding: A second `wrangler.jsonc` existed at `eve-frontier-map/wrangler.jsonc` still pointing EF_STATS binding to placeholder namespace `32c9bc0ca7c840d293d2d9c3c806fd79`. Pages deploy used the subdirectory config (higher precedence for `wrangler pages deploy` executed inside that dir), so binding never switched to authoritative namespace `cccc1a708dd74aa8aabd91c8bfc33c3f`.
+- Action: Updated subdirectory config EF_STATS id to authoritative value and added prominent comment warning to keep both configs in sync. No code logic changes required.
+- Risk: Low (config only). Immediate effect: next deploy should bind correct namespace and expose 8 historical daily snapshots via `/api/stats`.
+- Gates: Pending redeploy + manual GET `/api/stats?history=8` expecting 8 entries (pre-fix returned 1). Root cause documented to prevent recurrence.
+- Follow-ups: (1) Consider removing one config after migration stabilization (single source of truth) (2) Add CI check/script that greps for mismatched EF_* ids across configs.
+
+- Goal: Complete historical stats backfill from Netlify after lifting KV daily write cap (Workers Paid plan activated).
+- Action: Re-ran `node tools/mirror_netlify_stats_to_cf.js` (no DRY_RUN). Result: `writes:9, skips:0` (1 current + 8 daily snapshots) matching expected history window.
+- Outcome: Cloudflare `EF_STATS` namespace now seeded with Netlify parity baseline. Future `/api/stats?history=8` requests should reflect imported history once Worker uses CF exclusively.
+- Risk: None (idempotent; no overwrites of differing content occurred). Script would skip on re-run due to identical values.
+- Follow-ups: (1) Optional: extend history window (set NETLIFY_STATS_URL history param higher before another run if more days available). (2) Proceed with Netlify function code removal after verifying live Cloudflare stats increments new day. (3) Implement write aggregation optimization to reduce KV churn post-cutover.
+
+- Goal: Backfill historical usage statistics from legacy Netlify function endpoint into Cloudflare KV (`EF_STATS`) prior to full cleanup.
+- Action: Created script `tools/mirror_netlify_stats_to_cf.js` fetching `NETLIFY_STATS_URL` (with `?history=8`) and writing `current` plus each `daily/YYYY-MM-DD.json` entry to CF KV (skip identical values). Dry run (`DRY_RUN=true`) showed 9 pending writes (1 current + 8 daily) as expected.
+- Issue: Live run encountered Cloudflare API 429 errors with code `10048` (free usage daily write cap) immediately and after exponential backoff (attempts 5/5) when writing the very first key (`current`). Indicates KV write allotment already exhausted earlier in the day (likely from instrumentation or prior test scripts) or plan limit too low for additional batch today.
+- Mitigation Implemented: Added retry with exponential backoff (300→2400ms) and content-type header; still hit final 429. Did not partially write inconsistent subset (all writes aborted). Logged failure without altering snapshots.
+- Decision: Defer CF KV backfill until next daily quota window or upgrade plan. Alternative interim archival path: export fetched Netlify stats JSON to local file (`data/netlify_stats_export_<timestamp>.json`) and (once quota resets) perform idempotent replay into KV (script supports skipping existing identical values).
+- Risk: Low (read-only against Netlify; no partial CF state). Primary risk is potential loss of very old historical stats if Netlify functions retired before quota window allows copy—currently acceptable given limited history window (8 days) requested.
+- Follow-ups: (1) Add optional `--out file` CLI arg to mirror script for immediate local export (no CF writes). (2) Schedule a re-run after UTC midnight or upgrade CF plan if urgent. (3) Confirm required history depth (8 vs 30 days) and adjust `history` param accordingly before final successful run. (4) Post-success, add brief entry noting completion & counts.
+
 - Goal: Ensure Cloudflare Pages deployment always includes `_worker.js` and extend HTML fallback guards to stats & usage detection.
 - Changes:
   - Added `scripts/copy-worker.cjs` run at end of `build` script to copy root `worker.js` / `_worker.js` into `dist/_worker.js` (required by Pages for functions).
