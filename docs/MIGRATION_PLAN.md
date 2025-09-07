@@ -32,8 +32,8 @@ Success Criteria:
 Checklist:
 - [x] Enumerate all `_store.js` call sites (only the file itself currently; helpers `getStatsStore`/`getShareStore` used in functions already abstracted)
 - [x] Confirm no direct `@netlify/blobs` imports outside `_store.js` (except diagnostic `blobs-diag.js`; acceptable – will migrate last or remove)
-- [ ] Identify implicit assumptions (e.g. atomic overwrite) & map to KV semantics
-- [ ] Draft adapter interface (get, set, listKeys?, compareAndSwap? (defer))
+- [x] Identify implicit assumptions (e.g. atomic overwrite) & map to KV semantics
+- [x] Draft adapter interface (get, set, listKeys?, compareAndSwap? (defer))
 - [ ] (Operator) Create Cloudflare account (if not already) & enable Workers/KV
 - [x] (Operator) Create KV namespaces: shares (`EF_SHARES`), stats (`EF_STATS`), optional drift (`EF_DRIFT`)
 - [x] (Operator) Produce namespace IDs & desired binding names (not secrets) in chat
@@ -48,16 +48,16 @@ Rollback: N/A (no runtime change).
 
 ### Phase 1 – Adapter Introduction
 Checklist:
-- [ ] Create `cloudflareAdapter.ts` (placeholder using in-memory Map) (superseded: using `cf_kv.ts` stub)
+- [x] Create `cloudflareAdapter.ts` (placeholder using in-memory Map) (superseded: using `cf_kv.ts` stub)
 - [x] Add `cf_kv.ts` stub (SimpleKV interface + binding accessor)
-- [ ] Feature flag env var `CF_ADAPTER_ENABLE=false`
-- [ ] Wire selection logic (but keep Netlify active)
+- [x] Feature flag env var `CF_ADAPTER_ENABLE=false`
+- [x] Wire selection logic (but keep Netlify active)
 - [x] Add `wrangler.jsonc` scaffold with: name, compatibility_date, (assets to add later) `kv_namespaces`
 - [x] Insert actual KV namespace bindings (IDs recorded)
-- [ ] Add `assets` config & SPA not_found handling once we evaluate Pages vs Worker site serving
+- [x] Add `assets` config & SPA not_found handling (Worker assets placeholder)
 - [x] Create function mapping table (Netlify -> Cloudflare Worker route) in plan
-- [ ] Document dev workflow: `npm run build` then `npx wrangler dev` (flag disabled)
-- [ ] Validate that enabling flag without bindings fails gracefully (clear console warning, no crash)
+- [x] Document dev workflow: `npm run build` then `npx wrangler dev` (flag disabled)
+- [x] Validate that enabling flag without bindings fails gracefully (clear console warning, no crash)
 Exit Criteria: Build passes; toggling flag in dev shows no runtime errors.
 Rollback: Delete adapter file + selection branch.
 
@@ -130,6 +130,7 @@ Drift = |CF value - Netlify value| / max(Netlify,1). Measured on total counters 
 2025-09-06: Phase 0 token granted. Completed initial audits (call sites, env vars, build output, redirects=none, SPA flag). Pending: assumptions & adapter interface draft, operator namespace creation.
 2025-09-07: Namespaces (EF_SHARES/EF_STATS/EF_DRIFT) created via wrangler; IDs recorded. Advanced to Phase 1 (token). Added `wrangler.jsonc` scaffold & `cf_kv.ts` stub. Next: feature flag + selection logic & function mapping table.
 2025-09-07: Added CF_ADAPTER_ENABLE flag logic (inactive by default) in `_store.js`; added assets SPA handling & function mapping table scaffold.
+2025-09-07: Completed Phase 0 assumptions + adapter interface docs and Phase 1 tasks (flag wiring, mappings, assets config). Phase 1 exit criteria met (no behavior change, build green). Ready to request Phase 2 token when shadow read instrumentation is desired.
 
 ### Function Mapping Table (Phase 1 Draft)
 | Netlify Function | Current Path | Planned Worker Route | Notes |
@@ -154,3 +155,21 @@ MIGRATE PHASE1 OK
 - Dual Write: Write to both providers; read from primary only.
 - Drift: Relative difference between metric snapshots.
 - Fallback: Primary read failure causing secondary provider use.
+
+## 11. Assumptions Mapping (Phase 0 Completion)
+| Assumption | Current Netlify Blobs Behavior | Cloudflare KV Behavior | Action / Notes |
+|------------|--------------------------------|------------------------|----------------|
+| Overwrite is atomic per key | Last writer wins; blob replace | Put overwrites value (eventually consistent globally) | Accept. Stats snapshots treated as full replace. |
+| Read-after-write (same region) consistency | Strong for subsequent function invocation in same region | Eventual (typically <1s) | Accept; metrics & shares tolerate slight delay. No user-facing stale issue expected. |
+| Keys small / values JSON text | Yes (few KB) | Suitable (limit 25MB) | No change needed. |
+| No partial update / increments | Entire JSON replaced | Same | Continue full snapshot writes. |
+| Low write contention | True (single writer pattern) | Same | No CAS needed now; may add compareAndSwap later. |
+| Listing not required | Not used | List available (but avoided) | Keep key names deterministic; no list call. |
+| TTL not required | Not used | TTL optional | Leave unset. |
+
+## 12. Dev Workflow (Phase 1)
+1. Build frontend: `npm run build` (outputs `dist/`).
+2. (Optional scaffold) Run a Worker locally later with `npx wrangler dev` once entry added.
+3. Feature flag: set `CF_ADAPTER_ENABLE=true` in `.env` to exercise Cloudflare branch. With no bindings the app logs a warning and falls back silently. No runtime errors permitted.
+
+Graceful Failure Behavior: If `CF_ADAPTER_ENABLE=true` and no `__CF_KV` binding for a requested namespace, a console warning is emitted (dev only) and Netlify / memory path used.

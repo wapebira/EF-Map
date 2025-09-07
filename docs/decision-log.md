@@ -603,5 +603,18 @@
 - Gates: typecheck ✅ build ✅ smoke ✅ (local manual hover shows expected values, correct percent formatting on Engagement Rates chart).
 - Follow-ups: Optional multi-series stacked tooltip (all series values for a date), touch interaction (tap to lock), keyboard navigation (left/right arrows) if requested.
 
+## 2025-09-07 – Migration Phase 1 Completion
+- Goal: Conclude Phase 1 (Adapter Introduction) with no runtime behavior change while preparing for shadow reads.
+- Files: `wrangler.jsonc`, `netlify/functions/_store.js` (flag logic), `src/lib/cf_kv.ts`, `docs/MIGRATION_PLAN.md`, `.env.example`, `migration_status.json`.
+- Changes:
+  - Added KV namespace bindings & assets SPA handling in wrangler config (placeholder worker entry).
+  - Implemented `CF_ADAPTER_ENABLE` feature flag in `_store.js` (Cloudflare branch with graceful fallback + dev warning).
+  - Created `cf_kv.ts` stub defining SimpleKV interface and binding accessor.
+  - Documented function mapping table and persistence assumptions mapping.
+  - Added `.env.example` with flag and explanatory comments.
+- Risk: Low (docs + guarded code path unreachable in production unless flag explicitly set and bindings provided). No changes to existing Netlify runtime behavior.
+- Gates: typecheck ✅ build ✅ (pre/post modifications) smoke ✅ (share + stats functions unaffected; enabling flag locally without bindings logs single warning then falls back).
+- Follow-ups: Request Phase 2 token to implement shadow reads (parallel get + drift counters). Prepare drift instrumentation design before coding.
+
 
 
