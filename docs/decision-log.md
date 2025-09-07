@@ -1,4 +1,34 @@
 ## 2025-09-06 – Scout Optimizer Double Scrollbar Removal
+## 2025-09-07 – Merge Authorization & Manual Deploy Hold
+- Goal: Formalize operator approval to merge Cloudflare sandbox branch `systemselection` into `main` now that Cloudflare is affirmed as permanent primary (no Netlify fallbacks to be reintroduced) and proceed with manual CLI-based deploys temporarily before enabling Git-based auto deploy.
+- Decisions (A–D): (A) Accept Cloudflare primary permanence; (B) Accept no reinstatement of Netlify fallback; (C) Proceed with immediate merge; (D) Defer Git integration (Actions/Pages binding) briefly, continue manual `wrangler pages deploy` invocations post-merge.
+- Scope: Documentation updates (migration plan daily log), branch merge, manual deploy from `main`. No functional code deltas intended beyond merge consolidation.
+- Rationale: Stabilization work (persistent short share URLs, ingestion hardening, UI state restoration) complete; reducing divergence by consolidating branches lowers risk of drift and simplifies future cleanup (Phase 5) and DNS cutover tasks.
+- Risk: Low (fast-forward merge expected; if conflicts emerge they will be resolved without altering runtime semantics). Rollback: revert merge commit on `main` (Netlify production unaffected since it will cease to be primary post-DNS cutover).
+- Gates (pre-merge): typecheck ✅ build ✅ worker endpoints healthy ✅ share round trip ✅ usage ingestion 204 ✅.
+- Follow-ups: Enable Git → Cloudflare automatic deploy pipeline; execute Phase 5 cleanup (remove legacy Netlify functions directory) after short monitoring window; plan DNS change to point domain at Cloudflare Pages.
+
+## 2025-09-07 – Persistent Short Share URLs (No Rewrite)
+## 2025-09-07 – Usage Ingestion Hardening & Share UI State Population
+- Goal: Eliminate user-visible 500 errors on `/api/usage-event` (e.g., waypoint_count_bucket) and ensure opening a shared P2P route reflects original routing parameters (jump, optimize, algorithm, destination) in UI controls.
+- Changes:
+  - `worker.js`: Added internal `ingestion_error` counter to EVENT_MAP and wrapped per-event application in try/catch. Exceptions increment `ingestion_errors` instead of returning 500; endpoint always returns 204 when payload syntactically valid.
+  - `shortShare.ts`: Enhanced create error logging (parses JSON body on 400 and logs reason for diagnostics).
+  - `App.tsx`: When applying a P2P share, now sets persisted jump distance, optimization mode, algorithm, and destination system so the form mirrors shared settings.
+- Rationale: Prevent transient malformed or legacy event payloads from surfacing as 500 (noise), and improve trust in shared routes by showing the precise parameters used to generate them.
+- Risk: Low (additive defensive code + state population). Potential minor discrepancy if future share schema adds new fields not yet mapped—will default gracefully.
+- Gates: typecheck ✅ build (pending) deploy (pending) smoke: open route share `/s/<id>` -> UI fields reflect encoded settings; posting malformed event manually increments `ingestion_errors` without 500.
+- Follow-ups: Consider extending share schema with additional flags (gateReachable, waypoints, avoid list, returnToStart for P2P) after schema versioning discussion.
+
+- Goal: Keep user-visible shared URL as short form (/s/<id>) after opening a shared route; previously the worker redirected to /?share= which the client rewrote to a long #r1| hash, making the URL unwieldy and harder to re-copy.
+- Changes:
+  - `worker.js`: Replaced 302 redirect for `/s/<id>` with in-place SPA index serving; existence check performed, then root index served while path remains `/s/<id>`.
+  - `App.tsx`: Share resolution effect now (1) supports persistent path `/s/<id>`, (2) stops rewriting to long hash for both `?share=` legacy redirect and path mode, only removing the `?share` param if present, (3) retains legacy hash `#s=<id>` handling unchanged.
+- Rationale: Short URL remains stable & concise for subsequent copying / bookmarking; long encoded hash is still derivable internally when needed without polluting address bar.
+- Risk: Low (routing unaffected; only entrypoint + initial effect). If a future need arises to deep-link into additional state via hash, path-based short sharing remains compatible.
+- Gates: typecheck ✅ build (pending) deploy (pending) smoke plan: create share -> open /s/<id> in new tab -> route loads, address bar stays /s/<id>, Stats increments `shared_resolved`.
+- Follow-ups: After verification, consider optional button in UI to reveal long encoded form if user wants offline copy.
+
 - 2025-09-06 – PanelDrawer Scrollbar Compensation (Non-Resizable)
   - Goal: Prevent content squeeze in non-resizable drawers (e.g., Routing) when vertical scrollbar appears by extending overall panel width by scrollbar width, matching behavior previously limited to resizable panels.
   - Issue: Initial implementation only added `scrollbarExtra` when a `size` object existed (resizable case). Non-resizable panels left `width` undefined so added width never applied, shrinking inner content width when scrollbar present.
