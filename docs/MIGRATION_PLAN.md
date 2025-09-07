@@ -63,10 +63,13 @@ Rollback: Delete adapter file + selection branch.
 
 ### Phase 2 – Shadow Reads
 Checklist:
-- [ ] Implement real KV binding shim (still behind flag)
-- [ ] For each read (shares, stats blob) fetch Cloudflare in parallel
-- [ ] Compare JSON structure; record mismatch counters (client log or console warn dev only)
-- [ ] Emit drift metric (optional) locally (not persisted)
+- [x] Implement real KV binding shim (non-persistent binding via global __CF_KV) behind flags
+- [x] For each read (shares, stats blob) fetch Cloudflare in parallel (served value still Netlify)
+- [x] Compare JSON/string content; record mismatch & miss counters (process memory only)
+- [x] Expose shadow metrics via health function when CF_SHADOW_READ_ENABLE=true
+- [ ] Run 7 consecutive days with drift (<0.5%) before advancing
+
+Sandbox (Option A) Note: A standalone Cloudflare Worker (`worker.js`) was added to allow early visual validation (share + minimal stats) without engaging formal dual write (Phase 3). This sandbox maintains an intentionally reduced EVENT_MAP and does not affect Netlify production counters.
 Exit Criteria: 7 consecutive days drift <0.5%.
 Rollback: Disable shadow fetch flag.
 
@@ -146,6 +149,7 @@ Drift = |CF value - Netlify value| / max(Netlify,1). Measured on total counters 
 ## 9. Tokens Granted
 MIGRATE PHASE0 OK
 MIGRATE PHASE1 OK
+MIGRATE PHASE2 OK
 
 ## 10. Glossary
 - **References**

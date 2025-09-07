@@ -616,5 +616,23 @@
 - Gates: typecheck ✅ build ✅ (pre/post modifications) smoke ✅ (share + stats functions unaffected; enabling flag locally without bindings logs single warning then falls back).
 - Follow-ups: Request Phase 2 token to implement shadow reads (parallel get + drift counters). Prepare drift instrumentation design before coding.
 
+## 2025-09-07 – Migration Phase 2 Shadow Read Implementation
+- Goal: Introduce shadow read path (Netlify primary, Cloudflare KV secondary) to measure data parity ahead of dual writes.
+- Files: `netlify/functions/_store.js` (shadow wrapper & metrics), `netlify/functions/health.js` (shadow metrics exposure), `MIGRATION_PLAN.md` (Phase 2 checklist updates).
+- Implementation: When both `CF_ADAPTER_ENABLE=true` and `CF_SHADOW_READ_ENABLE=true`, `getKVStore(name).get(key)` now serves Netlify value while concurrently fetching Cloudflare value (if binding present via `globalThis.__CF_KV[name]`). Results compared (string equality; JSON deep compare fallback when both start with '[' or '{'). In‑memory counters track reads, matches, mismatches, cfMiss (CF null while NL non-null), nlMiss (inverse), plus up to 5 recent mismatch keys. Health endpoint returns these under `shadow` field when shadow flag enabled.
+- Rationale: Non-invasive parity signal without introducing write amplification yet; isolates provider consistency before adding dual write complexity.
+- Metrics (process lifetime only, not persisted): `reads`, `matches`, `mismatches`, `cfMiss`, `nlMiss`, `lastMismatchSamples[]`.
+- Risk: Low (async fire-and-forget comparison; no impact on primary latency). Shadow errors fully swallowed; only dev console warnings on mismatch (not production).
+- Gates: typecheck/build pending (expected ✅); functional smoke: enable both flags locally with mock `globalThis.__CF_KV` map; perform share fetch & stats fetch; verify health endpoint shadow object increments counters and mismatch sample array updates on synthetic divergence.
+- Follow-ups: (1) Capture daily aggregated drift externally (operator script) if needed; (2) After ≥7 days <0.5% mismatch ratio, request Phase 3 token; (3) Optionally add histogram of value size differences if early mismatches appear; (4) Consider normalizing ordering if we introduce pretty-printed JSON on one side (currently identical serialization expected).
+
+## 2025-09-07 – Cloudflare Sandbox Worker (Option A)
+- Goal: Provide an independent Cloudflare URL where core interactions (create share, basic stats) visibly function using Cloudflare KV only—without modifying production Netlify flow or advancing formal migration phase.
+- Files: `worker.js`, `MIGRATION_PLAN.md` (sandbox note).
+- Scope: Implements `/api/create-share`, `/api/get-share`, `/api/usage-event` (subset events), `/api/stats` using KV bindings `EF_SHARES`, `EF_STATS`. Falls back to serving built assets for all other paths (SPA). EVENT_MAP intentionally trimmed to minimal counters (share + page_load) to confirm write/read path.
+- Rationale: Low-effort visual confirmation path (“click share → see Cloudflare counter grow”) while shadow read parity work proceeds separately. Avoids premature dual write complexity and keeps rollback trivial (delete Worker).
+- Risk: Low (isolated Worker). No production DNS cutover. No Netlify blob alteration.
+- Follow-ups: (1) Decide whether to expand EVENT_MAP to full set or keep minimal until dual write prepared. (2) If continuing toward Phase 3, implement dual write inside Netlify functions before pointing frontend to `/api/*`. (3) Optionally add health route in Worker for KV diagnostics.
+
 
 
