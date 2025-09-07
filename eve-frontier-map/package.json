@@ -7,6 +7,7 @@
     "dev": "vite",
     "dev:netlify": "netlify dev",
     "build": "tsc -b && vite build",
+  "deploy": "echo 'Cloudflare Pages deploy step (no-op)'",
     "typecheck": "tsc -b",
     "lint": "eslint .",
     "preview": "vite preview",
