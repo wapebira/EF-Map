@@ -4,7 +4,7 @@
 interface UsageEventBase { type: string; [k:string]: any }
 
 const QUEUE: UsageEventBase[] = [];
-// Resolve API base once (Cloudflare Pages exposes /api/*). We attempt /api first then fallback.
+// Resolve API base once (Cloudflare Pages exposes /api/*). Netlify fallback removed after cutover.
 let USAGE_ENDPOINT: string | null = null; // chosen path including leading slash
 let triedDetect = false;
 let flushTimer: any = null;
@@ -22,16 +22,17 @@ function scheduleFlush(){
 async function detectEndpoint(){
   if(triedDetect) return;
   triedDetect = true;
-  const candidates = ['/api/usage-event','/.netlify/functions/usage-event'];
+  const candidates = ['/api/usage-event'];
   for(const c of candidates){
     try {
       // Lightweight HEAD/OPTIONS not guaranteed; send empty POST with invalid type to elicit 400/405 quickly
-      const res = await fetch(c, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ type:'__ping__' }) });
-      if(res.ok || res.status===400 || res.status===405){ USAGE_ENDPOINT = c; return; }
+  const res = await fetch(c, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ type:'__ping__' }) });
+  const ct = res.headers.get('content-type')||'';
+  if((res.ok || res.status===400 || res.status===405) && !ct.includes('text/html')){ USAGE_ENDPOINT = c; return; }
     } catch { /* ignore */ }
   }
-  // If detection fails we still fallback to legacy path (Netlify) so disable logic can trigger
-  USAGE_ENDPOINT = '/.netlify/functions/usage-event';
+  console.error('[usage] /api/usage-event unavailable; disabling tracking.');
+  disabledDueToMissingEndpoint = true;
 }
 
 async function flush(){
@@ -42,7 +43,7 @@ async function flush(){
   // send sequentially (functions are cheap) to keep server logic simple
   for(const evt of batch){
     try {
-      const endpoint = USAGE_ENDPOINT || '/.netlify/functions/usage-event';
+  const endpoint = USAGE_ENDPOINT!;
       const res = await fetch(endpoint, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(evt) });
       if(!res.ok && typeof window !== 'undefined'){
         // Development aid: log unknown event types or errors (non-intrusive)
@@ -105,7 +106,7 @@ export async function trackImmediate(evt: UsageEventBase){
   if(disabledDueToMissingEndpoint){ return; }
   if(!USAGE_ENDPOINT){ await detectEndpoint(); }
   try {
-    const endpoint = USAGE_ENDPOINT || '/.netlify/functions/usage-event';
+  const endpoint = USAGE_ENDPOINT!;
     const res = await fetch(endpoint, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(evt) });
     if(!res.ok){ track(evt); } else { noteActivity(); }
   } catch { track(evt); }
