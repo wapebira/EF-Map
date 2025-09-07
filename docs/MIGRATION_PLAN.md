@@ -55,7 +55,7 @@ Checklist:
 - [x] Add `wrangler.jsonc` scaffold with: name, compatibility_date, (assets to add later) `kv_namespaces`
 - [x] Insert actual KV namespace bindings (IDs recorded)
 - [ ] Add `assets` config & SPA not_found handling once we evaluate Pages vs Worker site serving
-- [ ] Create function mapping table (Netlify -> Cloudflare Worker route) in plan
+- [x] Create function mapping table (Netlify -> Cloudflare Worker route) in plan
 - [ ] Document dev workflow: `npm run build` then `npx wrangler dev` (flag disabled)
 - [ ] Validate that enabling flag without bindings fails gracefully (clear console warning, no crash)
 Exit Criteria: Build passes; toggling flag in dev shows no runtime errors.
@@ -129,6 +129,17 @@ Drift = |CF value - Netlify value| / max(Netlify,1). Measured on total counters 
 2025-09-06: Augmented Phase 0 & 1 with build/env audit, wrangler scaffold, function mapping, external reference link tasks.
 2025-09-06: Phase 0 token granted. Completed initial audits (call sites, env vars, build output, redirects=none, SPA flag). Pending: assumptions & adapter interface draft, operator namespace creation.
 2025-09-07: Namespaces (EF_SHARES/EF_STATS/EF_DRIFT) created via wrangler; IDs recorded. Advanced to Phase 1 (token). Added `wrangler.jsonc` scaffold & `cf_kv.ts` stub. Next: feature flag + selection logic & function mapping table.
+2025-09-07: Added CF_ADAPTER_ENABLE flag logic (inactive by default) in `_store.js`; added assets SPA handling & function mapping table scaffold.
+
+### Function Mapping Table (Phase 1 Draft)
+| Netlify Function | Current Path | Planned Worker Route | Notes |
+|------------------|-------------|----------------------|-------|
+| create-share.js  | /.netlify/functions/create-share | /api/create-share | Same request/response JSON; will dual write in P3 |
+| get-share.js     | /.netlify/functions/get-share    | /api/get-share    | Read-only; candidate for early shadow read (P2) |
+| usage-event.js   | /.netlify/functions/usage-event  | /api/usage-event  | Ingestion; order & batching semantics preserved |
+| stats.js         | /.netlify/functions/stats        | /api/stats        | Aggregated snapshot; ensure cache headers parity |
+| health.js        | /.netlify/functions/health       | /api/health       | Add drift/write stats fields in later phases |
+| blobs-diag.js    | /.netlify/functions/blobs-diag   | (maybe /api/diag) | Optional; may drop post-migration |
 ```
 
 ## 9. Tokens Granted

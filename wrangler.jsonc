@@ -10,6 +10,10 @@
     { "binding": "EF_STATS", "id": "cccc1a708dd74aa8aabd91c8bfc33c3f" },
     { "binding": "EF_DRIFT", "id": "4f87b8b5b23744ed920a10a8f8efffad" }
   ],
+  "assets": {
+    "directory": "eve-frontier-map/dist",
+    "not_found_handling": "single-page-application"
+  },
   // We will later add:
   // - route or pages_build_output_dir once we explore using Pages or direct Worker
   // - vars / env bindings for feature flags (e.g., CF_ADAPTER_ENABLED)

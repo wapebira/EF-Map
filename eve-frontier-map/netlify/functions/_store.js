@@ -11,6 +11,10 @@
 
 import { getStore as getNetlifyStore } from '@netlify/blobs';
 
+// Phase 1: optional Cloudflare adapter flag (inactive by default)
+// We keep this lightweight; real Worker env bindings will be integrated in later phases.
+const CF_ADAPTER_ENABLED = (process.env.CF_ADAPTER_ENABLE || '').toLowerCase() === 'true';
+
 // Internal in-memory map fallback (per name) for local dev without credentials.
 const MEMORY_STORES = new Map();
 
@@ -23,19 +27,23 @@ const MEMORY_STORES = new Map();
  *  4. In-memory ephemeral Map (dev only)
  */
 export async function getKVStore(name){
-  // Cloudflare Workers style (placeholder – will activate when migrated)
-  // If executed in a Cloudflare Worker environment, a global env object would be passed differently.
-  // We keep a reserved hook: if globalThis.__CF_KV && globalThis.__CF_KV[name] present, wrap it.
-  try {
-    if(globalThis.__CF_KV && globalThis.__CF_KV[name]){
-      const kv = globalThis.__CF_KV[name];
-      return {
-        async get(key){ return await kv.get(key); },
-        async set(key, value){ await kv.put(key, value); },
-        async delete(key){ try { await kv.delete(key); } catch {} }
-      };
-    }
-  } catch {/* ignore */}
+  // Cloudflare adapter path (flag + binding presence)
+  if(CF_ADAPTER_ENABLED){
+    try {
+      if(globalThis.__CF_KV && globalThis.__CF_KV[name]){
+        const kv = globalThis.__CF_KV[name];
+        return {
+          provider: 'cloudflare',
+          async get(key){ return await kv.get(key); },
+          async set(key, value){ await kv.put(key, value); },
+          async delete(key){ try { await kv.delete(key); } catch {/* ignore */} }
+        };
+      } else if(process.env.NODE_ENV !== 'production') {
+        // Dev visibility: flag enabled but no binding
+        console.warn(`[cf-adapter] CF_ADAPTER_ENABLE=true but no Cloudflare KV binding for namespace "${name}". Falling back to Netlify / memory.`);
+      }
+    } catch(e){ if(process.env.NODE_ENV !== 'production') console.warn('[cf-adapter] error probing Cloudflare KV', e); }
+  }
 
   // Netlify credential strategy (mirrors patterns in existing functions)
   let store; let storeError;
