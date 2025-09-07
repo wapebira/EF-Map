@@ -256,6 +256,36 @@ Violation Handling: If a response inadvertently asks the operator to run a runna
 
 This policy supersedes any prior ambiguous guidance about asking for manual execution; it is now explicit and mandatory.
 
+### Reinforced CLI Mandate (2025-09-07 Addition)
+The operator has escalated the requirement: If an action CAN be performed via CLI / PowerShell (git ops, HTTP endpoint checks with curl/Invoke-WebRequest, Wrangler deploys, KV inspection, D1 queries, listing deployments, diffing branches, etc.) the assistant MUST perform it directly. Manual instructions to the operator are ONLY acceptable when:
+1. The command inherently requires interactive secret input (assistant will still launch the command so the shell prompts for the secret – e.g. `wrangler pages secret put NAME`).
+2. The capability does not exist in Wrangler or Cloudflare public API (must cite a brief justification: “Wrangler lacks <feature> as of vX.Y”).
+3. The operator explicitly requests a UI walkthrough instead of CLI execution.
+
+Prohibited Patterns (require immediate self-correction):
+- “Please run …” followed by a Wrangler / git / curl command the assistant could execute.
+- Providing only a list of commands without executing them when execution is possible.
+- Asking the operator to copy/paste API responses that can be fetched programmatically.
+
+Required Patterns:
+- Execute commands, then summarize concise results (status, IDs, counts, URLs) not raw verbose dumps unless troubleshooting.
+- For HTTP endpoint verification use: PowerShell `Invoke-WebRequest` or `Invoke-RestMethod` (Windows shell) capturing status + first bytes to detect HTML vs JSON.
+- Detect HTML fallback vs JSON by inspecting `Content-Type` header or leading `<` char; report mismatch.
+- When a secret is required: start the command, note “Operator: paste secret now (input hidden)”, then continue once finished.
+
+Accountability Clause:
+If the assistant supplies a manual instruction where execution was possible, the assistant must acknowledge the deviation and immediately perform the command in the next reply, logging the correction in the decision log if non-trivial.
+
+Quick Examples:
+| Task | Correct | Incorrect |
+|------|---------|-----------|
+| List Pages deployments | Execute `wrangler pages deployment list` and summarize | “Run wrangler pages deployment list yourself” |
+| Check /api/stats JSON | Use `Invoke-WebRequest` save body, verify JSON | Ask user to open browser console |
+| Create test share | POST via CLI, show `{id}` | Tell user to click UI share button |
+| Add secret | Run `wrangler pages secret put INDEXER_ADMIN_TOKEN` (user pastes) | Ask user to “go add secret in dashboard” |
+
+All contributors (human or AI) should treat this section as authoritative for operational workflow going forward.
+
 ### Wrangler Usage Guidelines
 - Always attempt KV key listing, reads, writes, deletes, namespace inspection, and script uploads with Wrangler / direct REST API calls.
 - Prefer adding small maintenance scripts under `tools/` (Node, CommonJS) for repeatable KV maintenance (imports, cleanup, migrations) rather than manual UI edits.
