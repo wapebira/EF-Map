@@ -170,17 +170,25 @@ async function handleStats(url, env){
   const histParam = url.searchParams.get('history');
   let history=[]; let histDays=0; if(histParam){ histDays=Math.min(30,Math.max(1,parseInt(histParam,10)||0)); }
   const debug = url.searchParams.get('debug')==='1';
-  const foundKeys=[];
+  let foundKeys=[];
   if(histDays>0){
-    const today = new Date();
-    for(let i=0;i<histDays;i++){
-      const d = new Date(today.getTime()-i*86400000).toISOString().slice(0,10);
-      const key='daily/'+d+'.json'; const dr = await env.EF_STATS.get(key); if(dr){ foundKeys.push(key); try { history.push(JSON.parse(dr)); } catch{} }
-    }
-    history.reverse();
+    // List available daily snapshots and pick the most recent histDays.
+    try {
+      let cursor=null; const all=[];
+      do {
+        const list = await env.EF_STATS.list({ prefix:'daily/', cursor });
+        list.keys.forEach(k=>{ if(k.name.endsWith('.json')) all.push(k.name); });
+        cursor = list.list_complete? null : list.cursor;
+      } while(cursor);
+      all.sort(); // daily/YYYY-MM-DD.json lexicographically sorts oldest -> newest.
+      foundKeys = all.slice(-histDays);
+      for(const k of foundKeys){
+        const dr = await env.EF_STATS.get(k); if(dr){ try { const obj=JSON.parse(dr); history.push(obj); } catch{} }
+      }
+    } catch(e){ if(debug){ history.push({ error:'list_failed', message:String(e) }); } }
   }
   if(debug){
-    return json({ current: JSON.parse(raw), history, debug:{ namespaceId: env.EF_STATS._id || '(id unknown)', requestedDays: histDays, foundDailyKeys: foundKeys } });
+    return json({ current: JSON.parse(raw), history, debug:{ mode:'list', requestedDays: histDays, foundDailyKeys: foundKeys } });
   }
   return json({ current: JSON.parse(raw), history });
 }
