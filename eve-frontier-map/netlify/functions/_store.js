@@ -12,8 +12,21 @@
 import { getStore as getNetlifyStore } from '@netlify/blobs';
 
 // Phase 1: optional Cloudflare adapter flag (inactive by default)
-// We keep this lightweight; real Worker env bindings will be integrated in later phases.
+// Phase 2: shadow read flag (parallel Cloudflare get + drift counters; still serves Netlify result)
 const CF_ADAPTER_ENABLED = (process.env.CF_ADAPTER_ENABLE || '').toLowerCase() === 'true';
+const CF_SHADOW_READ_ENABLED = (process.env.CF_SHADOW_READ_ENABLE || '').toLowerCase() === 'true';
+
+// Shadow metrics (process lifetime only – NOT persisted). Exposed via getShadowMetrics().
+const shadowMetrics = {
+  reads: 0,
+  cfMiss: 0,      // Cloudflare had no value while primary had one
+  nlMiss: 0,      // Netlify had no value while Cloudflare had one (unexpected in P2)
+  matches: 0,
+  mismatches: 0,
+  lastMismatchSamples: [] // up to last 5 sample keys for diagnostics
+};
+
+export function getShadowMetrics(){ return shadowMetrics; }
 
 // Internal in-memory map fallback (per name) for local dev without credentials.
 const MEMORY_STORES = new Map();
@@ -56,11 +69,69 @@ export async function getKVStore(name){
   if(!store){ try { store = getNetlifyStore(name); storeError = undefined; } catch(e){ storeError = e; } }
 
   if(store){
-    return {
+    // If shadow reads enabled and Cloudflare adapter active we still build primary store now; we wrap below.
+    const primary = {
+      provider: 'netlify',
       async get(key){ return await store.get(key); },
       async set(key, value){ return await store.set(key, value); },
       async delete(key){ try { await store.delete?.(key); } catch {/* optional */} }
     };
+
+    // Shadow read wrapper: serve primary result, opportunistically fetch CF copy & compare.
+    if(CF_SHADOW_READ_ENABLED && CF_ADAPTER_ENABLED){
+      // Acquire potential CF namespace (best-effort) – reuse probe logic above but *only* for reads.
+      let cfKV;
+      try { if(globalThis.__CF_KV && globalThis.__CF_KV[name]) cfKV = globalThis.__CF_KV[name]; } catch {}
+      if(cfKV){
+        return {
+            ...primary,
+            async get(key){
+              const nlPromise = primary.get(key);
+              let cfValuePromise;
+              try { cfValuePromise = cfKV.get(key); } catch { /* ignore */ }
+              const nlValue = await nlPromise; // always await primary first for latency
+              if(cfValuePromise){
+                // Fire & forget comparison (do not delay response)
+                cfValuePromise.then(cfValue => {
+                  try {
+                    shadowMetrics.reads++;
+                    if(nlValue == null && cfValue == null){ /* both miss */ return; }
+                    if(nlValue == null && cfValue != null){ shadowMetrics.nlMiss++; return; }
+                    if(nlValue != null && cfValue == null){ shadowMetrics.cfMiss++; return; }
+                    // Both non-null – attempt structured comparison when JSON
+                    let same = nlValue === cfValue;
+                    if(!same){
+                      // Try JSON parse if both look like JSON objects/arrays
+                      if(typeof nlValue === 'string' && typeof cfValue === 'string' && nlValue.length && cfValue.length){
+                        if(/[\[{]/.test(nlValue[0]) && /[\[{]/.test(cfValue[0])){
+                          try {
+                            const a = JSON.parse(nlValue);
+                            const b = JSON.parse(cfValue);
+                            same = JSON.stringify(a) === JSON.stringify(b);
+                          } catch {/* parse failure falls back to string compare result */}
+                        }
+                      }
+                    }
+                    if(same){ shadowMetrics.matches++; }
+                    else {
+                      shadowMetrics.mismatches++;
+                      if(shadowMetrics.lastMismatchSamples.length >= 5) shadowMetrics.lastMismatchSamples.shift();
+                      shadowMetrics.lastMismatchSamples.push(`${name}:${key}`);
+                      if(process.env.NODE_ENV !== 'production'){
+                        console.warn('[shadow-read mismatch]', { namespace: name, key, nlLen: nlValue?.length, cfLen: cfValue?.length });
+                      }
+                    }
+                  } catch {/* swallow all shadow errors */}
+                });
+              }
+              return nlValue;
+            },
+            async set(key, value){ return primary.set(key, value); },
+            async delete(key){ return primary.delete(key); }
+        };
+      }
+    }
+    return primary;
   }
 
   // Memory fallback
