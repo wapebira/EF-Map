@@ -1,5 +1,5 @@
 {
-  "currentPhase": "none",
-  "tokensGranted": [],
-  "lastUpdated": "2025-09-06T00:00:00Z"
+  "currentPhase": "phase1",
+  "tokensGranted": ["MIGRATE PHASE0 OK", "MIGRATE PHASE1 OK"],
+  "lastUpdated": "2025-09-07T00:00:00Z"
 }

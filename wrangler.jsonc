@@ -1,0 +1,18 @@
+// Cloudflare Workers configuration (Phase 1 scaffold)
+// Note: No routes yet; we only define KV namespaces so adapter work can proceed.
+// Future phases will add routes for share + stats endpoints behind flags.
+{
+  "name": "ef-map-placeholder", // placeholder worker name (not yet deployed)
+  "main": "worker.js", // will be replaced when actual worker entry added
+  "compatibility_date": "2025-09-07",
+  "kv_namespaces": [
+    { "binding": "EF_SHARES", "id": "30e6ce90c90e44719a4eae3f25132e82" },
+    { "binding": "EF_STATS", "id": "cccc1a708dd74aa8aabd91c8bfc33c3f" },
+    { "binding": "EF_DRIFT", "id": "4f87b8b5b23744ed920a10a8f8efffad" }
+  ],
+  // We will later add:
+  // - route or pages_build_output_dir once we explore using Pages or direct Worker
+  // - vars / env bindings for feature flags (e.g., CF_ADAPTER_ENABLED)
+  // - d1_databases if we adopt D1 (not in scope now)
+  "observability": { "enabled": false }
+}

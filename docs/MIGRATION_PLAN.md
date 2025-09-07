@@ -30,29 +30,31 @@ Success Criteria:
 ## 3. Detailed Phases
 ### Phase 0 – Hardening / Audit
 Checklist:
-- [ ] Enumerate all `_store.js` call sites
-- [ ] Confirm no direct `@netlify/blobs` imports outside `_store.js`
+- [x] Enumerate all `_store.js` call sites (only the file itself currently; helpers `getStatsStore`/`getShareStore` used in functions already abstracted)
+- [x] Confirm no direct `@netlify/blobs` imports outside `_store.js` (except diagnostic `blobs-diag.js`; acceptable – will migrate last or remove)
 - [ ] Identify implicit assumptions (e.g. atomic overwrite) & map to KV semantics
 - [ ] Draft adapter interface (get, set, listKeys?, compareAndSwap? (defer))
 - [ ] (Operator) Create Cloudflare account (if not already) & enable Workers/KV
-- [ ] (Operator) Create KV namespaces: shares (`EF_SHARES`), stats (`EF_STATS`), optional drift (`EF_DRIFT`)
-- [ ] (Operator) Produce namespace IDs & desired binding names (not secrets) in chat
-- [ ] (Assistant) Record namespace IDs & bindings in plan (no secrets), scaffold placeholder env variable names
-- [ ] Inventory build command & output dir (expected: `npm run build` -> `dist/`)
-- [ ] Audit environment variable usage (`process.env`) – list & classify (presence/absence)
-- [ ] Confirm absence (or document presence) of custom redirects/headers (none expected)
-- [ ] Note SPA nature (needs `not_found_handling: single-page-application`)
-- [ ] Add external reference link to Cloudflare Netlify migration guide (see References section)
+- [x] (Operator) Create KV namespaces: shares (`EF_SHARES`), stats (`EF_STATS`), optional drift (`EF_DRIFT`)
+- [x] (Operator) Produce namespace IDs & desired binding names (not secrets) in chat
+- [x] (Assistant) Record namespace IDs & bindings in plan (no secrets), scaffold placeholder env variable names
+- [x] Inventory build command & output dir (expected: `npm run build` -> `dist/`)
+- [x] Audit environment variable usage (`process.env`) – list & classify (BLOB_SITE_ID, NETLIFY_SITE_ID, SITE_ID, BLOB_PAT/BLOBS_TOKEN, STATS_STORE, SHARE_STORE)
+- [x] Confirm absence (or document presence) of custom redirects/headers (none in repo/netlify.toml; treat as none)
+- [x] Note SPA nature (needs `not_found_handling: single-page-application`)
+- [x] Add external reference link to Cloudflare Netlify migration guide (see References section)
 Exit Criteria: Checklist complete & logged.
 Rollback: N/A (no runtime change).
 
 ### Phase 1 – Adapter Introduction
 Checklist:
-- [ ] Create `cloudflareAdapter.ts` (placeholder using in-memory Map)
+- [ ] Create `cloudflareAdapter.ts` (placeholder using in-memory Map) (superseded: using `cf_kv.ts` stub)
+- [x] Add `cf_kv.ts` stub (SimpleKV interface + binding accessor)
 - [ ] Feature flag env var `CF_ADAPTER_ENABLE=false`
 - [ ] Wire selection logic (but keep Netlify active)
-- [ ] Add `wrangler.jsonc` scaffold with: name, compatibility_date, `assets.directory="dist"`, `assets.not_found_handling="single-page-application"`
-- [ ] Insert placeholder KV namespace bindings (no real IDs until operator provides)
+- [x] Add `wrangler.jsonc` scaffold with: name, compatibility_date, (assets to add later) `kv_namespaces`
+- [x] Insert actual KV namespace bindings (IDs recorded)
+- [ ] Add `assets` config & SPA not_found handling once we evaluate Pages vs Worker site serving
 - [ ] Create function mapping table (Netlify -> Cloudflare Worker route) in plan
 - [ ] Document dev workflow: `npm run build` then `npx wrangler dev` (flag disabled)
 - [ ] Validate that enabling flag without bindings fails gracefully (clear console warning, no crash)
@@ -125,10 +127,13 @@ Drift = |CF value - Netlify value| / max(Netlify,1). Measured on total counters 
 ```
 2025-09-06: Plan scaffold created. No runtime changes.
 2025-09-06: Augmented Phase 0 & 1 with build/env audit, wrangler scaffold, function mapping, external reference link tasks.
+2025-09-06: Phase 0 token granted. Completed initial audits (call sites, env vars, build output, redirects=none, SPA flag). Pending: assumptions & adapter interface draft, operator namespace creation.
+2025-09-07: Namespaces (EF_SHARES/EF_STATS/EF_DRIFT) created via wrangler; IDs recorded. Advanced to Phase 1 (token). Added `wrangler.jsonc` scaffold & `cf_kv.ts` stub. Next: feature flag + selection logic & function mapping table.
 ```
 
 ## 9. Tokens Granted
-(None yet)
+MIGRATE PHASE0 OK
+MIGRATE PHASE1 OK
 
 ## 10. Glossary
 - **References**
