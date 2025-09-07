@@ -64,14 +64,18 @@ async function handleUsageEvent(req, env){
   if(req.method !== 'POST') return new Response('Method Not Allowed',{ status:405 });
   let body={}; try { body = req.headers.get('content-type')?.includes('application/json') ? await req.json() : {}; } catch { return new Response('Invalid JSON',{ status:400 }); }
   const { type } = body;
-  if(typeof type !== 'string' || !EVENT_MAP.has(type)) return new Response('Unknown event',{ status:400 });
+  // For sandbox: silently accept unknown event types (Netlify still holds full set in prod).
+  if(typeof type !== 'string') return new Response('Missing type',{ status:400 });
+  const known = EVENT_MAP.has(type);
   const current = await loadSnapshot(env.EF_STATS, 'current'); upgradeSnapshot(current);
   const day = new Date().toISOString().slice(0,10);
   const dailyKey = 'daily/' + day + '.json';
   const daily = await loadSnapshot(env.EF_STATS, dailyKey); upgradeSnapshot(daily);
-  if(!applyEvent(current,type,body) || !applyEvent(daily,type,body)) return new Response('Rejected',{ status:400 });
-  await env.EF_STATS.put('current', JSON.stringify(current));
-  await env.EF_STATS.put(dailyKey, JSON.stringify(daily));
+  if(known){
+    if(!applyEvent(current,type,body) || !applyEvent(daily,type,body)) return new Response('Rejected',{ status:400 });
+    await env.EF_STATS.put('current', JSON.stringify(current));
+    await env.EF_STATS.put(dailyKey, JSON.stringify(daily));
+  }
   return new Response(null,{ status:204 });
 }
 
@@ -98,10 +102,11 @@ export default {
   async fetch(req, env, ctx){
     const url = new URL(req.url);
     const p = url.pathname;
-    if(p === '/api/create-share') return handleCreateShare(req, env);
-    if(p === '/api/get-share') return handleGetShare(url, env);
-    if(p === '/api/usage-event') return handleUsageEvent(req, env);
-    if(p === '/api/stats') return handleStats(url, env);
+  // Support both /api/* and Netlify-style /.netlify/functions/* paths for the frontend without code changes.
+  if(p === '/api/create-share' || p === '/.netlify/functions/create-share') return handleCreateShare(req, env);
+  if(p === '/api/get-share' || p === '/.netlify/functions/get-share') return handleGetShare(url, env);
+  if(p === '/api/usage-event' || p === '/.netlify/functions/usage-event') return handleUsageEvent(req, env);
+  if(p === '/api/stats' || p === '/.netlify/functions/stats') return handleStats(url, env);
     // Fallback to assets (static site) – will serve SPA.
     return env.ASSETS.fetch(req);
   }
