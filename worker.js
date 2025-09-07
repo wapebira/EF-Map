@@ -205,11 +205,11 @@ export default {
       }
       return new Response('Not found', { status:404 });
     }
-  // Support both /api/* and Netlify-style /.netlify/functions/* paths for the frontend without code changes.
-  if(p === '/api/create-share' || p === '/.netlify/functions/create-share') return handleCreateShare(req, env);
-  if(p === '/api/get-share' || p === '/.netlify/functions/get-share') return handleGetShare(url, env);
-  if(p === '/api/usage-event' || p === '/.netlify/functions/usage-event') return handleUsageEvent(req, env);
-  if(p === '/api/stats' || p === '/.netlify/functions/stats') return handleStats(url, env);
+  // Cloudflare-only endpoints post-cutover (Netlify fallbacks removed)
+  if(p === '/api/create-share') return handleCreateShare(req, env);
+  if(p === '/api/get-share') return handleGetShare(url, env);
+  if(p === '/api/usage-event') return handleUsageEvent(req, env);
+  if(p === '/api/stats') return handleStats(url, env);
     // Fallback to assets (static site) – will serve SPA.
     return env.ASSETS.fetch(req);
   }
