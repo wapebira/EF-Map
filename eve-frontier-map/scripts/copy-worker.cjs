@@ -3,10 +3,14 @@
 const fs = require('fs');
 const path = require('path');
 
-const root = path.resolve(process.cwd(), '..'); // go up from app folder if run inside eve-frontier-map
+const root = path.resolve(process.cwd(), '..'); // repo root
+// Prefer the app-local _worker.js (Pages implementation) before falling back to root variants.
+// Root _worker.js is a thin re-export wrapper; deploying it caused HTML fallback for API endpoints when the richer
+// Pages worker existed. This ordering ensures we ship the full Pages worker logic.
 const candidates = [
-  path.join(root, '_worker.js'),
-  path.join(root, 'worker.js')
+  path.join(process.cwd(), '_worker.js'), // app-level
+  path.join(root, '_worker.js'),          // root-level (wrapper)
+  path.join(root, 'worker.js')            // legacy root worker.js direct
 ];
 const dist = path.join(process.cwd(), 'dist');
 if(!fs.existsSync(dist)){
@@ -22,7 +26,7 @@ if(!src){
 const dest = path.join(dist, '_worker.js');
 try {
   fs.copyFileSync(src, dest);
-  console.log('[copy-worker] Copied', src, '->', dest);
+  console.log('[copy-worker] Copied', src, '->', dest, '(selected first existing candidate in priority list)');
   // If the exported worker depends on sibling worker.js (re-export pattern), also copy it.
   const sibling = path.join(path.dirname(src), 'worker.js');
   if(fs.existsSync(sibling)){
@@ -30,8 +34,8 @@ try {
     fs.copyFileSync(sibling, siblingDest);
     console.log('[copy-worker] Copied', sibling, '->', siblingDest);
   }
-  // Copy migrations directory (if present at repo root) into dist so ASSETS fetch can serve SQL files.
-  const migrationsSrc = path.join(path.dirname(src), 'migrations');
+  // Copy migrations directory (always from repo root) into dist so ASSETS fetch can serve SQL files.
+  const migrationsSrc = path.join(root, 'migrations');
   if(fs.existsSync(migrationsSrc) && fs.lstatSync(migrationsSrc).isDirectory()){
     const migrationsDest = path.join(dist, 'migrations');
     if(!fs.existsSync(migrationsDest)) fs.mkdirSync(migrationsDest, { recursive:true });

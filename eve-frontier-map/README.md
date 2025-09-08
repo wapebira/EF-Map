@@ -1,70 +1,33 @@
-# React + TypeScript + Vite
+# EVE Frontier Map Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+This directory contains the client application: React + TypeScript + Vite, Three.js custom shaders, in‑browser SQLite (`sql.js`) and web workers for routing / optimization.
 
-Currently, two official plugins are available:
-
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default tseslint.config([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      ...tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      ...tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      ...tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+## Quick Start
 ```
-Deployment note: Trigger commit to test Netlify branch deploy (adds cinematic labels toggle verification) - ${new Date().toISOString().split('T')[0]}.
-
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
-
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default tseslint.config([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+npm install
+npm run dev
+# open http://localhost:5173
 ```
+
+Production build:
+```
+
+```
+
+The Worker scripts and KV bindings are defined at the repo root; build copies worker entries into `dist/`.
+
+## Key Paths
+* `src/App.tsx` – scene + global state wiring
+* `src/utils/usage.ts` – single source of usage events
+* `src/workers/` – routing / optimization logic off main thread
+* `public/` – static assets (DB, wasm, media)
+
+## Deployment
+Production deploys are performed from repo root via Cloudflare Pages (`wrangler pages deploy`). This sub‑README is intentionally minimal; see root `README.md` for full architecture and data pipeline details.
+
+## Notes
+* Legacy `netlify/functions/` retained only for historical reference (no runtime use post‑cutover).
+* UTF‑8 BOM stripping for stats snapshots handled server‑side (no client change needed).
+
+Refer to the root README and `docs/decision-log.md` for deeper implementation notes.
+        project: ['./tsconfig.node.json', './tsconfig.app.json'],

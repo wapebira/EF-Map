@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import IndexerStatusBadge from './Indexer/IndexerStatusBadge';
 import { ChartLegend, chartColors, ResponsiveLineChart } from './StatsCharts';
 
 interface StatsSnapshot { version: number; updatedAt: string; counters: Record<string, number>; sums: Record<string, number>; date?: string }
@@ -481,6 +482,9 @@ const StatsPage: React.FC = () => {
   </div>
   </>
       )}
+      <div style={{ marginTop:32 }}>
+        <IndexerStatusBadge inline />
+      </div>
       <div style={{ marginTop:22, fontSize:'11px', opacity:0.5 }}>Updated: {data? new Date(data.updatedAt).toLocaleString(): '—'}</div>
   {history.length>0 && (
         <div style={{ marginTop:30 }}>
