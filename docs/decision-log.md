@@ -1,6 +1,5 @@
 ## 2025-09-08 – Sept 7 Partial-Day Stats Merge (Netlify + Cloudflare)
 - Goal: Consolidate Sept 7 analytics split across pre‑cutover (old placeholder/Netlify era namespace) and post‑cutover (active Cloudflare namespace) snapshots into a single authoritative daily blob.
-- Goal: Consolidate Sept 7 analytics split across pre‑cutover (old placeholder/Netlify era namespace) and post‑cutover (active Cloudflare namespace) snapshots into a single authoritative daily blob.
 - Source Snapshots:
   - Old (placeholder) key: `daily/2025-09-07.json` (UTF-16 LE BOM) – partial early‑day window (page_loads=83, session_time_ms_sum≈2.15e9, etc.).
   - New (active) key: `daily/2025-09-07.json` (UTF-8) – post cutover remainder (page_loads=115, session_time_ms_sum≈1.12e10).
@@ -24,6 +23,22 @@
 - Verification: Preview deploy `feature-indexer-diagnostics` then production deploy → `/api/stats?history=7` now returns dates 04–08 inclusive with 07 present (no parse_error objects). Production UI shows Sept 7 in graph and table.
 - Risk: Low (read-path only). BOM strip is defensive for any future accidental BOM introductions.
 - Follow-ups: Add pre-deploy sanity script to scan KV `daily/*` values for BOM or non-JSON format; remove stale malformed backup keys (`daily/2025-09-07_malformed_raw_backup.json`) after short observation window.
+
+## 2025-09-08 – Cloudflare Cutover Documentation Refresh & Migration Plan Archival
+- Goal: Bring all public/project documentation into alignment with Cloudflare-as-primary reality, retire active migration phrasing, and surface new defensive + future-planning notes (BOM strip, dynamic structures, D1 scaffold).
+- Files Updated:
+  - `README.md` (root): Removed Netlify fallback language, updated architecture & deployment notes, added BOM parsing hardening rationale, clarified KV namespaces & D1 mention.
+  - `docs/MIGRATION_PLAN.md`: Marked HISTORICAL (archival banner), summarized skipped Dual Write (Phase 3) & completed Cutover (Phase 4), left CLEANUP pending.
+  - `eve-frontier-map/README.md`: Replaced Vite boilerplate with concise frontend quick start + legacy note.
+  - `docs/README.md`: Added dynamic structures planning docs, historical migration section, status notes (Cloudflare primary, BOM strip).
+  - `eve-frontier-map/netlify/functions/README.md`: New legacy notice clarifying directory retained temporarily for historical reference only (no active runtime usage).
+- Diff Summary: Pure documentation/text additions & edits (~+500 / -400 LOC aggregate across files; no code semantics changed).
+- Risk: Low (docs only). No runtime or build impact; worker & frontend code untouched by this commit set.
+- Rationale: Prevent operator / contributor confusion post-cutover; ensure single source of truth for platform state; provide traceability for defensive BOM change and upcoming D1/indexer work without implying unfinished migration phases.
+- Verification: Manual review of updated files (headings render, internal links valid, no lingering present-tense Netlify fallback instructions outside clearly marked historical sections). Build/typecheck not required (no TS changes) but can run opportunistically later.
+- Rollback: Revert documentation commit hash (no cascading effects).
+- Follow-ups: (1) Execute CLEANUP phase removing legacy Netlify function code after short observation window; (2) Add `/api/health` endpoint doc once implemented; (3) Consolidate duplicate wrangler config guidance into single authoritative doc section after cleanup.
+
 
 ## 2025-09-07 – Stats Duplicate Daily Keys Cleanup
 - Goal: Remove visual double counting on Stats page caused by duplicate KV keys with pattern daily/YYYY-MM-DD.json.json alongside correct daily/YYYY-MM-DD.json.
