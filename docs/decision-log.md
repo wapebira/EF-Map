@@ -1,3 +1,5 @@
+<!-- Ordering Convention: Reverse chronological (newest entries at the top). File reorganized on 2025-09-08 to adopt consistent newest-first ordering. Always append new decisions directly below this note. -->
+
 ## 2025-09-08 – Sept 7 Partial-Day Stats Merge (Netlify + Cloudflare)
 - Goal: Consolidate Sept 7 analytics split across pre‑cutover (old placeholder/Netlify era namespace) and post‑cutover (active Cloudflare namespace) snapshots into a single authoritative daily blob.
 - Source Snapshots:
@@ -43,6 +45,445 @@
 - Summary: Several hours lost attempting to invoke `/api/indexer-migrate` / `/api/indexer-bootstrap` on a Cloudflare Pages preview (branch) returning 401 despite setting the `INDEXER_ADMIN_TOKEN` secret. Successful execution only occurred after deploying to production, creating confusion about secret availability.
 - Impact: Delayed D1 schema migration & bootstrap; introduced temporary insecure fallback token (later removed) and extra debug endpoints.
 - User Symptoms: Preview endpoint always 401; secret debug attempts inconsistent; production deploy succeeded quickly with same header.
+## 2025-09-08 – KV Namespace Cleanup & Stats Retention Policy
+- Goal: Remove redundant migration/staging KV namespaces (EF_STATS_OLD, EF_DRIFT, extra share namespaces) and finalize initial stats retention guidance.
+- Changes:
+  - Removed EF_DRIFT and EF_STATS_OLD bindings from `wrangler.jsonc` (root + frontend).
+  - Deleted `/api/migrate-history` endpoint from both worker implementations.
+  - Verified no remaining references to EF_STATS_OLD / EF_DRIFT via grep.
+  - Retention policy documented: keep all daily snapshots up to 365 days; cap `history` query to 120 (existing), future option to aggregate >365 into monthly summaries.
+  - All redundant namespaces were empty (no data loss risk) prior to deletion.
+- Rationale: Reduce operational clutter, prevent accidental writes to obsolete namespaces, simplify mental model.
+- Risk: Low (namespaces empty; code path removal only). Rollback: reintroduce bindings + endpoint if unexpected historical data appears.
+- Follow-ups: (Deferred) Implement monthly aggregation & pruning script once >365 days accumulated.
+
+---
+
+## 2025-09-07 – Stats Duplicate Daily Keys Cleanup
+- Goal: Remove visual double counting on Stats page caused by duplicate KV keys with pattern daily/YYYY-MM-DD.json.json alongside correct daily/YYYY-MM-DD.json.
+- Files: `worker.js`, `eve-frontier-map/_worker.js` (added filter ignoring *.json.json), production KV namespace (deleted duplicate keys).
+- Diff: ~8 LoC added (filter logic + comment) plus this log entry.
+- Risk: Low (read-path only; ignores clearly malformed keys). Does not alter write logic.
+- Gates: typecheck N/A (JS workers), build pending; runtime validated via key deletion + /api/stats after deploy.
+- Follow-ups: Optionally remove legacy EF_STATS_OLD binding & migrate-history endpoint once confirmed no further historical backfill needed.
+
+## 2025-09-07 – Indexer Migration Execution, Bootstrap & Fallback Token Removal
+- Goal: Successfully apply initial D1 schema (migration 001_init), initialize `world_version` via external world API `/config`, and remove temporary insecure fallback admin token used to bypass preview secret absence.
+- Context: Preview deployments lacked `INDEXER_ADMIN_TOKEN`; production deploy 401s blocked migration. Introduced short-lived hard‑coded fallback (with explicit plan to remove) to continue validating migration executor & schema.
+- Key Changes: Enhanced migration runner in `worker.js` (absolute asset fetch, meta command strip, per-statement prepare/run fallback, robust splitter); adjusted `migrations/001_init.sql` replacing expression-based PRIMARY KEY (COALESCE) in `gate_access_cache` with NOT NULL columns + defaults; added bootstrap handler logic to handle array response shape.
+- Outcomes: `/api/indexer-migrate` executed `001_init` (tables + indexes created, `_migrations` row inserted). `/api/indexer-bootstrap` inserted `world_version` (version_number=1, contracts_version empty). `/api/indexer-health` now returns `{status:"ok", world:{...}}`.
+- Security: Removed fallback token after successful bootstrap; auth now strictly requires `X-Indexer-Admin` header matching `env.INDEXER_ADMIN_TOKEN`. Debug/secret endpoints previously removed (no secret surface exposed).
+- Rationale: Temporary fallback minimized downtime & avoided blocking on preview secret propagation issue while ensuring audit trail (this entry) documents its introduction and removal; schema simplification resolved D1 parser limitations causing "incomplete input" errors.
+- Gates: Migration run ✅ (executed:["001_init"]) | Bootstrap ✅ | Health ✅ | Existing share/stats endpoints unaffected | No console/runtime errors observed post-deploy.
+- Risks: Future migrations may still hit D1 parser edge cases (multi-statement exec); current runner complexity could be trimmed later. Preview secret injection root cause unresolved (affects future preview-only admin ops).
+- Follow-ups: (1) Investigate Wrangler Pages preview secret propagation gap; (2) Add lightweight `/api/indexer-health?details=1` with table counts; (3) Consider simplifying migration executor now that base schema stable; (4) Add automated dry-run validation for new migration files before apply.
+
+## 2025-09-07 – Merge Authorization & Manual Deploy Hold
+- Goal: Formalize operator approval to merge Cloudflare sandbox branch `systemselection` into `main` now that Cloudflare is affirmed as permanent primary (no Netlify fallbacks to be reintroduced) and proceed with manual CLI-based deploys temporarily before enabling Git-based auto deploy.
+- Decisions (A–D): (A) Accept Cloudflare primary permanence; (B) Accept no reinstatement of Netlify fallback; (C) Proceed with immediate merge; (D) Defer Git integration (Actions/Pages binding) briefly, continue manual `wrangler pages deploy` invocations post-merge.
+- Scope: Documentation updates (migration plan daily log), branch merge, manual deploy from `main`. No functional code deltas intended beyond merge consolidation.
+- Rationale: Stabilization work (persistent short share URLs, ingestion hardening, UI state restoration) complete; reducing divergence by consolidating branches lowers risk of drift and simplifies future cleanup (Phase 5) and DNS cutover tasks.
+- Risk: Low (fast-forward merge expected; if conflicts emerge they will be resolved without altering runtime semantics). Rollback: revert merge commit on `main` (Netlify production unaffected since it will cease to be primary post-DNS cutover).
+- Gates (pre-merge): typecheck ✅ build ✅ worker endpoints healthy ✅ share round trip ✅ usage ingestion 204 ✅.
+- Follow-ups: Enable Git → Cloudflare automatic deploy pipeline; execute Phase 5 cleanup (remove legacy Netlify functions directory) after short monitoring window; plan DNS change to point domain at Cloudflare Pages.
+
+## 2025-09-07 – Persistent Short Share URLs (No Rewrite)
+- Goal: Keep user-visible shared URL as short form (/s/<id>) after opening a shared route; previously the worker redirected to /?share= which the client rewrote to a long #r1| hash, making the URL unwieldy and harder to re-copy.
+- Changes:
+  - `worker.js`: Replaced 302 redirect for `/s/<id>` with in-place SPA index serving; existence check performed, then root index served while path remains `/s/<id>`.
+  - `App.tsx`: Share resolution effect now (1) supports persistent path `/s/<id>`, (2) stops rewriting to long hash for both `?share=` legacy redirect and path mode, only removing the `?share` param if present, (3) retains legacy hash `#s=<id>` handling unchanged.
+- Rationale: Short URL remains stable & concise for subsequent copying / bookmarking; long encoded hash is still derivable internally when needed without polluting address bar.
+- Risk: Low (routing unaffected; only entrypoint + initial effect). If a future need arises to deep-link into additional state via hash, path-based short sharing remains compatible.
+- Gates: typecheck ✅ build (pending) deploy (pending) smoke plan: create share -> open /s/<id> in new tab -> route loads, address bar stays /s/<id>, Stats increments `shared_resolved`.
+- Follow-ups: After verification, consider optional button in UI to reveal long encoded form if user wants offline copy.
+
+## 2025-09-07 – Usage Ingestion Hardening & Share UI State Population
+- Goal: Eliminate user-visible 500 errors on `/api/usage-event` (e.g., waypoint_count_bucket) and ensure opening a shared P2P route reflects original routing parameters (jump, optimize, algorithm, destination) in UI controls.
+- Changes:
+  - `worker.js`: Added internal `ingestion_error` counter to EVENT_MAP and wrapped per-event application in try/catch. Exceptions increment `ingestion_errors` instead of returning 500; endpoint always returns 204 when payload syntactically valid.
+  - `shortShare.ts`: Enhanced create error logging (parses JSON body on 400 and logs reason for diagnostics).
+  - `App.tsx`: When applying a P2P share, now sets persisted jump distance, optimization mode, algorithm, and destination system so the form mirrors shared settings.
+- Rationale: Prevent transient malformed or legacy event payloads from surfacing as 500 (noise), and improve trust in shared routes by showing the precise parameters used to generate them.
+- Risk: Low (additive defensive code + state population). Potential minor discrepancy if future share schema adds new fields not yet mapped—will default gracefully.
+- Gates: typecheck ✅ build (pending) deploy (pending) smoke: open route share `/s/<id>` -> UI fields reflect encoded settings; posting malformed event manually increments `ingestion_errors` without 500.
+- Follow-ups: Consider extending share schema with additional flags (gateReachable, waypoints, avoid list, returnToStart for P2P) after schema versioning discussion.
+
+## 2025-09-07 – Smart Gate Access Clarifications & Schema Cache Adjustments
+- Goal: Capture newly provided domain clarifications for dynamic smart gate integration: tribe-based (org) gating predominance, programmable contract logic via `configureGate`, irrelevance of fuel level beyond binary ONLINE state, and confirmation of current world address `0x7085f3e652987f656fb8dee5aa6592197bb75de8` for wipe/version tracking.
+- Changes:
+  - `dynamic_structures_plan.md`: Added Section 8.1 clarifications (tribe access, wallet→character→tribe mapping, event source RPC reference, fuel irrelevance) + extended open questions (18–20).
+  - `d1_schema_draft.sql`: Added `gate_access_cache` table (visibility_class + optional tribe_id + direction fields) and notes emphasizing tribe-centric gating & ignoring fuel for traversal.
+- Rationale: Shift early optimization from per-wallet ACL enumeration to tribe-scoped visibility caching; avoid premature complexity around fuel-based path weighting; ensure world versioning keyed to confirmed address.
+- Risk: Low (documentation + draft schema only, no deployed migrations yet). If tribe logic later proves multi-level (alliance/corp) we may extend `gate_access_cache` with hierarchy normalization rather than redesign core tables.
+- Follow-ups: Determine extraction method for tribe predicates from configured gate system contracts (table presence vs dynamic call); confirm if multiple tribes per character; decide caching granularity (per tribe vs aggregated public snapshot) before implementing indexer phase.
+
+## 2025-09-07 – Indexer Feature Branch & Access Model Resolutions
+- Goal: Scaffold migration + health endpoints for dynamic structures indexer (feature branch only).
+- Changes:
+  - Added `migrations/001_init.sql` (v1 schema) and migration runner endpoints in `worker.js` (`/api/indexer-migrate`, `/api/indexer-health`).
+  - Migration endpoint secured by `X-Indexer-Admin` header token (env var `INDEXER_ADMIN_TOKEN` expected) and idempotent via `_migrations` table.
+  - Health endpoint returns latest active `world_version` summary or disabled status if binding absent.
+- Binding Status: D1 binding not yet added in wrangler config (endpoints inert in production until bound); safe to merge later after secret provisioning.
+- Risk: Low (additive code path, only triggers on new endpoints). If D1 missing, returns disabled; no impact to existing shares/stats routes.
+- Follow-ups: Add `INDEX_DB` binding + env secret for admin token; implement initial polling indexer after confirming binding.
+
+## 2025-09-07 – Indexer Secret Debug Relocation & Migrations Asset Copy
+- Goal: Ensure secret diagnostic endpoint is served by deployed Cloudflare Pages worker (root) and enable migration SQL retrieval via ASSETS fetch.
+- Changes:
+  - Added `/api/indexer-secret-debug` handler to root `worker.js` (reports presence, length, first/last chars, sha256_first8 of `INDEXER_ADMIN_TOKEN`).
+  - Updated `eve-frontier-map/scripts/copy-worker.cjs` to copy root `migrations/` directory into `dist/migrations` during build so `/api/indexer-migrate` can fetch `migrations/001_init.sql` via `env.ASSETS`.
+- Rationale: Previous debug route patch in `eve-frontier-map/_worker.js` was ineffective because build copies root `_worker.js` / `worker.js` into `dist/`, ignoring subdirectory version. Without migrations in `dist/`, migration endpoint would 500 on SQL fetch.
+- Risk: Low (additive endpoints + file copy). Endpoint returns only truncated metadata; no secret value exposure. Copy script skips if directory absent.
+- Gates: typecheck N/A (JS only) | build pending (expect ✅) | smoke plan: redeploy preview -> GET `/api/indexer-secret-debug` returns JSON; POST migrate with correct `X-Indexer-Admin` completes (executed:['001_init']).
+- Follow-ups: Remove debug endpoint after successful migration & bootstrap; proceed with indexer polling implementation.
+
+## 2025-09-07 – Assistant CLI Execution Policy Formalization
+- Goal: Eliminate latency and ambiguity by mandating the assistant auto-executes every feasible Cloudflare Wrangler CLI command (non-secret) instead of instructing manual user execution.
+- Changes: Added explicit "Assistant CLI Execution Policy" section to `.github/copilot-instructions.md` under Cloudflare Platform & CLI Preference.
+- Scope: Documentation only; clarifies: auto-run non-secret commands, initiate secret prompts, avoid UI unless CLI lacks feature, summarize after batches, handle errors with targeted retry.
+- Rationale: Operator reported repeated inefficiency from being asked to run commands the assistant can run; policy codifies expectation to maximize automation.
+- Risk: Low (process clarification). No code path or runtime changes.
+- Follow-ups: Monitor future interactions for compliance; if a manual instruction slip occurs, assistant self-corrects next message per policy.
+
+## 2025-09-07 – Remove Temporary Indexer Debug Endpoints Pre-Prod
+- Goal: Eliminate `/api/indexer-secret-debug` and `/api/env-dump` prior to running migrations on production to avoid leaking environment key metadata.
+- Changes: Deleted both route handlers from `worker.js` (feature/indexer branch) before production deploy.
+- Rationale: Production migration requires secret; diagnostic endpoints no longer needed once decision made to execute against production. Reduces attack surface (env key enumeration / secret presence check).
+- Risk: Low (pure removal; no user routes affected). If further diagnosis needed, can reintroduce guarded behind admin token.
+- Follow-ups: Proceed with production build & deploy, then run `/api/indexer-migrate` + `/api/indexer-bootstrap` using admin header.
+
+## 2025-09-07 – Cloudflare Cutover: Remove Netlify Fallbacks
+- Goal: Finalize migration by eliminating all client fallbacks to Netlify Functions (`/.netlify/functions/*`) for shares, usage, and stats; enforce Cloudflare Worker (`/api/*`) as sole backend.
+- Files: `src/utils/shortShare.ts`, `src/utils/usage.ts`, `src/components/StatsPage.tsx`, `.github/copilot-instructions.md`, `docs/migration_status.json`, `docs/MIGRATION_PLAN.md` (phase update pending), `decision-log.md` (this entry).
+- Changes: Removed fallback candidate arrays & retry logic; HTML (text/html) responses now hard errors. Updated instructions file to mark Cloudflare Pages + Worker + KV as primary and note legacy Netlify code as deprecated. Added explicit console error diagnostics when /api endpoints unavailable to surface misconfigured deploy early.
+- Diff: ~ -120 LOC (fallback paths & comments) / +40 LOC (instructions + error messages) net.
+- Risk: Medium (removal of redundancy; any deploy misconfig now surfaces immediately). Rollback plan: revert this commit to restore fallback while investigating Worker bind/deploy issue.
+- Gates: typecheck ✅ build ✅ (pending current session build) smoke (post-deploy checklist: /api/stats JSON ok, create & resolve share round trip, usage events 2xx, no network access to /.netlify/functions paths).
+- Follow-ups: Phase status update to mark `MIGRATE PHASE4 OK` granted; schedule cleanup removal of legacy Netlify function directory after short stability window (Phase CLEANUP). Potential addition: lightweight /api/health endpoint surfacing KV namespace connectivity & last snapshot write timestamp.
+
+## 2025-09-07 – Migration Phase 1 Completion
+- Goal: Conclude Phase 1 (Adapter Introduction) with no runtime behavior change while preparing for shadow reads.
+- Files: `wrangler.jsonc`, `netlify/functions/_store.js` (flag logic), `src/lib/cf_kv.ts`, `docs/MIGRATION_PLAN.md`, `.env.example`, `migration_status.json`.
+- Changes:
+  - Added KV namespace bindings & assets SPA handling in wrangler config (placeholder worker entry).
+  - Implemented `CF_ADAPTER_ENABLE` feature flag in `_store.js` (Cloudflare branch with graceful fallback + dev warning).
+  - Created `cf_kv.ts` stub defining SimpleKV interface and binding accessor.
+  - Documented function mapping table and persistence assumptions mapping.
+  - Added `.env.example` with flag and explanatory comments.
+- Risk: Low (docs + guarded code path unreachable in production unless flag explicitly set and bindings provided). No changes to existing Netlify runtime behavior.
+- Gates: typecheck ✅ build ✅ (pre/post modifications) smoke ✅ (share + stats functions unaffected; enabling flag locally without bindings logs single warning then falls back).
+- Follow-ups: Request Phase 2 token to implement shadow reads (parallel get + drift counters). Prepare drift instrumentation design before coding.
+
+## 2025-09-07 – Migration Phase 2 Shadow Read Implementation
+- Goal: Introduce shadow read path (Netlify primary, Cloudflare KV secondary) to measure data parity ahead of dual writes.
+- Files: `netlify/functions/_store.js` (shadow wrapper & metrics), `netlify/functions/health.js` (shadow metrics exposure), `MIGRATION_PLAN.md` (Phase 2 checklist updates).
+- Implementation: When both `CF_ADAPTER_ENABLE=true` and `CF_SHADOW_READ_ENABLE=true`, `getKVStore(name).get(key)` now serves Netlify value while concurrently fetching Cloudflare value (if binding present via `globalThis.__CF_KV[name]`). Results compared (string equality; JSON deep compare fallback when both start with '[' or '{'). In‑memory counters track reads, matches, mismatches, cfMiss (CF null while NL non-null), nlMiss (inverse), plus up to 5 recent mismatch keys. Health endpoint returns these under `shadow` field when shadow flag enabled.
+- Rationale: Non-invasive parity signal without introducing write amplification yet; isolates provider consistency before adding dual write complexity and keeps rollback simple.
+- Metrics: `reads`, `matches`, `mismatches`, `cfMiss`, `nlMiss`, `lastMismatchSamples` (process lifetime only).
+- Risk: Low (async fire-and-forget comparison; no impact on primary latency). Shadow errors swallowed; only dev console warnings on mismatch.
+- Follow-ups: (1) After ≥7 days <0.5% mismatch ratio, request Phase 3 token; (2) Optionally add histogram of value size differences if early mismatches appear; (3) Consider normalizing JSON order if pretty-print divergences appear.
+
+## 2025-09-07 – Cloudflare Sandbox Worker (Option A)
+- Goal: Provide an independent Cloudflare URL where core interactions (create share, basic stats) visibly function using Cloudflare KV only—without modifying production Netlify flow or advancing formal migration phase.
+- Files: `worker.js`, `MIGRATION_PLAN.md` (sandbox note).
+- Scope: Implements `/api/create-share`, `/api/get-share`, `/api/usage-event` (subset events), `/api/stats` using KV bindings `EF_SHARES`, `EF_STATS`. Falls back to SPA assets for other paths. EVENT_MAP trimmed to minimal counters (share + page_load) to confirm write/read path.
+- Rationale: Fast visual confirmation while shadow reads proceed separately. Avoids premature dual write complexity; rollback trivial.
+- Risk: Low (isolated Worker). No production DNS change.
+- Follow-ups: Decide whether to expand EVENT_MAP to full set or keep minimal until dual write prepared; optionally add health route.
+
+## 2025-09-07 – Netlify -> Cloudflare Migration Script
+- Goal: Provide reproducible, idempotent export of existing Netlify Blobs (shares + stats snapshots) into Cloudflare KV ahead of Phase 3 dual writes / cutover rehearsal.
+- Files: `tools/migrate_netlify_to_cf.js`, root `package.json` (script), `.env.example` (credential placeholders), `decision-log.md`.
+- Behavior: Lists Netlify blob keys for stores `shares` & `app-stats` via REST (cursor pagination), copies values into CF KV (`EF_SHARES`, `EF_STATS`). Skips existing keys unless `--force`. Optional `--dry-run`. Post-copy random sample verification.
+- Env Vars: `NETLIFY_SITE_ID`, `NETLIFY_TOKEN`, `CF_ACCOUNT_ID`, `CF_API_TOKEN`, `CF_KV_SHARES_NAMESPACE_ID`, `CF_KV_STATS_NAMESPACE_ID`.
+- Safety: Read-only to Netlify. Idempotent on re-run.
+- Risk: Low (standalone script). Failure confined to console.
+- Follow-ups: Add retries, progress meter, potential bulk API usage when key counts scale.
+
+## 2025-09-07 – Migration Script Execution (Empty Source State)
+- Goal: Run migration script against production Netlify blobs to seed Cloudflare KV.
+- Result: 0 keys in both `shares` and `app-stats` (no historical data). Dry-run and full identical. Sample verification skipped.
+- Observations: Indicates prior cleanup/reset; safe baseline. Shadow read remains parity mechanism.
+- Follow-ups: Re-run before enabling dual writes; add explicit log for zero keys scenario (future enhancement).
+
+## 2025-09-07 – Cloudflare Sandbox Worker Full Stats & Short Share URLs
+- Goal: Expand sandbox Worker to full parity (stats + sharing) for isolated end-to-end validation.
+- Changes: Full EVENT_MAP parity, batching for `/api/usage-event`, sum & dynamic bucket logic, `/s/<id>` redirect, share collision retries.
+- Risk: Low (isolated). Schema parity maintained with Netlify snapshots.
+- Follow-ups: Optional history roll-up caching, compression, sandbox-only counter.
+
+## 2025-09-07 – Temporary Branch Isolation (systemselection Sandbox)
+- Goal: Maintain production stability on Netlify while iterating Cloudflare parity on `systemselection`.
+- Rules: No merges to `main` until parity & cutover checklist; only hotfixes to `main`; dynamic endpoint detection supports dual env.
+- Follow-ups: After parity, execute cutover checklist (merge, DNS), then cleanup legacy Netlify code.
+
+## 2025-09-07 – AI-Managed CLI Deployment Workflow
+- Goal: Formalize operator ↔ assistant process for commits and Cloudflare deploys from sandbox branch.
+- Scope: Documentation only (MIGRATION_PLAN addition). Steps include build, typecheck, deploy, log entry.
+- Follow-ups: Add parity drift script; surface deploy metadata in `/api/health` later.
+
+## 2025-09-07 – Cloudflare API HTML Fallback Hardening
+- Goal: Prevent false-positive detection of `/api` share endpoints when Worker absent (HTML returned).
+- Change: `shortShare.ts` now rejects `text/html` responses during detection & on create/get; falls back to Netlify paths.
+- Risk: Low (client-only guard). Consider similar guard for usage & stats if needed.
+
+## 2025-09-07 – Worker Build Integration & Extended HTML Guards
+- Goal: Ensure Pages deployment always includes `_worker.js` and extend HTML fallback guards.
+- Changes: Added copy script for worker into `dist/_worker.js`; updated detection for usage & stats endpoints to treat HTML as invalid.
+- Risk: Low (build step + header checks). Optionally centralize detection logic later.
+
+## 2025-09-07 – Netlify Stats Mirror Attempt & CF Rate Limit
+- Goal: Backfill historical usage stats from Netlify into Cloudflare KV.
+- Issue: 429 rate limit (`10048`) prevented first key write despite retries; aborted to avoid partial state.
+- Mitigation: Plan re-run after quota reset / plan upgrade; local export option considered.
+- Follow-ups: Add `--out` export, schedule re-run, confirm history depth need.
+
+## 2025-09-07 – Netlify Stats Mirror Success (Workers Paid)
+- Goal: Complete historical stats backfill after quota lift.
+- Action: Re-ran mirror script: `writes:9, skips:0` (current + 8 daily). Data parity established.
+- Follow-ups: Possibly extend window, move toward Netlify code removal, reduce KV churn.
+
+## 2025-09-07 – Stats Daily Key Rename & History Fallback
+- Goal: Make mirrored Netlify daily stats visible in Cloudflare (history missing due to double extension bug).
+- Fix: Renamed `*.json.json` keys via `tools/fix_stats_keys.js`; added worker fallback for `.json.json` during transition; raised history window to 120.
+- Risk: Low; fallback removable after validation window.
+
+## 2025-09-07 – Cloudflare KV Namespace Consolidation
+- Goal: Ensure Pages + Worker deployments read identical stats history.
+- Finding: Two EF_STATS namespaces (authoritative with 8 days, placeholder minimal). Updated binding to authoritative id.
+- Follow-up: Delete placeholder namespace post-verification.
+
+## 2025-09-07 – Duplicate Wrangler Config Causing Binding Drift
+- Goal: Resolve missing stats history caused by subdirectory `wrangler.jsonc` binding outdated namespace.
+- Fix: Synced EF_STATS id & added prominent sync comment.
+- Follow-ups: Consider single config + CI mismatch check.
+
+## 2025-09-07 – Unified Pages Worker Implementation (History & Diagnostic Header)
+- Goal: Remove ambiguity between root & subdir worker files; standardize history (max 120) and diagnostics header.
+- Changes: Subdir `_worker.js` updated (no Netlify fallbacks, header `X-Stats-Impl`), strict `/api/*` routing.
+- Follow-ups: Possible `/api/health` replacing header; remove unused root worker later.
+
+## 2025-09-07 – Dynamic Player Structures & Smart Gates Planning Kickoff
+- Goal: Initiate structured planning for ingesting and rendering dynamic player-created assets (Smart Gates & other structures).
+- Deliverable: `dynamic_structures_plan.md` draft (scope, model, auth, roadmap, risks, open questions).
+- Follow-ups: Provide API docs & sample payloads; finalize storage decision; scaffold D1 schema migrations.
+
+## 2025-09-07 – D1 Provisioning (ef_index) & Config Binding
+- Goal: Record creation & binding of D1 database `ef_index` (id `cfc8fecb-9fe1-4ad0-98ed-525772d13ff0`).
+- Changes: Added database binding `INDEX_DB` to both wrangler configs.
+- Follow-ups: Set `INDEXER_ADMIN_TOKEN` secret then run `/api/indexer-migrate` & bootstrap; implement poller.
+
+## 2025-09-07 – Indexer Bootstrap Endpoint
+- Goal: Admin endpoint to initialize/advance `world_version` (`/api/indexer-bootstrap`).
+- Behavior: Fetches `/config`, inserts or bumps version, updates contracts diff. Admin token protected.
+- Follow-ups: Poller to populate `smart_assembly` & gate directions.
+
+## 2025-09-07 – Indexer Preview Deployment (feature/indexer Branch Isolation)
+- Goal: Deploy `_worker.js` with indexer endpoints to Pages preview (`feature-indexer`) without affecting production.
+- Verification: Preview `/api/indexer-health` returns `{status:"uninitialized"}`; 401 on admin endpoints confirms protection.
+- Follow-ups: Add secret in preview env; run migrate/bootstrap.
+
+## 2025-09-07 – Indexer Secret Debug Endpoint (Temporary)
+- Goal: Diagnose 401 responses on preview migration endpoints by confirming secret binding presence.
+- Endpoint: `/api/indexer-secret-debug` (sanitized metadata only). To be removed after validation.
+
+## 2025-09-07 – Preview Secret Propagation & 401 Migration Endpoint Postmortem
+- (See 2025-09-08 Postmortem for consolidated analysis—this entry superseded by next-day retrospective.)
+
+---
+
+## 2025-09-06 – Scout Optimizer Double Scrollbar Removal
+- Goal: Eliminate redundant inner scrollbar when Scout Optimizer embedded in Routing drawer while preserving log scroll.
+- Change: Added `.scout-optimizer-panel.embedded` style with `max-height:none; overflow:visible`; applied conditional class.
+- Risk: Low (CSS tweak). Single outer scrollbar + internal log scroll remains.
+- Follow-ups: Provide detached mode later if needed.
+
+## 2025-09-06 – Transmission Metrics (Replay / Fast-Forward / Timing / Echo Buckets)
+- Goal: Rich anonymous instrumentation for Incoming Transmission window engagement.
+- Metrics: replay, fastforward, close, close_early, echo_msg counters; open_time & echo_time sums; echo message & open share buckets.
+- Privacy: Coarse buckets only; no content stored.
+- Risk: Medium (multi-file wiring). Additive.
+
+## 2025-09-06 – Environment Metrics: Screen Resolution & CPU Core Buckets
+- Goal: Capture coarse distributions for resolution + logical cores to inform UI density & concurrency heuristics.
+- Implementation: Single emission per session for `screen_res_bucket` & `cpu_cores_bucket`.
+- Privacy: Coarse buckets, no raw values.
+
+## 2025-09-06 – Migration Planning Framework Introduction
+- Goal: Establish token-gated multi-phase migration plan (docs + status JSON) before runtime changes.
+- Deliverables: `MIGRATION_PLAN.md`, `migration_status.json`.
+
+## 2025-09-06 – Natural Language Migration Triggers & UI Prep Docs
+- Goal: Map plain English phrases to migration phase tokens; supply Cloudflare UI/setup cheat sheet.
+- Changes: `.github/copilot-instructions.md` & `MIGRATION_PLAN.md` updates.
+
+## 2025-09-06 – Stats Charts Hover Tooltips
+- Goal: Improve daily trend charts readability via SVG hover crosshair + tooltip.
+- Implementation: Nearest date hit-testing; percent formatting for normalized series.
+- Risk: Low (presentation-only).
+
+---
+
+## 2025-09-05 – Display Settings v11 (Route Thickness) & Compare Regions Sort Persistence
+- Goal: Adjustable route ribbon thickness + session persistence of Compare Regions sort.
+- Changes: Prefs v11 `routeThickness`, slider UI, runtime uniform scaling, sessionStorage sort restore.
+
+## 2025-09-05 – Station Scaling Bounce Stabilization
+- Goal: Remove icon size oscillation at max zoom for focused station sprites.
+- Fix: Use immutable `basePos` for distance; lock mechanism with hysteresis.
+
+## 2025-09-05 – Explore Routing Mode Scaffold
+- Goal: Add 'explore' optimization mode placeholder (UI + serialization) prior to enrichment logic.
+
+## 2025-09-05 – Explore Enrichment (A* + Dijkstra)
+- Goal: Implement enrichment inserting intermediate systems within fuel overhead budget.
+- Returns: `meta` (baselineCost, finalCost, baselineNodes, finalNodes).
+- Risk: Medium (worker logic).
+
+## 2025-09-05 – Explore Overhead Control & Stats
+- Goal: UI overhead slider + meta display (overhead %, extra systems) for Explore mode.
+
+## 2025-09-05 – Explore Help & Usage Metric
+- Goal: Document Explore + add adoption metric `p2p_mode_explore` to Stats.
+
+## 2025-09-05 – Explore Forward-Progress Tuning
+- Goal: Avoid early-looping; enforce incremental global progress & candidate scoring bias.
+
+## 2025-09-05 – Transmission Metrics (Already captured 2025-09-06 entry) – (Consolidated above)
+
+---
+
+## 2025-09-04 – Usage Dev 404 Auto-Disable & Transmission Replay Fix
+- Goal: Disable noisy usage 404 spam in dev & ensure transmission replay resets intro properly.
+
+## 2025-09-04 – Transmission Persistence & Autoplay Adjustments
+- Goal: Deterministic replay/echo behavior; intro only on first or explicit replay; lower default volume.
+
+## 2025-09-04 – Transmission Replay & Echo Audio Rules Refinement
+- Goal: Enforce silent echo phase & audio limited to intro.
+
+## 2025-09-04 – User Overlay Foundational Enhancements (Search, Sort Presets, Aging, Text Export)
+- Goal: Improve scalability & maintenance for large mark lists.
+
+## 2025-09-04 – User Overlay Advanced Interaction (Legend, Multi-Select, Soft Hover, Duplicate Merge)
+- Goal: High-efficiency bulk editing & inspection workflow for marks.
+
+## 2025-09-04 – User Overlay Metrics, Stats Integration & Help Documentation
+- Goal: Instrument overlay adoption & expose metrics in Stats + Help panel docs.
+
+## 2025-09-04 – No-Op Rebuild Trigger
+- Purpose: Force remote build; no functional changes.
+
+## 2025-09-04 – Transmission Intro Guard & Diagnostics Hardening
+- Goal: Prevent unintended intro replays; structured debug log.
+
+---
+
+## 2025-09-03 – Region Stats Metric Simplification (EMPTY PLACEHOLDER)
+
+## 2025-09-03 – Region Stats Baseline Distance Integration
+- Goal: Introduce nearest-neighbor baseline distances for realistic traversal figures.
+
+## 2025-09-03 – Region Stats Has Station Flag
+- Goal: Add boolean `has_station` to region stats output & UI card.
+
+## 2025-09-03 – Station Data Integration (map_data_v2)
+- Goal: Embed station counts in SQLite & fallback gracefully when absent.
+
+## 2025-09-03 – Usage Stats Graphs
+- Goal: Add SVG chart components for usage trends (line & stacked percent, distribution toggles).
+
+## 2025-09-03 – Usage Stats Graph Simplification (Placeholder / integrated in later redesign)
+
+## 2025-09-03 – Stats Tables + Incremental Panel Cascade UI Rework
+- Goal: Deterministic panel layout cascade & stats table refinement.
+
+## 2025-09-03 – Station Sprite Rendering, Scaling & Interaction Refinements
+- Goal: Complete station overlay (toggle, focus growth, hover precedence, depth correctness).
+
+## 2025-09-03 – Hover Threshold Fine-Tuning (floorBelowMin=0.12 Adopted)
+- Goal: Improve selection precision in dense clusters at max zoom.
+
+## 2025-09-03 – Stargate Selection Gradient (Option A Prototype)
+- Goal: Highlight stargate connections from selected system using vertex color interpolation.
+
+## 2025-09-03 – Stargate Selection Gradient Shader (Option B 2/3 Fade)
+- Goal: Shader-based partial-length accent fade with new `sel` attribute & `uAccentSpan`.
+
+## 2025-09-03 – Ship Jump Differentiation (Dashed Inner Core)
+- Goal: Distinguish ship (non-gate) hops via dashed core modulation in ribbon shader.
+
+## 2025-09-03 – Fix Has Station False Negative
+- Goal: Populate station ID set immediately after DB load to avoid false `has_station=false`.
+
+## 2025-09-03 – Region Stats Panel Cascade Integration
+- Goal: Make Region Stats panel adopt shared cascade behavior.
+
+## 2025-09-03 – Compare Regions Panel (Sortable Multi-Region Metrics)
+- Goal: Bulk region metric comparison + sortable table, highlight integration.
+
+## 2025-09-03 – Resizable Compare Regions Panel
+- Goal: Add resizable PanelDrawer capabilities (handles, persisted size) for compare panel.
+
+## 2025-09-03 – Compare Regions Click -> Region Highlight
+- Goal: Region name click triggers highlight & Region Stats open.
+
+## 2025-09-03 – Help Panel: Region Stats & Compare Regions Documentation
+- Goal: In-app help coverage for new region analytics panels.
+
+## 2025-09-03 – Usage Metric: Compare Regions Opens
+- Goal: Track panel adoption (`compare_regions_open`).
+
+## 2025-09-03 – Fix Auto Reachability Stale Closure (Reference – see earlier reachability entries)
+
+## 2025-09-03 – Reach Bubble Hide Double Count Fix (Date Uncertain, original placeholder 2025-??-??)
+- Goal: Prevent double counting `rangebubble_hide` event due to dual emission paths.
+- NOTE: Original date marker unknown; placed within 2025-09-03 cluster for ordering consistency.
+
+## 2025-09-03 – Region Stats (Phase 1)
+- Goal: Initial per-region spatial & network metrics (worker + card + instrumentation).
+
+## 2025-09-03 – Route Ribbon Shader Rewrite (Pulse Tail & Visibility Fixes)
+- Goal: Replace legacy tube geometry with single screen-space ribbon supporting pulse & tail.
+
+## 2025-09-03 – Reachability Help Section & Metrics
+- Goal: Document reachability feature & instrument adoption/buckets.
+
+## 2025-09-03 – Fix Star Size Scaling Regression After Cinematic Mode
+- Goal: Restore star point size variance after exiting cinematic mode.
+
+---
+
+## 2025-09-02 – Auto Reachability Stale Closure (Consolidated into 2025-09-03 fix listing)
+
+## 2025-09-02 – Additional (implicit) minor adjustments (see 09-03 consolidations)
+
+---
+
+## 2025-09-01 – Baseline Starfield Visual Enhancements (Items 1–9)
+- Goal: Enrich default non-cinematic starfield with gradient sky dome, dither, fog, twinkle, parallax.
+
+## 2025-09-01 – Init storage abstraction & decision log
+- Goal: Unified KV accessor abstraction + seed decision log.
+
+## 2025-09-01 – Refactor functions to unified store abstraction
+- Goal: Deduplicate blob credential logic through `_store.js` usage.
+
+## 2025-09-01 – Instrument gateReachable feature flag
+- Goal: Track gateReachable toggle usage.
+
+## 2025-09-01 – Expand analytics Tier 1–3 metrics
+- Goal: Broad anonymous instrumentation additions (routing, optimization, UI, donations, environment).
+
+## 2025-09-01 – Stats Page Redesign & Cleanup
+- Goal: Grouped layout surfacing new instrumentation; hide noisy diagnostics.
+
+## 2025-09-01 – Reintroduce 7‑Day Roll-Up & Copy Rate Metric
+- Goal: Restore 7-day table + derived Copy Rate % metric.
+
+## 2025-09-01 – Per-Metric Tooltips & Help Panel Prune
+- Goal: Inline tooltips for metrics & concise Help panel.
+
 - Root Causes:
   1. Duplicate `wrangler.jsonc` files (root + `eve-frontier-map/`) with out-of-sync bindings; preview deploy path used the subdirectory config missing/incorrect binding reference at points during iteration.
   2. Secret added after initial preview deploy; redeploy not performed immediately (Pages requires redeploy for new secret to be injected).
@@ -399,6 +840,18 @@
   1. Data Bridge: On DB load (prefers `map_data_v2.db` → falls back) constructs `window.__efStations` (array of `{ id:number, count:number }`). System ID normalization to numbers avoids earlier mismatch.
   2. Persistent Toggle: `showStations` stored in prefs; on page reload if enabled, a guarded effect retries sprite creation until dataset present (prevents race with async DB open).
   3. Single Sprite Group Guard: Ref & retry token ensure only one `stationsGroup` exists; cleanup removes group when toggled off to free GPU resources.
+
+## 2025-09-08 – KV Namespace Cleanup & Stats Retention Policy
+- Goal: Remove redundant migration/staging KV namespaces (EF_STATS_OLD, EF_DRIFT, extra share namespaces) and finalize initial stats retention guidance.
+- Changes:
+  - Removed EF_DRIFT and EF_STATS_OLD bindings from `wrangler.jsonc` (root + frontend).
+  - Deleted `/api/migrate-history` endpoint from both worker implementations.
+  - Verified no remaining references to EF_STATS_OLD / EF_DRIFT via grep.
+  - Retention policy documented: keep all daily snapshots up to 365 days; cap `history` query to 120 (existing), future option to aggregate >365 into monthly summaries.
+  - All redundant namespaces were empty (no data loss risk) prior to deletion.
+- Rationale: Reduce operational clutter, prevent accidental writes to obsolete namespaces, simplify mental model.
+- Risk: Low (namespaces empty; code path removal only). Rollback: reintroduce bindings + endpoint if unexpected historical data appears.
+- Follow-ups: (Deferred) Implement monthly aggregation & pruning script once >365 days accumulated.
   4. Visual Fidelity:
     - Texture: transparent PNG (no programmatic alpha manipulation) retains original red (#ff2b2b family) under sRGB; tone mapping left disabled for consistency with starfield.
     - Aspect Ratio: Sprite scale uses texture width/height ratio to avoid horizontal squishing.
