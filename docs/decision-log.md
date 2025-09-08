@@ -1,3 +1,38 @@
+## 2025-09-08 – Sept 7 Partial-Day Stats Merge (Netlify + Cloudflare)
+- Goal: Consolidate Sept 7 analytics split across pre‑cutover (old placeholder/Netlify era namespace) and post‑cutover (active Cloudflare namespace) snapshots into a single authoritative daily blob.
+- Goal: Consolidate Sept 7 analytics split across pre‑cutover (old placeholder/Netlify era namespace) and post‑cutover (active Cloudflare namespace) snapshots into a single authoritative daily blob.
+- Source Snapshots:
+  - Old (placeholder) key: `daily/2025-09-07.json` (UTF-16 LE BOM) – partial early‑day window (page_loads=83, session_time_ms_sum≈2.15e9, etc.).
+  - New (active) key: `daily/2025-09-07.json` (UTF-8) – post cutover remainder (page_loads=115, session_time_ms_sum≈1.12e10).
+- Merge Script: `tools/merge_daily_stats.js` (auto BOM detection, ratio & dominance heuristics). Determined mode = sum (disjoint time windows) – ratio(page_loads_new/old)=1.3855; dominance thresholds not met to favor max.
+- Action Sequence:
+  1. Retrieved both source snapshots via CLI (wrangler kv key get ... for each namespace).
+  2. Ran merge script → produced `merged_2025-09-07.json` + report (mode=sum, counters_changed=120, sums_changed=26).
+  3. Backed up active (pre-merge) snapshot locally (`cf_2025-09-07_premerge.json`) then stored in KV under safety key `daily/2025-09-07_cloudflare_premerge.json`.
+  4. Overwrote primary key `daily/2025-09-07.json` with merged snapshot (page_loads=198, session_time_ms_sum=11423142122, session_time_count=704, cinematic_enters=24, scout_optimizations=9, etc.).
+- Backup / Rollback: To revert, copy value from `daily/2025-09-07_cloudflare_premerge.json` back to `daily/2025-09-07.json` (single CLI put). Old namespace still intact until final cleanup.
+- Rationale: Mid‑day platform migration split metrics; additive merge preserves total activity without inflation (events sets non-overlapping in time). Using max would undercount; averaging inappropriate for counters.
+- Verification Gates: (a) KV backup key exists; (b) merged key write succeeded (wrangler put exit 0); (c) spot-checked critical counters & sums in stored value (string contains `page_loads:198` & updated sums); (d) /api/stats (manual fetch pending) expected to reflect new totals on next aggregation read.
+- Risk: Low (single-key overwrite with preserved backup & source namespace). No code changes.
+- Follow-ups: (1) After confirming UI displays merged values, schedule removal of obsolete EF_STATS_OLD binding & migration/history endpoint; (2) Consider adding a validation script to assert daily key format & absence of duplicate *.json.json keys before future merges.
+
+## 2025-09-08 – Sept 7 History Omission (UTF-8 BOM Parsing Fix)
+- Goal: Restore missing Sept 7 row in Stats history (graphs + 7‑day table) which remained absent post-merge despite correct key presence.
+- Symptoms: `/api/stats?history=7&debug=1` listed `daily/2025-09-07.json` in `foundDailyKeys` but history array excluded it (length 4: 04,05,06,08). Temporary diagnostics showed `parse_error true` with preview starting `ï»¿{"version":3,...}` indicating a leading UTF‑8 BOM (0xFEFF) in KV value at certain edges. Backup/old variants also had malformed (unquoted) JSON.
+- Root Cause: Earlier manual wrangler puts from PowerShell introduced BOM or unquoted JS-object style content; eventual consistency meant some edge reads still served stale BOM-prefixed value causing `JSON.parse` to throw. Silent catch suppressed the row.
+- Fix: Added BOM strip before `JSON.parse` for daily history load in both worker variants (`worker.js`, `eve-frontier-map/_worker.js`). Re-uploaded clean BOM‑less JSON via Node script writing UTF‑8 without BOM. Removed temporary verbose diagnostics (retained minimal debug error object only when `debug=1`).
+- Verification: Preview deploy `feature-indexer-diagnostics` then production deploy → `/api/stats?history=7` now returns dates 04–08 inclusive with 07 present (no parse_error objects). Production UI shows Sept 7 in graph and table.
+- Risk: Low (read-path only). BOM strip is defensive for any future accidental BOM introductions.
+- Follow-ups: Add pre-deploy sanity script to scan KV `daily/*` values for BOM or non-JSON format; remove stale malformed backup keys (`daily/2025-09-07_malformed_raw_backup.json`) after short observation window.
+
+## 2025-09-07 – Stats Duplicate Daily Keys Cleanup
+- Goal: Remove visual double counting on Stats page caused by duplicate KV keys with pattern daily/YYYY-MM-DD.json.json alongside correct daily/YYYY-MM-DD.json.
+- Files: `worker.js`, `eve-frontier-map/_worker.js` (added filter ignoring *.json.json), production KV namespace (deleted duplicate keys).
+- Diff: ~8 LoC added (filter logic + comment) plus this log entry.
+- Risk: Low (read-path only; ignores clearly malformed keys). Does not alter write logic.
+- Gates: typecheck N/A (JS workers), build pending; runtime validated via key deletion + /api/stats after deploy.
+- Follow-ups: Optionally remove legacy EF_STATS_OLD binding & migrate-history endpoint once confirmed no further historical backfill needed.
+
 ## 2025-09-06 – Scout Optimizer Double Scrollbar Removal
 ## 2025-09-07 – Indexer Migration Execution, Bootstrap & Fallback Token Removal
 - Goal: Successfully apply initial D1 schema (migration 001_init), initialize `world_version` via external world API `/config`, and remove temporary insecure fallback admin token used to bypass preview secret absence.
