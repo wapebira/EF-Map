@@ -285,7 +285,16 @@ async function handleStats(url, env){
   const filtered = all.filter(k=>!k.endsWith('.json.json'));
   foundKeys = filtered.slice(-histDays);
       for(const k of foundKeys){
-        const dr = await env.EF_STATS.get(k); if(dr){ try { const obj=JSON.parse(dr); history.push(obj); } catch{} }
+        const dr = await env.EF_STATS.get(k);
+        if(dr){
+          try {
+            const obj=JSON.parse(dr); history.push(obj);
+          } catch(e){
+            if(debug){
+              history.push({ date:k.split('/').pop(), parse_error:true, message:String(e).slice(0,80), preview: dr.slice(0,120) });
+            }
+          }
+        }
       }
     } catch(e){ if(debug){ history.push({ error:'list_failed', message:String(e) }); } }
   }
