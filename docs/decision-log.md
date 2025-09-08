@@ -39,6 +39,31 @@
 - Rollback: Revert documentation commit hash (no cascading effects).
 - Follow-ups: (1) Execute CLEANUP phase removing legacy Netlify function code after short observation window; (2) Add `/api/health` endpoint doc once implemented; (3) Consolidate duplicate wrangler config guidance into single authoritative doc section after cleanup.
 
+## 2025-09-08 – Preview Secret Propagation & 401 Migration Endpoint Postmortem
+- Summary: Several hours lost attempting to invoke `/api/indexer-migrate` / `/api/indexer-bootstrap` on a Cloudflare Pages preview (branch) returning 401 despite setting the `INDEXER_ADMIN_TOKEN` secret. Successful execution only occurred after deploying to production, creating confusion about secret availability.
+- Impact: Delayed D1 schema migration & bootstrap; introduced temporary insecure fallback token (later removed) and extra debug endpoints.
+- User Symptoms: Preview endpoint always 401; secret debug attempts inconsistent; production deploy succeeded quickly with same header.
+- Root Causes:
+  1. Duplicate `wrangler.jsonc` files (root + `eve-frontier-map/`) with out-of-sync bindings; preview deploy path used the subdirectory config missing/incorrect binding reference at points during iteration.
+  2. Secret added after initial preview deploy; redeploy not performed immediately (Pages requires redeploy for new secret to be injected).
+  3. Reliance on ad-hoc debug endpoint rather than a standardized health probe (`/api/indexer-health?details=1`) increased turnaround time.
+  4. Ambiguity over whether preview branch secrets were set (no CLI confirmation run before testing requests).
+- Resolution Steps:
+  1. Synchronized EF_STATS and other bindings across both wrangler configs; added comments warning to keep them identical.
+  2. Re-ran `wrangler pages secret put INDEXER_ADMIN_TOKEN --project-name ef-map` (production scope) then triggered a fresh deploy from the correct directory ensuring unified worker + migrations present.
+  3. Executed `/api/indexer-migrate` then `/api/indexer-bootstrap` successfully; removed fallback token + secret debug endpoint.
+- Verification: `indexer-health` endpoint returned `{status:"ok"}` with expected world_version; decision log entries for migration & fallback token removal recorded earlier on 2025-09-07.
+- Preventative Actions (Implemented / Planned):
+  - Added Documentation: This postmortem + forthcoming `operations-secrets.md` runbook (proceduralization).
+  - Config Sync: Highlighted duplicate wrangler config risk in docs; cleanup task to consolidate into single authoritative config (post legacy removal).
+  - Standard Health Endpoint: Plan to extend `/api/indexer-health?details=1` to report `hasAdminToken:true/false` removing need for secret debug endpoints.
+  - Deployment Discipline: Mandate workflow (secret put -> list secrets -> deploy -> health check) in runbook.
+  - CLI First Policy: Reinforced assistant auto-executes non-secret diagnostic commands to surface binding mismatches early.
+- Metrics / Detection Ideas: Add optional header `X-Worker-Bindings-Hash` or expose binding summary in health for future rapid mismatch detection (deferred until need justified).
+- Rollback Consideration: Not required; issue procedural/config, not code defect persisted in production.
+- Follow-ups: (1) Implement health details extension. (2) Consolidate wrangler configs. (3) Remove legacy Netlify functions to eliminate dual-config path.
+
+
 
 ## 2025-09-07 – Stats Duplicate Daily Keys Cleanup
 - Goal: Remove visual double counting on Stats page caused by duplicate KV keys with pattern daily/YYYY-MM-DD.json.json alongside correct daily/YYYY-MM-DD.json.
