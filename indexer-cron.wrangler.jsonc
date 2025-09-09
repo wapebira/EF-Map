@@ -1,0 +1,31 @@
+// Standalone Cron Worker for Autonomous Indexer Ingestion (Recreated)
+// Reduced window & adaptive segmentation defaults.
+{
+	"name": "ef-indexer-cron",
+	"main": "cron_entry.js",
+	"compatibility_date": "2025-09-07",
+	"triggers": { "crons": ["*/1 * * * *"] },
+	"kv_namespaces": [
+		{ "binding": "EF_SHARES", "id": "93333a061a734ceca8da9f055cf189d1" },
+		{ "binding": "EF_STATS", "id": "cccc1a708dd74aa8aabd91c8bfc33c3f" }
+	],
+	"d1_databases": [
+		{ "binding": "INDEX_DB", "database_name": "ef_index", "database_id": "cfc8fecb-9fe1-4ad0-98ed-525772d13ff0" }
+	],
+	"vars": {
+		"INDEXER_CRON_ENABLED": "1",
+		"INDEXER_CRON_MODE": "store_all",
+		"INDEXER_CRON_MAXBLOCKS": "1200", // rollback from 1800 aiming ~2x baseline (600)
+		"INDEXER_CRON_SEGMENT": "120",   // rollback from 150 (baseline 80)
+		"INDEXER_CRON_ROWCAP": "8000",   // rollback from 12000 (baseline 4000)
+		"INDEXER_CRON_THROTTLE_MS": "300", // slower than 150 to reduce provider pressure (baseline 500)
+		"INDEXER_CRON_MAX_SEGMENTS": "5",  // below 6; modest expansion over baseline 3
+		"INDEXER_CRON_BATCH_GROUP": "6",    // new: number of 11-row statements to group per db.batch()
+		"PYROPE_RPC": "https://rpc.pyropechain.com",
+		"WORLD_ADDRESS": "0x7085f3e652987f656fB8dEE5aA6592197Bb75de8",
+		"DEPLOY_BLOCK": "7288348",
+		"CONFIRM_DEPTH": "8"
+		// Mini mode disabled to restore normal run logging & multi-segment ingest
+		,"INDEXER_CRON_MINI": "0"
+	}
+}

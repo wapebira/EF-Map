@@ -33,7 +33,96 @@ CREATE INDEX IF NOT EXISTS idx_indexer_run_mode ON indexer_run(mode);`,
   '005_overlay': `CREATE TABLE IF NOT EXISTS gate_tombstone (id INTEGER PRIMARY KEY AUTOINCREMENT, gate_id TEXT NOT NULL, world_version INTEGER NOT NULL REFERENCES world_version(id) ON DELETE RESTRICT, deleted_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP);CREATE INDEX IF NOT EXISTS idx_gate_tombstone_deleted_at ON gate_tombstone(deleted_at);CREATE INDEX IF NOT EXISTS idx_gate_tombstone_world ON gate_tombstone(world_version);CREATE INDEX IF NOT EXISTS idx_gate_direction_last_change ON smart_gate_direction(last_change_at);`
   , '006_store_registry': `CREATE TABLE IF NOT EXISTS table_registry (table_id TEXT PRIMARY KEY, namespace_guess TEXT NULL, name_guess TEXT NULL, first_block INTEGER NOT NULL, last_block INTEGER NOT NULL, appearances INTEGER NOT NULL DEFAULT 1, finalized INTEGER NOT NULL DEFAULT 0, decode_status TEXT NULL, decode_last_block INTEGER NULL, decode_error TEXT NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP);CREATE INDEX IF NOT EXISTS idx_table_registry_finalized ON table_registry(finalized);CREATE TABLE IF NOT EXISTS store_events (id INTEGER PRIMARY KEY AUTOINCREMENT, block_number INTEGER NOT NULL, log_index INTEGER NOT NULL DEFAULT 0, tx_hash TEXT NOT NULL, topic0 TEXT NOT NULL, table_id TEXT NOT NULL, key_hex TEXT NULL, field_index INTEGER NULL, value_hex TEXT NULL, ephemeral INTEGER NOT NULL DEFAULT 0, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP);CREATE INDEX IF NOT EXISTS idx_store_events_block ON store_events(block_number);CREATE INDEX IF NOT EXISTS idx_store_events_table ON store_events(table_id);CREATE TABLE IF NOT EXISTS decode_progress (table_id TEXT PRIMARY KEY, last_decoded_event_id INTEGER NOT NULL DEFAULT 0, last_decoded_block INTEGER NOT NULL DEFAULT 0, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP);`
   , '007_raw_logs': `CREATE TABLE IF NOT EXISTS raw_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, block_number INTEGER NOT NULL, log_index INTEGER NOT NULL, tx_hash TEXT NOT NULL, address TEXT NOT NULL, topic0 TEXT NULL, topic1 TEXT NULL, topic2 TEXT NULL, topic3 TEXT NULL, data TEXT NOT NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP);CREATE UNIQUE INDEX IF NOT EXISTS u_raw_logs_block_logindex ON raw_logs(block_number, log_index);CREATE INDEX IF NOT EXISTS idx_raw_logs_block ON raw_logs(block_number);CREATE INDEX IF NOT EXISTS idx_raw_logs_address ON raw_logs(address);CREATE INDEX IF NOT EXISTS idx_raw_logs_topic0 ON raw_logs(topic0);`
+  , '008_progress': `ALTER TABLE indexer_run ADD COLUMN last_progress_at TIMESTAMP NULL;ALTER TABLE indexer_run ADD COLUMN rows_so_far INTEGER DEFAULT 0;ALTER TABLE indexer_run ADD COLUMN stall_restarts INTEGER DEFAULT 0;`
+  , '009_run_metrics': `ALTER TABLE indexer_run ADD COLUMN seg_requests_so_far INTEGER DEFAULT 0;ALTER TABLE indexer_run ADD COLUMN batch_flushes INTEGER DEFAULT 0;ALTER TABLE indexer_run ADD COLUMN adaptive_batch_current INTEGER DEFAULT 0;`
+  , '010_raw_logs_shadow': `CREATE TABLE IF NOT EXISTS raw_logs_new (id INTEGER PRIMARY KEY AUTOINCREMENT, block_number INTEGER NOT NULL, log_index INTEGER NOT NULL, tx_hash TEXT NOT NULL, address TEXT NOT NULL, topic0 TEXT NULL, topic1 TEXT NULL, topic2 TEXT NULL, topic3 TEXT NULL, data TEXT NOT NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP);CREATE UNIQUE INDEX IF NOT EXISTS u_raw_logs_new_block_logindex ON raw_logs_new(block_number, log_index);CREATE INDEX IF NOT EXISTS idx_raw_logs_new_block ON raw_logs_new(block_number);CREATE INDEX IF NOT EXISTS idx_raw_logs_new_address ON raw_logs_new(address);CREATE INDEX IF NOT EXISTS idx_raw_logs_new_topic0 ON raw_logs_new(topic0);`
+  , '011_decode_schema': `CREATE TABLE IF NOT EXISTS field_layout (table_id TEXT NOT NULL, field_index INTEGER NOT NULL, field_name TEXT NULL, field_type TEXT NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (table_id, field_index));CREATE INDEX IF NOT EXISTS idx_field_layout_table ON field_layout(table_id);CREATE TABLE IF NOT EXISTS apply_cursor (id INTEGER PRIMARY KEY CHECK(id=1), last_block_number INTEGER NOT NULL DEFAULT 0, last_log_index INTEGER NOT NULL DEFAULT 0, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP);INSERT INTO apply_cursor (id, last_block_number, last_log_index) SELECT 1,0,0 WHERE NOT EXISTS (SELECT 1 FROM apply_cursor WHERE id=1);`
+  , '012_latest_state': `CREATE TABLE IF NOT EXISTS record_latest (table_id TEXT NOT NULL, key_hex TEXT NOT NULL, value_hex TEXT NULL, last_block_number INTEGER NOT NULL, last_log_index INTEGER NOT NULL DEFAULT 0, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (table_id, key_hex));CREATE INDEX IF NOT EXISTS idx_record_latest_table ON record_latest(table_id);`
+  , '013_gap_scan_results': `CREATE TABLE IF NOT EXISTS gap_scan_result (id INTEGER PRIMARY KEY AUTOINCREMENT, scanned_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, from_block INTEGER NOT NULL, to_block INTEGER NOT NULL, expected_logs INTEGER NOT NULL, found_logs INTEGER NOT NULL, missing_logs INTEGER NOT NULL, sample_count INTEGER NULL, notes TEXT NULL);CREATE INDEX IF NOT EXISTS idx_gap_scan_range ON gap_scan_result(from_block, to_block);`
+  , '014_decode_bootstrap': `-- Decode bootstrap (schema compatible upgrade)
+CREATE TABLE IF NOT EXISTS topic_map (abi_hash TEXT PRIMARY KEY, json TEXT NOT NULL, inserted_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP);
+-- record_latest existed from migration 012 with (table_id,key_hex,value_hex,last_block_number,last_log_index,updated_at)
+-- We extend it instead of recreating to avoid column mismatch errors.
+ALTER TABLE record_latest ADD COLUMN value_json TEXT NULL;
+ALTER TABLE record_latest ADD COLUMN last_block INTEGER;
+-- Backfill new last_block column from legacy last_block_number if present.
+UPDATE record_latest SET last_block = COALESCE(last_block, last_block_number) WHERE last_block IS NULL;
+-- Index on new unified last_block (will be mostly NULL until backfill above executes once).
+CREATE INDEX IF NOT EXISTS idx_record_latest_block ON record_latest(last_block);
+CREATE TABLE IF NOT EXISTS decoded_cursor (id INTEGER PRIMARY KEY CHECK (id=1), last_block INTEGER NOT NULL DEFAULT 0, last_log_index INTEGER NOT NULL DEFAULT 0, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP);
+INSERT INTO decoded_cursor (id, last_block, last_log_index) SELECT 1,0,0 WHERE NOT EXISTS (SELECT 1 FROM decoded_cursor WHERE id=1);`
+  , '015_run_attempted': `ALTER TABLE indexer_run ADD COLUMN attempted_logs INTEGER DEFAULT 0;`
 };
+// Table Allowlist (MUD Store tableIds) – introduced 2025-09-09
+// Rationale: Reduce ingestion volume & accelerate backfill by ignoring World contract logs
+// for tables outside the Eve Frontier namespace set we care about. Source list derived from
+// provided explorer URLs (mudtableurl.txt). Some table names truncated in URL queries; they are
+// retained as-is until store__Tables decoding confirms canonical names.
+// Gate via env INDEXER_TABLE_ALLOWLIST=1 to permit easy rollback / A/B.
+const TABLE_ALLOWLIST_META = {
+  // evefrontier namespace (partial + core gameplay)
+  '0x746265766566726f6e74696572000000576f726c6456657273696f6e00000000': { ns:'evefrontier', name:'WorldVersion' },
+  '0x746265766566726f6e7469657200000054656e616e7400000000000000000000': { ns:'evefrontier', name:'Tenant' },
+  '0x746265766566726f6e74696572000000536d617274547572726574436f6e6669': { ns:'evefrontier', name:'SmartTurretConfi', truncated:true },
+  '0x746265766566726f6e74696572000000536d617274476174654c696e6b000000': { ns:'evefrontier', name:'SmartGateLink' },
+  '0x746265766566726f6e74696572000000536d61727447617465436f6e66696700': { ns:'evefrontier', name:'SmartGateConfig' },
+  '0x746265766566726f6e74696572000000536d617274417373656d626c79000000': { ns:'evefrontier', name:'SmartAssembly' },
+  '0x746265766566726f6e74696572000000526f6c65000000000000000000000000': { ns:'evefrontier', name:'Role' },
+  '0x746265766566726f6e746965720000004f776e65727368697042794f626a6563': { ns:'evefrontier', name:'OwnershipByObjec', truncated:true },
+  '0x746265766566726f6e746965720000004e6574776f726b4e6f6465456e657267': { ns:'evefrontier', name:'NetworkNodeEnerg', truncated:true },
+  '0x746265766566726f6e746965720000004e6574776f726b4e6f64654279417373': { ns:'evefrontier', name:'NetworkNodeByAss', truncated:true },
+  '0x746265766566726f6e746965720000004e6574776f726b4e6f6465417373656d': { ns:'evefrontier', name:'NetworkNodeAssem', truncated:true },
+  '0x746265766566726f6e746965720000004e6574776f726b4e6f64650000000000': { ns:'evefrontier', name:'NetworkNode' },
+  '0x746265766566726f6e746965720000004c6f636174696f6e0000000000000000': { ns:'evefrontier', name:'Location' },
+  '0x746265766566726f6e746965720000004b696c6c4d61696c0000000000000000': { ns:'evefrontier', name:'KillMail' },
+  '0x746265766566726f6e74696572000000496e76656e746f72794974656d547261': { ns:'evefrontier', name:'InventoryItemTra', truncated:true },
+  '0x746265766566726f6e74696572000000496e76656e746f72794974656d000000': { ns:'evefrontier', name:'InventoryItem' },
+  '0x746265766566726f6e74696572000000496e76656e746f727942794974656d00': { ns:'evefrontier', name:'InventoryByItem' },
+  '0x746265766566726f6e74696572000000496e76656e746f72794279457068656d': { ns:'evefrontier', name:'InventoryByEphem', truncated:true },
+  '0x746265766566726f6e74696572000000496e76656e746f727900000000000000': { ns:'evefrontier', name:'Inventory' },
+  '0x746265766566726f6e74696572000000496e697469616c697a65640000000000': { ns:'evefrontier', name:'Initialized' },
+  '0x746265766566726f6e74696572000000496e697469616c697a65000000000000': { ns:'evefrontier', name:'Initialize' },
+  '0x746265766566726f6e74696572000000486173526f6c65000000000000000000': { ns:'evefrontier', name:'HasRole' },
+  '0x746265766566726f6e74696572000000476c6f62616c53746174696344617461': { ns:'evefrontier', name:'GlobalStaticData' },
+  '0x746265766566726f6e746965720000004675656c456666696369656e6379436f': { ns:'evefrontier', name:'FuelEfficiencyCo', truncated:true },
+  '0x746265766566726f6e746965720000004675656c436f6e73756d7074696f6e53': { ns:'evefrontier', name:'FuelConsumptionS', truncated:true },
+  '0x746265766566726f6e746965720000004675656c000000000000000000000000': { ns:'evefrontier', name:'Fuel' },
+  '0x746265766566726f6e74696572000000457068656d6572616c4974656d547261': { ns:'evefrontier', name:'EphemeralItemTra', truncated:true },
+  '0x746265766566726f6e74696572000000457068656d6572616c496e76656e746f': { ns:'evefrontier', name:'EphemeralInvento', truncated:true },
+  '0x746265766566726f6e74696572000000457068656d6572616c496e764974656d': { ns:'evefrontier', name:'EphemeralInvItem', truncated:true },
+  '0x746265766566726f6e74696572000000457068656d6572616c496e7643617061': { ns:'evefrontier', name:'EphemeralInvCapa', truncated:true },
+  '0x746265766566726f6e74696572000000456e746974795461674d617000000000': { ns:'evefrontier', name:'EntityTagMap' },
+  '0x746265766566726f6e74696572000000456e746974795265636f72644d657461': { ns:'evefrontier', name:'EntityRecordMeta' },
+  '0x746265766566726f6e74696572000000456e746974795265636f726400000000': { ns:'evefrontier', name:'EntityRecord' },
+  '0x746265766566726f6e74696572000000456e7469747900000000000000000000': { ns:'evefrontier', name:'Entity' },
+  '0x746265766566726f6e746965720000004465706c6f7961626c65537461746500': { ns:'evefrontier', name:'DeployableState' },
+  '0x746265766566726f6e746965720000004368617261637465727342794163636f': { ns:'evefrontier', name:'CharactersByAcco', truncated:true },
+  '0x746265766566726f6e7469657200000043686172616374657273000000000000': { ns:'evefrontier', name:'Characters' },
+  '0x746265766566726f6e7469657200000043616c6c416363657373000000000000': { ns:'evefrontier', name:'CallAccess' },
+  '0x746265766566726f6e74696572000000417373656d626c79456e65726779436f': { ns:'evefrontier', name:'AssemblyEnergyCo', truncated:true },
+  '0x746265766566726f6e74696572000000416363657373436f6e66696700000000': { ns:'evefrontier', name:'AccessConfig' },
+  // world namespace
+  '0x7462776f726c640000000000000000005573657244656c65676174696f6e436f': { ns:'world', name:'UserDelegationCo', truncated:true },
+  '0x7462776f726c6400000000000000000053797374656d73000000000000000000': { ns:'world', name:'Systems' },
+  '0x7462776f726c6400000000000000000053797374656d52656769737472790000': { ns:'world', name:'SystemRegistry' },
+  '0x7462776f726c6400000000000000000053797374656d486f6f6b730000000000': { ns:'world', name:'SystemHooks' },
+  '0x7462776f726c640000000000000000005265736f757263654163636573730000': { ns:'world', name:'ResourceAccess' },
+  '0x7462776f726c640000000000000000004e616d6573706163654f776e65720000': { ns:'world', name:'NamespaceOwner' },
+  '0x7462776f726c640000000000000000004e616d65737061636544656c65676174': { ns:'world', name:'NamespaceDelegat', truncated:true },
+  '0x7462776f726c64000000000000000000496e7374616c6c65644d6f64756c6573': { ns:'world', name:'InstalledModules' },
+  '0x7462776f726c64000000000000000000496e69744d6f64756c65416464726573': { ns:'world', name:'InitModuleAddres', truncated:true },
+  '0x7462776f726c6400000000000000000046756e6374696f6e53656c6563746f72': { ns:'world', name:'FunctionSelector' },
+  '0x7462776f726c6400000000000000000042616c616e6365730000000000000000': { ns:'world', name:'Balances' },
+  '0x6f74776f726c6400000000000000000046756e6374696f6e5369676e61747572': { ns:'world', name:'FunctionSignatur', truncated:true },
+  // store / puppet / metadata / erc20-puppet namespaces
+  '0x746273746f72650000000000000000005461626c657300000000000000000000': { ns:'store', name:'Tables' },
+  '0x746273746f726500000000000000000053746f7265486f6f6b73000000000000': { ns:'store', name:'StoreHooks' },
+  '0x746273746f72650000000000000000005265736f757263654964730000000000': { ns:'store', name:'ResourceIds' },
+  '0x7462707570706574000000000000000050757070657452656769737472790000': { ns:'puppet', name:'PuppetRegistry' },
+  '0x74626d657461646174610000000000005265736f757263655461670000000000': { ns:'metadata', name:'ResourceTag' },
+  '0x746265726332302d707570706574000045524332305265676973747279000000': { ns:'erc20-puppet', name:'ERC20Registry' }
+};
+const TABLE_ALLOWLIST_SET = new Set(Object.keys(TABLE_ALLOWLIST_META));
 // Full EVENT_MAP parity with Netlify usage-event.js for migration consistency.
 const EVENT_MAP = new Map(Object.entries({
   p2p_route: { counters: ['p2p_routes'] },
@@ -182,7 +271,7 @@ async function handleIndexerHealth(env, url){
           try { const r = await env.INDEX_DB.prepare(cq.q).all(); counts[cq.k]= r.results?.[0]?.c ?? 0; } catch { counts[cq.k]='err'; }
         }
         try {
-          const lr = await env.INDEX_DB.prepare("SELECT id, mode, run_started_at, run_finished_at, run_duration_ms, assemblies_scanned, rows_added, rows_updated, rows_removed, gate_edges_rebuilt, error_count FROM indexer_run ORDER BY id DESC LIMIT 1").all();
+          const lr = await env.INDEX_DB.prepare("SELECT id, mode, run_started_at, run_finished_at, run_duration_ms, assemblies_scanned, rows_added, rows_updated, rows_removed, gate_edges_rebuilt, error_count, last_progress_at, rows_so_far, stall_restarts, seg_requests_so_far, batch_flushes, adaptive_batch_current, attempted_logs FROM indexer_run ORDER BY id DESC LIMIT 1").all();
           lastRun = lr.results?.[0] || null;
         } catch { /* ignore */ }
       } catch { /* swallow */ }
@@ -266,25 +355,57 @@ async function handleIndexerHealth(env, url){
     const migProbe = await env.INDEX_DB.prepare("SELECT id FROM _migrations ORDER BY id").all();
     migrationsApplied = (migProbe.results||[]).map(r=>r.id);
   } catch { /* ignore if table absent */ }
-  return json({ status:'ok', world, chain: chainDeploy? { chainId, ...chainDeploy }: null, counts, lastRun, cursor, ingestionLagMs, pendingChanges, snapshotRecommended, snapshotReason, changeSummary, hasAdminToken, migrationsApplied, probeStats: includeProbeStats? _pendingProbeStats : undefined });
+  // Derived active run timing metrics (if lastRun still active)
+  let activeRunAgeMs=null, lastProgressAgoMs=null;
+  if(lastRun && !lastRun.run_finished_at){
+    try { const started = new Date((lastRun.run_started_at||'') + (lastRun.run_started_at?.endsWith('Z')?'':'Z')); if(!isNaN(started.getTime())) activeRunAgeMs = Date.now() - started.getTime(); } catch{}
+    if(lastRun.last_progress_at){
+      try { const lp = new Date(lastRun.last_progress_at + (lastRun.last_progress_at.endsWith('Z')?'':'Z')); if(!isNaN(lp.getTime())) lastProgressAgoMs = Date.now() - lp.getTime(); } catch{}
+    }
+  }
+  // Expose threshold/env configuration for UI introspection
+  const stallNoProgressMs = parseInt(env.INDEXER_STALL_NO_PROGRESS_MS||'120000',10);
+  const staleAgeMs = parseInt(env.INDEXER_STALE_AGE_MS||'1500000',10); // 25m default
+  const rpcTimeoutMs = parseInt(env.INDEXER_RPC_TIMEOUT_MS||'15000',10);
+  return json({ status:'ok', world, chain: chainDeploy? { chainId, ...chainDeploy }: null, counts, lastRun, cursor, ingestionLagMs, pendingChanges, snapshotRecommended, snapshotReason, changeSummary, hasAdminToken, migrationsApplied, probeStats: includeProbeStats? _pendingProbeStats : undefined, activeRunAgeMs, lastProgressAgoMs, thresholds:{ stallNoProgressMs, staleAgeMs, rpcTimeoutMs } });
   } catch(e){
     return json({ status:'error', error:String(e), chain: chainDeploy? { chainId, ...chainDeploy }: null, counts, lastRun });
+  }
+}
+
+// List recent indexer runs (read-only). No auth required (non-sensitive operational metadata).
+// Query params: ?limit=25 (default 25, max 100)
+async function handleIndexerRuns(env, url){
+  if(!env.INDEX_DB){
+    return json({ status:'disabled', reason:'INDEX_DB binding missing' });
+  }
+  const limRaw = Number(url.searchParams.get('limit')||25);
+  const limit = (!isFinite(limRaw) || limRaw<=0) ? 25 : Math.min(100, Math.floor(limRaw));
+  try {
+  const active = await env.INDEX_DB.prepare("SELECT id, mode, run_started_at, rows_added, error_count, notes, rows_so_far, last_progress_at, seg_requests_so_far, batch_flushes, adaptive_batch_current, stall_restarts, attempted_logs FROM indexer_run WHERE run_finished_at IS NULL ORDER BY id DESC LIMIT 5").all();
+  const recent = await env.INDEX_DB.prepare("SELECT id, mode, run_started_at, run_finished_at, run_duration_ms, rows_added, rows_updated, rows_removed, error_count, notes, rows_so_far, seg_requests_so_far, batch_flushes, adaptive_batch_current, stall_restarts, attempted_logs FROM indexer_run ORDER BY id DESC LIMIT ?").bind(limit).all();
+    return json({ status:'ok', active: active.results||[], runs: recent.results||[] });
+  } catch(e){
+    return json({ status:'error', error:String(e) });
   }
 }
 
 async function handleIndexerMigrate(req, env){
   if(req.method !== 'POST') return json({ error:'Method Not Allowed' },405);
   const token = req.headers.get('X-Indexer-Admin');
+  const authDisabled = env.INDEXER_AUTH_DISABLED === '1';
   const host = req.headers.get('host')||'';
   const isPreviewHost = host.endsWith('.pages.dev');
   const urlObj = new URL(req.url);
   const openPreview = urlObj.searchParams.get('openPreview') === '1';
   const tokenValid = !!token && token === (env.INDEXER_ADMIN_TOKEN||'');
   const bypassAuth = !tokenValid && isPreviewHost && openPreview;
-  if(!tokenValid && !bypassAuth) return json({ error:'Unauthorized' },401);
+  if(!authDisabled && !tokenValid && !bypassAuth) return json({ error:'Unauthorized' },401);
   if(!env.INDEX_DB) return json({ error:'INDEX_DB binding missing' },500);
   await env.INDEX_DB.exec("CREATE TABLE IF NOT EXISTS _migrations (id TEXT PRIMARY KEY, applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)");
-  const migrationList = ['001_init','002_enrichment','003_cursor','004_run_duration','005_overlay','006_store_registry','007_raw_logs'];
+  const migrationList = ['001_init','002_enrichment','003_cursor','004_run_duration','005_overlay','006_store_registry','007_raw_logs','008_progress','009_run_metrics','010_raw_logs_shadow','011_decode_schema','012_latest_state','013_gap_scan_results','014_decode_bootstrap','015_run_attempted'];
+  
+  // (Table allowlist constants defined globally for shared use.)
   const appliedRes = await env.INDEX_DB.prepare("SELECT id FROM _migrations").all();
   const applied = new Set((appliedRes?.results||[]).map(r=>r.id));
   const executed=[]; const skipped=[];
@@ -306,7 +427,11 @@ async function handleIndexerMigrate(req, env){
 async function handleIndexerBootstrap(req, env){
   if(req.method !== 'POST') return json({ error:'Method Not Allowed' },405);
   const token = req.headers.get('X-Indexer-Admin');
-  if(!token || token !== (env.INDEXER_ADMIN_TOKEN||'')) return json({ error:'Unauthorized' },401);
+  const host = req.headers.get('host')||'';
+  const isPreviewHost = host.endsWith('.pages.dev');
+  let bypassAuth=false;
+  try { const urlObj = new URL(req.url); bypassAuth = isPreviewHost && urlObj.searchParams.get('openPreview')==='1' && (!env.INDEXER_ADMIN_TOKEN || token !== env.INDEXER_ADMIN_TOKEN); } catch { /* ignore */ }
+  if(!bypassAuth && (!token || token !== (env.INDEXER_ADMIN_TOKEN||''))) return json({ error:'Unauthorized' },401);
   if(!env.INDEX_DB) return json({ error:'INDEX_DB binding missing' },500);
   let cfg; try {
     const resp = await fetch(WORLD_API_BASE + '/config');
@@ -347,15 +472,22 @@ async function handleIndexerIngest(req, env){
   if(!env.INDEX_DB) return json({ error:'INDEX_DB binding missing' },500);
   // Auth: allow same preview bypass pattern as /api/indexer-migrate to unblock ingestion when admin token not configured.
   const token = req.headers.get('X-Indexer-Admin');
+  const authDisabled = env.INDEXER_AUTH_DISABLED === '1';
   const expected = (env.INDEXER_ADMIN_TOKEN||'').trim();
   const host = req.headers.get('host')||'';
   const isPreviewHost = host.endsWith('.pages.dev');
   let bypassAuth=false;
   try { const urlObj = new URL(req.url); bypassAuth = isPreviewHost && urlObj.searchParams.get('openPreview')==='1' && (!!expected ? token?.trim() !== expected : !token); } catch{ /* ignore URL parse */ }
-  if(expected && token?.trim() !== expected && !bypassAuth) return json({ error:'Unauthorized' },401);
+  if(!authDisabled && expected && token?.trim() !== expected && !bypassAuth) return json({ error:'Unauthorized' },401);
   let body={}; try { if(req.headers.get('content-type')?.includes('application/json')) body = await req.json(); } catch { body={}; }
-  const baseMode = body.mode === 'store' ? 'store' : 'stub';
-  const extendedMode = body.mode === 'store_all' ? 'store_all' : baseMode; // store_all = address-only raw capture
+  // Mode parsing: allow mode via body or query param; support case-insensitive values.
+  let modeInput = body.mode;
+  try { const u = new URL(req.url); if(!modeInput && u.searchParams.get('mode')) modeInput = u.searchParams.get('mode'); } catch { /* ignore */ }
+  if(typeof modeInput === 'string') modeInput = modeInput.toLowerCase();
+  let extendedMode;
+  if(modeInput === 'store_all') extendedMode = 'store_all';
+  else if(modeInput === 'store') extendedMode = 'store';
+  else extendedMode = 'stub';
   // Ensure base tables
   await env.INDEX_DB.exec("CREATE TABLE IF NOT EXISTS gate_tombstone (id INTEGER PRIMARY KEY AUTOINCREMENT, gate_id TEXT NOT NULL, world_version INTEGER NOT NULL, deleted_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP);");
   await env.INDEX_DB.exec("CREATE TABLE IF NOT EXISTS event_cursor (id INTEGER PRIMARY KEY CHECK (id = 1), last_block_number INTEGER NOT NULL DEFAULT 0, last_log_index INTEGER NOT NULL DEFAULT 0, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP);");
@@ -368,16 +500,35 @@ async function handleIndexerIngest(req, env){
   await env.INDEX_DB.prepare("INSERT INTO indexer_run (world_version, mode, assemblies_scanned, rows_added, rows_updated, rows_removed, gate_edges_rebuilt, snapshot_version, notes) VALUES (?, ?, 0,0,0,0,0,NULL,?)").bind(worldId, extendedMode, extendedMode==='store' ? 'store ingest start' : (extendedMode==='store_all'?'store_all raw capture start':'stub start')).run();
   const started = await env.INDEX_DB.prepare("SELECT id, run_started_at FROM indexer_run WHERE world_version=? ORDER BY id DESC LIMIT 1").bind(worldId).all();
   const runId = started.results?.[0]?.id;
+  // Initialize heartbeat fields on start (best-effort; ignore errors if migration not applied yet)
+  if(runId){ try { await env.INDEX_DB.prepare("UPDATE indexer_run SET last_progress_at=CURRENT_TIMESTAMP, rows_so_far=0 WHERE id=?").bind(runId).run(); } catch { /* ignore if column missing (migration not run) */ } }
   if(extendedMode === 'store_all'){
     // Broad address-only capture with batched inserts to mitigate per-row overhead (reduces Worker 1101 exceptions).
     try {
-      const RPC = env.PYROPE_RPC || body.rpc || '';
-      const WORLD = (env.WORLD_ADDRESS || body.world || '').toLowerCase();
-      if(!RPC || !WORLD) return json({ error:'missing_rpc_or_world' },400);
+  // Reset allowlist skip counter for this invocation
+  globalThis.__skippedAllowlist = 0;
+  const RPC = env.PYROPE_RPC || body.rpc || '';
+  const RPC_LIST = RPC.split(',').map(s=>s.trim()).filter(Boolean);
+  const WORLD = (env.WORLD_ADDRESS || body.world || '').toLowerCase();
+  const reindexMode = env.INDEXER_REINDEX_MODE === '1';
+  const dualRaw = env.INDEXER_DUAL_RAW === '1';
+      if(!RPC || !WORLD){
+        // Finalize the run record so UI does not show a perpetual active run with zero progress.
+        if(runId){
+          try {
+            await env.INDEX_DB.prepare("UPDATE indexer_run SET run_finished_at=CURRENT_TIMESTAMP, notes=COALESCE(notes,'finalized_missing_config'), run_duration_ms=COALESCE(run_duration_ms, (julianday(CURRENT_TIMESTAMP)-julianday(run_started_at))*86400000) WHERE id=? AND run_finished_at IS NULL").bind(runId).run();
+          } catch { /* ignore finalize errors */ }
+        }
+        return json({ error:'missing_rpc_or_world' },400);
+      }
       const CONFIRM_DEPTH = BigInt(env.CONFIRM_DEPTH || body.confirmDepth || 8);
       const deployBlock = BigInt(env.DEPLOY_BLOCK || body.deployBlock || 0);
-      const maxBlocks = Math.min(Number(body.maxBlocks||2000),20000);
-      const segmentBlocks = Math.min(Number(body.segmentBlocks||0)||0, maxBlocks);
+  const maxBlocks = Math.min(Number(body.maxBlocks||2000),20000);
+  const segmentBlocks = Math.min(Number(body.segmentBlocks||0)||0, maxBlocks);
+  // Throttle: optional sleep between segment RPC calls (ms). Accept body.throttleMs or env.INDEXER_THROTTLE_MS (default 0)
+  const throttleMs = Math.min(60000, Math.max(0, parseInt(body.throttleMs || env.INDEXER_THROTTLE_MS || '0',10)||0));
+  // Limit number of segments processed in a single invocation (body.maxSegments or env.INDEXER_MAX_SEGMENTS) to reduce provider pressure.
+  const maxSegments = Math.min( Math.max(1, parseInt(body.maxSegments || env.INDEXER_MAX_SEGMENTS || '0',10)||0) , 500); // 0 => unlimited (bounded by MAX_SEG_REQ)
       const rowCap = Math.min(Number(body.rowCap||50000),200000);
       // Ensure schema
       try {
@@ -387,19 +538,77 @@ async function handleIndexerIngest(req, env){
         await env.INDEX_DB.exec("CREATE INDEX IF NOT EXISTS idx_raw_logs_address ON raw_logs(address);");
         await env.INDEX_DB.exec("CREATE INDEX IF NOT EXISTS idx_raw_logs_topic0 ON raw_logs(topic0);");
       } catch(e){ return json({ error:'raw_logs_ddl_failed', message:String(e) },500); }
+      const RPC_TIMEOUT_MS = parseInt(env.INDEXER_RPC_TIMEOUT_MS||'15000',10);
       async function rpc(method, params){
-        const r = await fetch(RPC,{ method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ jsonrpc:'2.0', id:1, method, params }) });
-        if(!r.ok) throw new Error('rpc_http_'+r.status);
-        const j = await r.json(); if(j.error) throw new Error('rpc_'+j.error.message);
-        return j.result;
+        const maxAttempts = 3 * (RPC_LIST.length||1); // allow attempts across providers
+        let attempt=0; let lastErr=null; let providerIndex=0; let failuresOnProvider=0;
+        while(attempt < maxAttempts){
+          attempt++;
+            const currentRpc = RPC_LIST[providerIndex] || RPC; // fallback to single RPC string
+          const ac = new AbortController();
+          const t = setTimeout(()=> ac.abort('rpc_timeout'), RPC_TIMEOUT_MS);
+          try {
+            const r = await fetch(currentRpc,{ method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({ jsonrpc:'2.0', id:attempt, method, params }), signal: ac.signal });
+            if(!r.ok) throw new Error('rpc_http_'+r.status);
+            const j = await r.json(); if(j.error) throw new Error('rpc_'+j.error.message);
+            return j.result;
+          } catch(e){
+            lastErr = e;
+            const msg = String(e);
+            const retriable = (msg.includes('rpc_http_5') || msg.includes('rpc_timeout') || msg.includes('fetch failed'));
+            globalThis.__rpcFailures = (globalThis.__rpcFailures||0)+1;
+            failuresOnProvider++;
+            if(retriable){
+              // rotate provider if multiple available & failure count >0 on this provider
+              if(RPC_LIST.length>1 && failuresOnProvider>=1){
+                providerIndex = (providerIndex + 1) % RPC_LIST.length;
+                failuresOnProvider=0;
+              }
+              const backoffMs = 200 * Math.pow(2, attempt%3); // 200,400,800 repeating
+              await new Promise(res=> setTimeout(res, backoffMs));
+              continue;
+            }
+            if(msg.includes('rpc_timeout')) throw new Error('rpc_timeout_'+method);
+            throw e;
+          } finally { clearTimeout(t); }
+        }
+        throw lastErr || new Error('rpc_failed_'+method);
+      }
+      // Helper: finalize run safely (idempotent-ish). Persist metrics & inserted count best-effort.
+    async function finalizeRun(insertedVal, segReq, flushes, adaptiveBatch, note){
+        if(!runId) return;
+        try {
+          const durRes = await env.INDEX_DB.prepare("SELECT (julianday(CURRENT_TIMESTAMP)-julianday(run_started_at))*86400000 AS ms FROM indexer_run WHERE id=?").bind(runId).all();
+          const ms = Math.max(0, Math.round(durRes.results?.[0]?.ms||0));
+          // Only overwrite notes if still the start note or a blank note.
+      let finalNote = note;
+      const extraMetrics = [];
+      if(typeof globalThis.__rpcFailures === 'number') extraMetrics.push('rpcFail:'+globalThis.__rpcFailures);
+      if(typeof globalThis.__segmentRetries === 'number') extraMetrics.push('segRetry:'+globalThis.__segmentRetries);
+      if(!finalNote) finalNote = 'store_all raw '+insertedVal;
+      if(extraMetrics.length) finalNote += ' '+extraMetrics.join(' ');
+          try {
+            await env.INDEX_DB.prepare("UPDATE indexer_run SET run_finished_at=CURRENT_TIMESTAMP, run_duration_ms=?, rows_added=?, seg_requests_so_far=?, batch_flushes=?, adaptive_batch_current=?, attempted_logs=COALESCE(?,attempted_logs), notes=? WHERE id=? AND run_finished_at IS NULL")
+              .bind(ms, insertedVal||0, segReq||0, flushes||0, adaptiveBatch||0, (typeof attempted==='number'? attempted: null), finalNote, runId).run();
+          } catch(_e){
+            await env.INDEX_DB.prepare("UPDATE indexer_run SET run_finished_at=CURRENT_TIMESTAMP, run_duration_ms=?, rows_added=?, seg_requests_so_far=?, batch_flushes=?, adaptive_batch_current=?, notes=? WHERE id=? AND run_finished_at IS NULL")
+              .bind(ms, insertedVal||0, segReq||0, flushes||0, adaptiveBatch||0, finalNote, runId).run();
+          }
+        } catch {/* ignore finalize errors */ }
       }
       let latestHex; try { latestHex = await rpc('eth_blockNumber', []); } catch(e){ return json({ error:'head_fetch_failed', message:String(e) },502); }
       const latest = BigInt(latestHex);
-      if(latest < deployBlock + CONFIRM_DEPTH) return json({ status:'head_too_low', latest:Number(latest) });
+      if(latest < deployBlock + CONFIRM_DEPTH){
+        await finalizeRun(0,0,0,0,(reindexMode?'reindex_freeze ':'')+'store_all head_too_low latest:'+Number(latest));
+        return json({ status:'head_too_low', latest:Number(latest), reindexMode });
+      }
       const finalizedHead = latest - CONFIRM_DEPTH;
       let startBlock = BigInt(cursor?.last_block_number||0) + 1n;
       if(startBlock < deployBlock) startBlock = deployBlock;
-      if(startBlock > finalizedHead) return json({ status:'up_to_date', cursor });
+      if(startBlock > finalizedHead){
+        await finalizeRun(0,0,0,0,(reindexMode?'reindex_freeze ':'')+'store_all up_to_date');
+        return json({ status:'up_to_date', cursor, reindexMode });
+      }
       const endBlock = startBlock + BigInt(maxBlocks);
       const toBlock = endBlock > finalizedHead ? finalizedHead : endBlock;
   let inserted=0; // logical processed rows (used for rowCap & advancement semantics)
@@ -413,8 +622,10 @@ async function handleIndexerIngest(req, env){
   // Compute safe initial batch rows so rows * VARS_PER_ROW <= D1_PARAM_LIMIT.
   const SAFE_ROWS = Math.max(1, Math.floor(D1_PARAM_LIMIT / VARS_PER_ROW)); // floor(100/9)=11
   let adaptiveBatch = Math.min(REQUESTED_BATCH, SAFE_ROWS);
-      let pending=[]; let batchFlushes=0; let batchShrinks=0;
-      async function flush(){
+  let pending=[]; let batchFlushes=0; let batchShrinks=0;
+  const writeLegacy = !reindexMode; // freeze prevents advancing or mutating legacy raw_logs
+  const writeShadow = reindexMode || dualRaw;
+  async function flush(){
         if(!pending.length) return;
         // We may need to split pending into sub-batches that fit the variable limit.
         let local = pending; pending=[];
@@ -424,13 +635,33 @@ async function handleIndexerIngest(req, env){
           const slice = local.slice(idx, idx+sliceSize);
           const flat=[]; for(const p of slice){ flat.push(...p); }
           const placeholders = slice.map(()=> '(?,?,?,?,?,?,?,?,?)').join(',');
-          const sql = `INSERT OR IGNORE INTO raw_logs (block_number, log_index, tx_hash, address, topic0, topic1, topic2, topic3, data) VALUES ${placeholders}`;
+          const sqlLegacy = `INSERT OR IGNORE INTO raw_logs (block_number, log_index, tx_hash, address, topic0, topic1, topic2, topic3, data) VALUES ${placeholders}`;
+          const sqlShadow = `INSERT OR IGNORE INTO raw_logs_new (block_number, log_index, tx_hash, address, topic0, topic1, topic2, topic3, data) VALUES ${placeholders}`;
           try {
             if(sliceSize * VARS_PER_ROW > D1_PARAM_LIMIT){ throw new Error('synthetic_var_limit'); }
-            const r = await env.INDEX_DB.prepare(sql).bind(...flat).run();
-            inserted += slice.length; // keep existing semantics (so cursor can advance even if duplicates)
-            if(r && r.meta && typeof r.meta.changes === 'number') actualInserted += r.meta.changes;
+            if(writeLegacy){
+              const r = await env.INDEX_DB.prepare(sqlLegacy).bind(...flat).run();
+              // Only count rows actually inserted to avoid masking duplicate-only batches
+              const changes = (r && r.meta && typeof r.meta.changes === 'number') ? r.meta.changes : 0;
+              inserted += changes;
+              actualInserted += changes;
+            }
+            if(writeShadow){
+              try { await env.INDEX_DB.prepare(sqlShadow).bind(...flat).run(); } catch { /* ignore shadow errors */ }
+              if(!writeLegacy){ inserted += slice.length; }
+            }
             idx += sliceSize; batchFlushes++;
+            // Heartbeat: update rows_so_far & last_progress_at (throttled to >=5s) so UI can reflect mid-run progress
+            if(runId){
+              try {
+                if(!globalThis.__lastHeartbeatTs) globalThis.__lastHeartbeatTs = 0;
+                const nowTs = Date.now();
+                if(nowTs - globalThis.__lastHeartbeatTs >= 5000){
+                  globalThis.__lastHeartbeatTs = nowTs;
+                  await env.INDEX_DB.prepare("UPDATE indexer_run SET rows_so_far=?, last_progress_at=CURRENT_TIMESTAMP WHERE id=?").bind(inserted, runId).run();
+                }
+              } catch { /* ignore heartbeat errors */ }
+            }
           } catch(e){
             const msg = String(e);
             if((msg.includes('too many SQL variables') || msg.includes('synthetic_var_limit')) && sliceSize > 1){
@@ -446,11 +677,19 @@ async function handleIndexerIngest(req, env){
           }
         }
       }
-      async function handleLogs(logs){
+  async function handleLogs(logs){
         for(const log of logs){
           if(inserted + pending.length >= rowCap) break;
           const bn = Number(BigInt(log.blockNumber)); if(firstBlock===null) firstBlock=bn; lastBlock=bn;
           const t0 = (log.topics&&log.topics[0])? log.topics[0] : null; uniqueTopics.add((t0||'').toLowerCase());
+          // Optional table allowlist filtering (skip non-whitelisted tableId logs)
+          if(env.INDEXER_TABLE_ALLOWLIST === '1'){
+            const tableId = (log.topics && log.topics[1]) ? log.topics[1].toLowerCase() : null;
+            if(tableId && !TABLE_ALLOWLIST_SET.has(tableId)){
+              globalThis.__skippedAllowlist = (globalThis.__skippedAllowlist||0)+1;
+              continue;
+            }
+          }
           attempted++;
           pending.push([bn, Number(log.logIndex||0), log.transactionHash||'', (log.address||'').toLowerCase(), t0, log.topics?.[1]||null, log.topics?.[2]||null, log.topics?.[3]||null, log.data||'0x']);
           if(pending.length >= adaptiveBatch) await flush();
@@ -458,52 +697,110 @@ async function handleIndexerIngest(req, env){
       }
       // Guard: limit total RPC subrequests per invocation to reduce risk of 1101 (Too many API requests) errors.
       const MAX_SEG_REQ = 40; // soft cap for eth_getLogs calls in one invocation
-      let segRequests=0; let segmentsProcessed=0; let truncated=false; let segmentBlocksUsed=segmentBlocks||0;
+  let segRequests=0; let segmentsProcessed=0; let truncated=false; let segmentBlocksUsed=segmentBlocks||0;
       try {
         if(segmentBlocks && segmentBlocks > 0){
           let segFrom = startBlock;
           let dynamicSeg = BigInt(segmentBlocks);
+          const MIN_SEG_BLOCKS = 25n; // lowest fallback segment size
+          const SEG_SHRINK_FACTOR = 2n; // divide by 2 on failures
+          const MAX_SEGMENT_RETRIES = 5; // per failing segment range
+          let segmentRetries=0; // total retry attempts across run
+          let rpcFailures=0; // count of RPC failures (5xx/timeouts) encountered
           while(segFrom <= toBlock && (inserted + pending.length) < rowCap){
+            if(maxSegments && segmentsProcessed >= maxSegments){ truncated=true; break; }
             if(segRequests >= MAX_SEG_REQ){ truncated=true; break; }
             const remainingBlocks = (toBlock - segFrom) + 1n;
             if(dynamicSeg > remainingBlocks) dynamicSeg = remainingBlocks;
             if(dynamicSeg <= 0) break;
-            const segTo = segFrom + dynamicSeg - 1n;
-            let segLogs;
-            try {
-              segLogs = await rpc('eth_getLogs',[{ address: WORLD, fromBlock:'0x'+segFrom.toString(16), toBlock:'0x'+segTo.toString(16) }]);
-              segRequests++;
-            } catch(segErr){
+            let segTo = segFrom + dynamicSeg - 1n;
+            let fetched=false; let segLogs=null; let attempt=0; let localSegSize=dynamicSeg;
+            while(!fetched && attempt <= MAX_SEGMENT_RETRIES){
+              attempt++;
+              try {
+                segLogs = await rpc('eth_getLogs',[{ address: WORLD, fromBlock:'0x'+segFrom.toString(16), toBlock:'0x'+segTo.toString(16) }]);
+                segRequests++; fetched=true;
+              } catch(segErr){
+                rpcFailures++;
+                const msg = String(segErr);
+                // Shrink segment and retry if possible
+                if(localSegSize > MIN_SEG_BLOCKS){
+                  localSegSize = localSegSize / SEG_SHRINK_FACTOR;
+                  if(localSegSize < MIN_SEG_BLOCKS) localSegSize = MIN_SEG_BLOCKS;
+                  segTo = segFrom + localSegSize - 1n;
+                  dynamicSeg = localSegSize; // propagate smaller size for subsequent segments
+                  segmentRetries++;
+                  continue; // retry
+                }
+                // If already at minimum size, abort this run with partial progress finalize later
+                await flush();
+                const advanceTo = (inserted < rowCap) ? Number(segFrom-1n) : Number(segTo);
+                if(inserted){ try { await env.INDEX_DB.prepare("UPDATE event_cursor SET last_block_number=?, updated_at=CURRENT_TIMESTAMP WHERE id=1").bind(advanceTo).run(); } catch { /* ignore */ } }
+                return json({ error:'log_fetch_failed', message:'segment_error:'+msg, inserted, attempted, batchFlushes, segment:{ from:Number(segFrom), to:Number(segTo) }, segRequests, segmentsProcessed, truncated, segmentRetries, rpcFailures });
+              }
+            }
+            if(!fetched){
               await flush();
-              const advanceTo = (inserted < rowCap) ? Number(segFrom-1n) : Number(segTo);
-              if(inserted){ await env.INDEX_DB.prepare("UPDATE event_cursor SET last_block_number=?, updated_at=CURRENT_TIMESTAMP WHERE id=1").bind(advanceTo).run(); }
-              return json({ error:'log_fetch_failed', message:'segment_error:'+String(segErr), inserted, attempted, batchFlushes, segment:{ from:Number(segFrom), to:Number(segTo) }, segRequests, segmentsProcessed, truncated });
+              return json({ error:'log_fetch_failed', message:'segment_retry_exhausted', inserted, attempted, batchFlushes, segment:{ from:Number(segFrom), to:Number(segTo) }, segRequests, segmentsProcessed, truncated, segmentRetries, rpcFailures });
             }
             await handleLogs(segLogs);
             segmentsProcessed++;
+            if(throttleMs > 0){ await new Promise(r=> setTimeout(r, throttleMs)); }
             segFrom = segTo + 1n;
             if((inserted + pending.length) >= rowCap) break;
           }
+          // attach retry metrics to outer scope for finalizeRun usage (store on globalThis temp)
+          globalThis.__segmentRetries = (globalThis.__segmentRetries||0) + (typeof segmentRetries==='number'? segmentRetries:0);
+          globalThis.__rpcFailures = (globalThis.__rpcFailures||0) + (typeof rpcFailures==='number'? rpcFailures:0);
         } else {
           const logs = await rpc('eth_getLogs',[{ address: WORLD, fromBlock:'0x'+startBlock.toString(16), toBlock:'0x'+toBlock.toString(16) }]);
           segRequests=1; segmentsProcessed=1; await handleLogs(logs);
         }
-      } catch(e){ await flush(); return json({ error:'log_fetch_failed', message:String(e), inserted, attempted, batchFlushes, segRequests, segmentsProcessed, truncated }); }
+      } catch(e){
+        await flush();
+        await finalizeRun(inserted, segRequests, batchFlushes, adaptiveBatch, 'store_all log_fetch_failed '+String(e).slice(0,80));
+        return json({ error:'log_fetch_failed', message:String(e), inserted, attempted, batchFlushes, segRequests, segmentsProcessed, truncated });
+      }
       await flush();
-      // If we attempted logs but inserted none, do NOT advance cursor to avoid data loss; surface retry signal.
-  if(attempted>0 && actualInserted===0){
-        if(runId){ const durRes = await env.INDEX_DB.prepare("SELECT (julianday(CURRENT_TIMESTAMP)-julianday(run_started_at))*86400000 AS ms FROM indexer_run WHERE id=?").bind(runId).all(); const ms = Math.max(0, Math.round(durRes.results?.[0]?.ms||0)); await env.INDEX_DB.prepare("UPDATE indexer_run SET run_finished_at=CURRENT_TIMESTAMP, run_duration_ms=?, rows_added=?, notes=? WHERE id=?").bind(ms, 0, 'store_all batch_insert_failed shrinks:'+batchShrinks+' errs:'+insertErrors.length, runId).run(); }
-  return json({ status:'batch_insert_failed', retry:true, cursor, range:{ from:Number(startBlock), to:Number(toBlock) }, inserted, actualInserted, attempted, adaptiveBatch, batchShrinks, batchFlushes, insertErrorCount: insertErrors.length, firstInsertError: insertErrors[0]||null, uniqueTopics: Array.from(uniqueTopics), topicCount: uniqueTopics.size, rowCapApplied: rowCap, bypassAuth, segRequests, segmentsProcessed, truncated, segmentBlocksRequested: segmentBlocks||0 });
+      // Persist live metrics (seg_requests_so_far, batch_flushes, adaptive_batch_current) mid-run best-effort
+  if(runId){ try { await env.INDEX_DB.prepare("UPDATE indexer_run SET seg_requests_so_far=?, batch_flushes=?, adaptive_batch_current=?, attempted_logs=COALESCE(?,attempted_logs) WHERE id=?").bind(segRequests, batchFlushes, adaptiveBatch, attempted, runId).run(); } catch {/* ignore */} }
+      // Duplicate-only segment handling: if we attempted logs and inserted none, probe coverage.
+      if(attempted>0 && actualInserted===0 && writeLegacy){
+        let coverageCount=null; let coverageOk=false; let probeErr=null;
+        try {
+          const cov = await env.INDEX_DB.prepare("SELECT COUNT(1) AS c FROM raw_logs WHERE block_number BETWEEN ? AND ?")
+            .bind(Number(startBlock), Number(toBlock)).all();
+          coverageCount = cov.results?.[0]?.c ?? 0;
+          if(coverageCount >= attempted * 0.98){ // allow 2% tolerance
+            coverageOk = true;
+          }
+        } catch(e){ probeErr = String(e).slice(0,120); }
+        if(coverageOk){
+          try {
+            await env.INDEX_DB.prepare("UPDATE event_cursor SET last_block_number=?, updated_at=CURRENT_TIMESTAMP WHERE id=1")
+              .bind(Number(toBlock)).run();
+            const c2 = await env.INDEX_DB.prepare("SELECT id, last_block_number, last_log_index, updated_at FROM event_cursor WHERE id=1").all();
+            cursor = c2.results?.[0] || cursor;
+          } catch { /* ignore cursor advance errors */ }
+          await finalizeRun(0, segRequests, batchFlushes, adaptiveBatch, 'store_all ok_duplicate '+Number(startBlock)+'-'+Number(toBlock)+' cov:'+coverageCount);
+          return json({ status:'ok_duplicate', cursor, range:{ from:Number(startBlock), to:Number(toBlock) }, attempted, coverageCount, coverageTolerance:0.98, adaptiveBatch, batchShrinks, batchFlushes, segRequests, segmentsProcessed, truncated, uniqueTopics: Array.from(uniqueTopics), topicCount: uniqueTopics.size, bypassAuth, segmentBlocksRequested: segmentBlocks||0, rpcFailures: globalThis.__rpcFailures||0, segmentRetries: globalThis.__segmentRetries||0, skippedAllowlist: globalThis.__skippedAllowlist||0, allowlistEnabled: env.INDEXER_TABLE_ALLOWLIST === '1' });
+        }
+        await finalizeRun(0, segRequests, batchFlushes, adaptiveBatch, 'store_all batch_insert_failed shrinks:'+batchShrinks+' errs:'+insertErrors.length+' cov:'+(coverageCount??'null')+' probeErr:'+(probeErr||'')+' firstErr:'+(insertErrors[0]||''));
+        return json({ status:'batch_insert_failed', retry:true, cursor, range:{ from:Number(startBlock), to:Number(toBlock) }, inserted, actualInserted, attempted, adaptiveBatch, batchShrinks, batchFlushes, coverageCount, probeErr, insertErrorCount: insertErrors.length, firstInsertError: insertErrors[0]||null, uniqueTopics: Array.from(uniqueTopics), topicCount: uniqueTopics.size, rowCapApplied: rowCap, bypassAuth, segRequests, segmentsProcessed, truncated, segmentBlocksRequested: segmentBlocks||0, rpcFailures: globalThis.__rpcFailures||0, segmentRetries: globalThis.__segmentRetries||0 });
       }
-      const advanceTo = (inserted < rowCap) ? Number(toBlock) : (lastBlock!==null? lastBlock: Number(toBlock));
-      if(inserted>0){
-        await env.INDEX_DB.prepare("UPDATE event_cursor SET last_block_number=?, updated_at=CURRENT_TIMESTAMP WHERE id=1").bind(advanceTo).run();
-        const c2 = await env.INDEX_DB.prepare("SELECT id, last_block_number, last_log_index, updated_at FROM event_cursor WHERE id=1").all();
-        cursor = c2.results?.[0] || cursor;
+      if(!reindexMode){
+        const advanceTo = (inserted < rowCap) ? Number(toBlock) : (lastBlock!==null? lastBlock: Number(toBlock));
+        if(inserted>0){
+          await env.INDEX_DB.prepare("UPDATE event_cursor SET last_block_number=?, updated_at=CURRENT_TIMESTAMP WHERE id=1").bind(advanceTo).run();
+          const c2 = await env.INDEX_DB.prepare("SELECT id, last_block_number, last_log_index, updated_at FROM event_cursor WHERE id=1").all();
+          cursor = c2.results?.[0] || cursor;
+        }
       }
-      if(runId){ const durRes = await env.INDEX_DB.prepare("SELECT (julianday(CURRENT_TIMESTAMP)-julianday(run_started_at))*86400000 AS ms FROM indexer_run WHERE id=?").bind(runId).all(); const ms = Math.max(0, Math.round(durRes.results?.[0]?.ms||0)); await env.INDEX_DB.prepare("UPDATE indexer_run SET run_finished_at=CURRENT_TIMESTAMP, run_duration_ms=?, rows_added=?, notes=? WHERE id=?").bind(ms, inserted, 'store_all raw '+inserted+' batches:'+batchFlushes+' shrinks:'+batchShrinks+' segReq:'+segRequests, runId).run(); }
-  return json({ status:'ok', mode:'store_all', cursor, range:{ from:Number(startBlock), to:Number(toBlock) }, inserted, actualInserted, attempted, adaptiveBatchInitial:REQUESTED_BATCH, adaptiveBatchFinal:adaptiveBatch, batchShrinks, batchFlushes, insertErrorCount: insertErrors.length, firstInsertError: insertErrors[0]||null, uniqueTopics: Array.from(uniqueTopics), topicCount: uniqueTopics.size, rowCapApplied: rowCap, blocks:{ first:firstBlock, last:lastBlock }, bypassAuth, segRequests, segmentsProcessed, truncated, segmentBlocksRequested: segmentBlocks||0 });
+    await finalizeRun(inserted, segRequests, batchFlushes, adaptiveBatch, 'store_all raw '+inserted+' batches:'+batchFlushes+' shrinks:'+batchShrinks+' segReq:'+segRequests);
+  return json({ status:'ok', mode:'store_all', cursor, range:{ from:Number(startBlock), to:Number(toBlock) }, inserted, actualInserted, attempted, adaptiveBatchInitial:REQUESTED_BATCH, adaptiveBatchFinal:adaptiveBatch, batchShrinks, batchFlushes, insertErrorCount: insertErrors.length, firstInsertError: insertErrors[0]||null, uniqueTopics: Array.from(uniqueTopics), topicCount: uniqueTopics.size, rowCapApplied: rowCap, blocks:{ first:firstBlock, last:lastBlock }, bypassAuth, segRequests, segmentsProcessed, truncated, segmentBlocksRequested: segmentBlocks||0, reindexMode, dualRaw, rpcFailures: globalThis.__rpcFailures||0, segmentRetries: globalThis.__segmentRetries||0, skippedAllowlist: globalThis.__skippedAllowlist||0, allowlistEnabled: env.INDEXER_TABLE_ALLOWLIST === '1' });
     } catch(e){
+      // Attempt to finalize with whatever progress we tracked (heartbeat may have updated rows_so_far already)
+      try { await finalizeRun(null, null, null, null, 'store_all unhandled '+String(e).slice(0,80)); } catch{/* ignore */}
       return json({ error:'store_all_unhandled', message:String(e) },500);
     }
   }
@@ -578,7 +875,7 @@ async function handleIndexerIngest(req, env){
   if(events.length && assemblies_scanned){ if(highestBlock > (cursor?.last_block_number||0)){ await env.INDEX_DB.prepare("UPDATE event_cursor SET last_block_number=?, updated_at=CURRENT_TIMESTAMP WHERE id=1").bind(highestBlock).run(); const c2 = await env.INDEX_DB.prepare("SELECT id, last_block_number, last_log_index, updated_at FROM event_cursor WHERE id=1").all(); cursor = c2.results?.[0] || cursor; } }
   if(runId){ const durRes = await env.INDEX_DB.prepare("SELECT (julianday(CURRENT_TIMESTAMP)-julianday(run_started_at))*86400000 AS ms FROM indexer_run WHERE id=?").bind(runId).all(); const ms = Math.max(0, Math.round(durRes.results?.[0]?.ms||0)); const notes = errors.length? `processed with ${errors.length} errors`:'ok'; await env.INDEX_DB.prepare("UPDATE indexer_run SET run_finished_at=CURRENT_TIMESTAMP, run_duration_ms=?, assemblies_scanned=?, rows_added=?, rows_updated=?, rows_removed=?, gate_edges_rebuilt=?, error_count=?, notes=? WHERE id=?").bind(ms, assemblies_scanned, rows_added, rows_updated, rows_removed, gate_edges_rebuilt, error_count, notes, runId).run(); }
   const runRow = await env.INDEX_DB.prepare("SELECT id, run_started_at, run_finished_at, mode, run_duration_ms, assemblies_scanned, rows_added, rows_updated, rows_removed, gate_edges_rebuilt, error_count FROM indexer_run WHERE id=?").bind(runId).all();
-  return json({ status:'ok', mode: extendedMode, cursor, run: runRow.results?.[0]||null });
+  return json({ status:'ok', mode: extendedMode, modeInput, cursor, run: runRow.results?.[0]||null });
 }
 
 // Manual trigger endpoint: starts a store_all ingestion run unless one already in progress.
@@ -588,22 +885,74 @@ async function handleIndexerTrigger(req, env){
   if(!env.INDEX_DB) return json({ error:'INDEX_DB binding missing' },500);
   // Reuse auth pattern (token or preview bypass) without requiring body.
   const token = req.headers.get('X-Indexer-Admin');
+  const authDisabled = env.INDEXER_AUTH_DISABLED === '1';
   const expected = (env.INDEXER_ADMIN_TOKEN||'').trim();
   const host = req.headers.get('host')||'';
   const isPreviewHost = host.endsWith('.pages.dev');
   let bypassAuth=false;
   try { const urlObj = new URL(req.url); bypassAuth = isPreviewHost && urlObj.searchParams.get('openPreview')==='1' && (!!expected ? token?.trim() !== expected : !token); } catch {}
-  if(expected && token?.trim() !== expected && !bypassAuth) return json({ error:'Unauthorized' },401);
+  if(!authDisabled && expected && token?.trim() !== expected && !bypassAuth) return json({ error:'Unauthorized' },401);
   // Detect in-progress run (no finished_at yet) to avoid overlapping heavy RPC bursts.
   try {
     const active = await env.INDEX_DB.prepare("SELECT id, mode, run_started_at FROM indexer_run WHERE run_finished_at IS NULL ORDER BY id DESC LIMIT 1").all();
     const running = active.results?.[0] || null;
-    if(running){
-      return json({ status:'in_progress', run: running, bypassAuth });
+  if(running){
+      // Extended watchdog: consider progress heartbeat (last_progress_at) if column exists
+      let lastProgressTs=null;
+      try {
+        const lp = await env.INDEX_DB.prepare("SELECT last_progress_at FROM indexer_run WHERE id=?").bind(running.id).all();
+        lastProgressTs = lp.results?.[0]?.last_progress_at || null;
+      } catch { /* ignore if column not present */ }
+      // Auto-finalize stale runs >25 minutes old to clear stuck state (e.g., prior worker eviction mid-run)
+      try {
+        const started = new Date(running.run_started_at + 'Z'); // treat as UTC
+        const ageMs = Date.now() - started.getTime();
+        const STALE_MS = parseInt(env.INDEXER_STALE_AGE_MS||'1500000',10); // default 25m
+        const NO_PROGRESS_MS = parseInt(env.INDEXER_STALL_NO_PROGRESS_MS||'120000',10); // default 2m
+        let noProgress=false;
+        if(lastProgressTs){
+          const lpDate = new Date(lastProgressTs + (lastProgressTs.endsWith('Z')?'':'Z'));
+            if(!isNaN(lpDate.getTime())){
+              const since = Date.now() - lpDate.getTime();
+              if(since > NO_PROGRESS_MS) noProgress=true;
+            }
+        }
+        if(!isNaN(ageMs) && ageMs > STALE_MS){
+          await env.INDEX_DB.prepare("UPDATE indexer_run SET run_finished_at=CURRENT_TIMESTAMP, run_duration_ms=COALESCE(run_duration_ms, ?) , notes=COALESCE(notes,'auto-finalized_stale') WHERE id=?")
+            .bind(ageMs, running.id).run();
+        } else if(noProgress){
+          // finalize due to missing heartbeat; increment stall_restarts counter
+          try { await env.INDEX_DB.prepare("UPDATE indexer_run SET run_finished_at=CURRENT_TIMESTAMP, notes=COALESCE(notes,'auto-finalized_no_progress'), stall_restarts=COALESCE(stall_restarts,0)+1, run_duration_ms=COALESCE(run_duration_ms, (julianday(CURRENT_TIMESTAMP)-julianday(run_started_at))*86400000) WHERE id=?").bind(running.id).run(); } catch {/* ignore */}
+          // Emit stall_restart usage metric (best-effort, no failure propagation)
+          try {
+            if(env.EF_STATS){
+              const day = new Date().toISOString().slice(0,10);
+              const dailyKey = 'daily/'+day+'.json';
+              async function loadSnap(k){ const raw = await env.EF_STATS.get(k); if(!raw) return { version:1, updatedAt:new Date().toISOString(), counters:{}, sums:{} }; try { return JSON.parse(raw); } catch { return { version:1, updatedAt:new Date().toISOString(), counters:{}, sums:{} }; } }
+              const cur = await loadSnap('current'); const daily = await loadSnap(dailyKey);
+              cur.counters.stall_restarts = (cur.counters.stall_restarts||0)+1;
+              daily.counters.stall_restarts = (daily.counters.stall_restarts||0)+1;
+              await env.EF_STATS.put('current', JSON.stringify(cur));
+              await env.EF_STATS.put(dailyKey, JSON.stringify(daily));
+            }
+          } catch { /* ignore metric errors */ }
+        } else {
+          return json({ status:'in_progress', run: running, bypassAuth });
+        }
+      } catch { return json({ status:'in_progress', run: running, bypassAuth, warn:'auto_finalize_failed' }); }
     }
   } catch { /* ignore presence errors */ }
   // Delegate to ingestion handler with mode store_all (raw capture). We construct a synthetic Request so handler logic (including auth bypass) is reused.
-  const triggerReq = new Request(req.url, { method:'POST', headers:{ 'content-type':'application/json', ...(token? { 'X-Indexer-Admin': token }: {}) }, body: JSON.stringify({ mode:'store_all' }) });
+  // Inject chain params from env if available so manual trigger doesn't require JSON body each time.
+  const bodyPayload = { mode:'store_all' };
+  if(env.PYROPE_RPC) bodyPayload.rpc = env.PYROPE_RPC;
+  if(env.WORLD_ADDRESS) bodyPayload.world = env.WORLD_ADDRESS;
+  if(env.DEPLOY_BLOCK) bodyPayload.deployBlock = parseInt(env.DEPLOY_BLOCK,10)||env.DEPLOY_BLOCK;
+  // Reuse cron tuning vars if present so manual trigger mirrors autonomous scheduled window
+  if(env.INDEXER_CRON_MAX_BLOCKS) bodyPayload.maxBlocks = parseInt(env.INDEXER_CRON_MAX_BLOCKS,10)||env.INDEXER_CRON_MAX_BLOCKS;
+  if(env.INDEXER_CRON_SEGMENT_BLOCKS) bodyPayload.segmentBlocks = parseInt(env.INDEXER_CRON_SEGMENT_BLOCKS,10)||env.INDEXER_CRON_SEGMENT_BLOCKS;
+  if(env.INDEXER_CRON_ROW_CAP) bodyPayload.rowCap = parseInt(env.INDEXER_CRON_ROW_CAP,10)||env.INDEXER_CRON_ROW_CAP;
+  const triggerReq = new Request(req.url, { method:'POST', headers:{ 'content-type':'application/json', ...(token? { 'X-Indexer-Admin': token }: {}) }, body: JSON.stringify(bodyPayload) });
   return handleIndexerIngest(triggerReq, env);
 }
 
@@ -760,6 +1109,72 @@ async function handleIndexerOverlay(url, env){
   }
 }
 
+// Diagnostic: expose presence (not values) of ingestion environment configuration
+async function handleIndexerEnv(req, env){
+  if(req.method !== 'GET') return json({ error:'Method Not Allowed' },405);
+  const token = req.headers.get('X-Indexer-Admin');
+  const authDisabled = env.INDEXER_AUTH_DISABLED === '1';
+  const expected = (env.INDEXER_ADMIN_TOKEN||'').trim();
+  const host = req.headers.get('host')||'';
+  const isPreviewHost = host.endsWith('.pages.dev');
+  let bypassAuth=false;
+  try { const urlObj = new URL(req.url); bypassAuth = isPreviewHost && urlObj.searchParams.get('openPreview')==='1' && (!!expected ? token?.trim() !== expected : !token); } catch {}
+  if(!authDisabled && expected && token?.trim() !== expected && !bypassAuth) return json({ error:'Unauthorized' },401);
+  const out = {
+    rpc: !!env.PYROPE_RPC,
+    world: !!env.WORLD_ADDRESS,
+    deployBlock: !!env.DEPLOY_BLOCK,
+    confirmDepth: !!env.CONFIRM_DEPTH,
+    adminToken: !!expected
+  };
+  // Optionally include active run id & cursor snapshot when DB bound
+  if(env.INDEX_DB){
+    try {
+      const run = await env.INDEX_DB.prepare("SELECT id, run_started_at FROM indexer_run WHERE run_finished_at IS NULL ORDER BY id DESC LIMIT 1").all();
+      const cur = await env.INDEX_DB.prepare("SELECT last_block_number FROM event_cursor WHERE id=1").all();
+      out.activeRun = run.results?.[0]||null;
+      out.cursorBlock = cur.results?.[0]?.last_block_number ?? null;
+    } catch { /* ignore */ }
+  }
+  return json({ status:'ok', config: out, bypassAuth });
+}
+
+// Reset endpoint: finalize any active run and reset cursor to (DEPLOY_BLOCK-1) so next ingest begins from deployment block.
+// Preview bypass allowed; production requires admin token. Does not truncate data (raw_logs retained) to permit forensic review.
+async function handleIndexerReset(req, env){
+  if(req.method !== 'POST') return json({ error:'Method Not Allowed' },405);
+  if(!env.INDEX_DB) return json({ error:'INDEX_DB binding missing' },500);
+  const token = req.headers.get('X-Indexer-Admin');
+  const authDisabled = env.INDEXER_AUTH_DISABLED === '1';
+  const expected = (env.INDEXER_ADMIN_TOKEN||'').trim();
+  const host = req.headers.get('host')||'';
+  const isPreviewHost = host.endsWith('.pages.dev');
+  let bypassAuth=false;
+  try { const urlObj = new URL(req.url); bypassAuth = isPreviewHost && urlObj.searchParams.get('openPreview')==='1' && (!!expected ? token?.trim() !== expected : !token); } catch {}
+  if(!authDisabled && expected && token?.trim() !== expected && !bypassAuth) return json({ error:'Unauthorized' },401);
+  const deployBlock = parseInt(env.DEPLOY_BLOCK||'0',10) || 0;
+  let activeRun=null; let previousCursor=null; let updatedCursor=null;
+  try {
+    const run = await env.INDEX_DB.prepare("SELECT id, run_started_at FROM indexer_run WHERE run_finished_at IS NULL ORDER BY id DESC LIMIT 1").all();
+    activeRun = run.results?.[0]||null;
+    if(activeRun){
+      // finalize with note
+      await env.INDEX_DB.prepare("UPDATE indexer_run SET run_finished_at=CURRENT_TIMESTAMP, notes=COALESCE(notes,'reset_finalized'), run_duration_ms=COALESCE(run_duration_ms, (julianday(CURRENT_TIMESTAMP)-julianday(run_started_at))*86400000) WHERE id=?").bind(activeRun.id).run();
+    }
+  } catch { /* ignore */ }
+  try {
+    const cur = await env.INDEX_DB.prepare("SELECT last_block_number, last_log_index FROM event_cursor WHERE id=1").all();
+    previousCursor = cur.results?.[0]||null;
+    if(deployBlock>0){
+      const newBlock = Math.max(0, deployBlock-1);
+      await env.INDEX_DB.prepare("UPDATE event_cursor SET last_block_number=?, last_log_index=0, updated_at=CURRENT_TIMESTAMP WHERE id=1").bind(newBlock).run();
+      const cur2 = await env.INDEX_DB.prepare("SELECT last_block_number, last_log_index FROM event_cursor WHERE id=1").all();
+      updatedCursor = cur2.results?.[0]||null;
+    }
+  } catch(e){ return json({ error:'cursor_reset_failed', message:String(e) },500); }
+  return json({ status:'ok', activeRunFinalized: !!activeRun, previousCursor, updatedCursor, deployBlock, bypassAuth });
+}
+
 async function handleDebugKV(url, env){
   const limit = parseInt(url.searchParams.get('limit')||'50',10);
   const prefix = url.searchParams.get('prefix')||'';
@@ -771,6 +1186,35 @@ async function handleDebugKV(url, env){
 
 function json(obj,status=200){ return new Response(JSON.stringify(obj),{ status, headers:{ 'Content-Type':'application/json','Cache-Control':'no-store' } }); }
 
+// Return aggregate count in a block range for raw_logs / raw_logs_new (shadow) for gap analysis
+async function handleIndexerRawLogsRange(url, env){
+  if(!env.INDEX_DB) return json({ error:'INDEX_DB binding missing' },500);
+  const from = parseInt(url.searchParams.get('from')||'0',10);
+  const to = parseInt(url.searchParams.get('to')||'0',10);
+  if(!(from>=0) || !(to>=from)) return json({ error:'invalid_range' },400);
+  const shadow = url.searchParams.get('shadow')==='1';
+  const table = shadow? 'raw_logs_new':'raw_logs';
+  try {
+    const r = await env.INDEX_DB.prepare(`SELECT COUNT(1) as c FROM ${table} WHERE block_number BETWEEN ? AND ?`).bind(from,to).all();
+    return json({ status:'ok', table, from, to, count: r.results?.[0]?.c||0 });
+  } catch(e){ return json({ error:'range_query_failed', message:String(e) },500); }
+}
+
+// Accept POST with JSON { from, to, expected, found, missing, sampleCount, notes }
+async function handleIndexerGapReport(req, env){
+  if(req.method !== 'POST') return json({ error:'Method Not Allowed' },405);
+  if(!env.INDEX_DB) return json({ error:'INDEX_DB binding missing' },500);
+  let b={}; try { if(req.headers.get('content-type')?.includes('application/json')) b = await req.json(); } catch { return json({ error:'invalid_json' },400); }
+  const { from, to, expected, found, missing, sampleCount, notes } = b;
+  if(!Number.isInteger(from)||!Number.isInteger(to)||to<from) return json({ error:'invalid_range' },400);
+  if(!Number.isInteger(expected)||!Number.isInteger(found)||!Number.isInteger(missing)) return json({ error:'invalid_counts' },400);
+  try {
+    await env.INDEX_DB.prepare("INSERT INTO gap_scan_result (from_block,to_block,expected_logs,found_logs,missing_logs,sample_count,notes) VALUES (?,?,?,?,?,?,?)")
+      .bind(from,to,expected,found,missing, sampleCount??null, notes? String(notes).slice(0,240): null).run();
+    return json({ status:'recorded' });
+  } catch(e){ return json({ error:'gap_record_failed', message:String(e) },500); }
+}
+
 export default {
   async fetch(req, env, ctx){
     const url = new URL(req.url); const p = url.pathname;
@@ -781,12 +1225,78 @@ export default {
   if(p === '/api/list-stats') return handleListStats(env);
   if(p === '/api/debug-kv') return handleDebugKV(url, env);
   if(p === '/api/indexer-health') return handleIndexerHealth(env, url);
+  if(p === '/api/indexer-runs') return handleIndexerRuns(env, url);
   if(p === '/api/indexer-migrate') return handleIndexerMigrate(req, env);
   if(p === '/api/indexer-bootstrap') return handleIndexerBootstrap(req, env);
   if(p === '/api/indexer-ingest') return handleIndexerIngest(req, env);
   if(p === '/api/indexer-trigger') return handleIndexerTrigger(req, env);
+  if(p === '/api/indexer-env') return handleIndexerEnv(req, env);
+  if(p === '/api/indexer-reset') return handleIndexerReset(req, env);
   if(p === '/api/indexer-secret-debug') return handleIndexerSecretDebug(env);
   if(p === '/api/indexer-overlay') return handleIndexerOverlay(url, env);
+  if(p === '/api/indexer-rawlogs-range') return handleIndexerRawLogsRange(url, env);
+  if(p === '/api/indexer-gap-report') return handleIndexerGapReport(req, env);
+  if(p === '/api/indexer-topic-map') {
+    if(!env.INDEX_DB) return json({ error:'INDEX_DB binding missing' },500);
+    try {
+      const full = url.searchParams.get('full')==='1';
+      const tm = await env.INDEX_DB.prepare("SELECT abi_hash, json, inserted_at FROM topic_map ORDER BY inserted_at DESC LIMIT 1").all();
+      if(!tm.results || !tm.results.length){ return json({ status:'empty' }); }
+      const row = tm.results[0];
+      if(!full){
+        let meta=null; try { const j = JSON.parse(row.json); meta = j.meta||{ eventCount: Object.keys(j.events||{}).length, functionCount: Object.keys(j.functions||{}).length }; } catch{}
+        return json({ status:'ok', abiHash: row.abi_hash, inserted_at: row.inserted_at, meta });
+      }
+      return json({ status:'ok', abiHash: row.abi_hash, inserted_at: row.inserted_at, map: JSON.parse(row.json) });
+    } catch(e){ return json({ error:'topic_map_fetch_failed', message:String(e) },500); }
+  }
+  if(p === '/api/indexer-topic-map-refresh') {
+    if(req.method !== 'POST') return json({ error:'Method Not Allowed' },405);
+    const token = req.headers.get('X-Indexer-Admin');
+    const expected = (env.INDEXER_ADMIN_TOKEN||'').trim();
+    const host = req.headers.get('host')||''; const isPreviewHost = host.endsWith('.pages.dev');
+    const urlObj = new URL(req.url); const bypass = isPreviewHost && urlObj.searchParams.get('openPreview')==='1' && (!expected || token?.trim()!==expected);
+    if(expected && token?.trim()!==expected && !bypass) return json({ error:'Unauthorized' },401);
+    if(!env.INDEX_DB) return json({ error:'INDEX_DB binding missing' },500);
+    try {
+      const origin = new URL(req.url).origin;
+      const resp = await env.ASSETS.fetch(origin + '/topic_map.json');
+      if(!resp.ok) return json({ error:'asset_fetch_failed', status: resp.status },502);
+      const text = await resp.text();
+      let parsed; try { parsed = JSON.parse(text); } catch(e){ return json({ error:'invalid_json', message:String(e) },400); }
+      const abiHash = parsed?.meta?.abiHash || parsed?.meta?.abi_hash || null;
+      if(!abiHash) return json({ error:'missing_abi_hash' },400);
+      await env.INDEX_DB.prepare("INSERT OR REPLACE INTO topic_map (abi_hash, json) VALUES (?, ?)").bind(abiHash, JSON.stringify(parsed)).run();
+      return json({ status:'stored', abiHash });
+    } catch(e){ return json({ error:'topic_map_store_failed', message:String(e) },500); }
+  }
+  if(p === '/api/indexer-decode-batch') {
+    if(req.method !== 'POST') return json({ error:'Method Not Allowed' },405);
+    if(!env.INDEX_DB) return json({ error:'INDEX_DB binding missing' },500);
+    const token = req.headers.get('X-Indexer-Admin');
+    const expected = (env.INDEXER_ADMIN_TOKEN||'').trim();
+    const host = req.headers.get('host')||''; const isPreviewHost = host.endsWith('.pages.dev');
+    const urlObj = new URL(req.url); const bypass = isPreviewHost && urlObj.searchParams.get('openPreview')==='1' && (!expected || token?.trim()!==expected);
+    if(expected && token?.trim()!==expected && !bypass) return json({ error:'Unauthorized' },401);
+    try {
+      const cur = await env.INDEX_DB.prepare("SELECT last_block, last_log_index FROM decoded_cursor WHERE id=1").all();
+      const cursor = cur.results?.[0] || { last_block:0, last_log_index:0 };
+      return json({ status:'noop', decoded:0, cursor });
+    } catch(e){ return json({ error:'decode_batch_failed', message:String(e) },500); }
+  }
+  if(p === '/api/indexer-wipe') {
+    if(req.method !== 'POST') return json({ error:'Method Not Allowed' },405);
+    const token = req.headers.get('X-Indexer-Admin');
+    const expected = (env.INDEXER_ADMIN_TOKEN||'').trim();
+    const host = req.headers.get('host')||''; const isPreviewHost = host.endsWith('.pages.dev');
+    const urlObj = new URL(req.url); const bypass = isPreviewHost && urlObj.searchParams.get('openPreview')==='1' && (!expected || token?.trim()!==expected);
+    if(expected && token?.trim()!==expected && !bypass) return json({ error:'Unauthorized' },401);
+    if(!env.INDEX_DB) return json({ error:'INDEX_DB binding missing' },500);
+    if(urlObj.searchParams.get('confirm')!=='YES') return json({ error:'confirm_param_required', hint:'POST /api/indexer-wipe?confirm=YES&openPreview=1' },400);
+  const dropList = ['raw_logs_new','raw_logs','store_events','table_registry','decode_progress','smart_assembly','smart_gate_direction','gate_acl','gate_access_cache','structure_generic','adjacency_snapshot_meta','gate_tombstone','event_cursor','indexer_run','topic_map','record_latest','decoded_cursor','_migrations'];
+    const failed=[]; for(const t of dropList){ try { await env.INDEX_DB.prepare(`DROP TABLE IF EXISTS ${t}`).run(); } catch(e){ failed.push({ table:t, error:String(e).slice(0,120) }); } }
+    return json({ status:'wiped', dropped: dropList.length, failed });
+  }
   if(p === '/api/debug-rawlogs'){
     if(!env.INDEX_DB) return json({ error:'INDEX_DB binding missing' },500);
     try { const res = await env.INDEX_DB.prepare("SELECT COUNT(*) AS c FROM raw_logs").all(); return json({ count: res.results?.[0]?.c||0 }); } catch(e){ return json({ error:'raw_logs_query_failed', message:String(e) },500); }
@@ -796,3 +1306,55 @@ export default {
     return new Response(resp.body,{ status:resp.status, statusText:resp.statusText, headers:h });
   }
 };
+
+// Scheduled cron handler (Cloudflare Cron Triggers) – autonomous ingestion loop.
+// Executes every 5 minutes (see wrangler.jsonc triggers.crons). Gated by INDEXER_CRON_ENABLED=1.
+// Logic: skip if active run younger than 2m; finalize stale (>30m) unfinished run; then invoke store_all ingestion
+// with configured window (INDEXER_CRON_MAX_BLOCKS / SEGMENT_BLOCKS / ROW_CAP). Internal call bypasses external auth.
+export async function scheduled(event, env, ctx){
+  try {
+    if(env.INDEXER_CRON_ENABLED !== '1') return; // disabled gate
+    if(!env.INDEX_DB) return; // nothing to do without DB
+    // Overlap lock: detect unfinished run
+    let active=null;
+    try {
+      const r = await env.INDEX_DB.prepare("SELECT id, run_started_at FROM indexer_run WHERE run_finished_at IS NULL ORDER BY id DESC LIMIT 1").all();
+      active = r.results?.[0]||null;
+    } catch { /* ignore */ }
+    if(active){
+      try {
+        const started = new Date(active.run_started_at + 'Z');
+        const ageMs = Date.now() - started.getTime();
+        const STALE_MS = 30*60*1000; // 30m
+        const MIN_AGE_MS = 2*60*1000; // consider in-progress if <2m
+        if(ageMs < MIN_AGE_MS){
+          return; // recent active run – skip
+        } else if(ageMs > STALE_MS){
+          // finalize stale run so next cron can progress
+          try {
+            await env.INDEX_DB.prepare("UPDATE indexer_run SET run_finished_at=CURRENT_TIMESTAMP, notes=COALESCE(notes,'auto-finalized_cron_stale'), run_duration_ms=COALESCE(run_duration_ms, (julianday(CURRENT_TIMESTAMP)-julianday(run_started_at))*86400000) WHERE id=?").bind(active.id).run();
+          } catch { /* ignore finalize error */ }
+        } else {
+          // mid-age active run – let it finish
+          return;
+        }
+      } catch { return; }
+    }
+    // Construct internal ingestion request (store_all mode)
+    const maxBlocks = parseInt(env.INDEXER_CRON_MAX_BLOCKS||'4000',10)||4000;
+    const segmentBlocks = parseInt(env.INDEXER_CRON_SEGMENT_BLOCKS||'300',10)||300;
+    const rowCap = parseInt(env.INDEXER_CRON_ROW_CAP||'50000',10)||50000;
+    const payload = { mode:'store_all', maxBlocks, segmentBlocks, rowCap };
+    if(env.PYROPE_RPC) payload.rpc = env.PYROPE_RPC;
+    if(env.WORLD_ADDRESS) payload.world = env.WORLD_ADDRESS;
+    if(env.DEPLOY_BLOCK) payload.deployBlock = parseInt(env.DEPLOY_BLOCK,10)||env.DEPLOY_BLOCK;
+    const headers = { 'content-type':'application/json' };
+    if(env.INDEXER_ADMIN_TOKEN) headers['X-Indexer-Admin'] = env.INDEXER_ADMIN_TOKEN;
+    const internalReq = new Request('https://internal/api/indexer-ingest', { method:'POST', headers, body: JSON.stringify(payload) });
+    // Fire and wait (ensure single run per cron invocation)
+    await handleIndexerIngest(internalReq, env);
+  } catch(e){
+    // Best-effort logging; cron exits silently otherwise
+    console.log('cron_ingest_error', String(e).slice(0,160));
+  }
+}

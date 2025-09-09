@@ -7,6 +7,11 @@
   "name": "ef-map",
   "compatibility_date": "2025-09-07",
   "pages_build_output_dir": "dist",
+  // NOTE: Cloudflare Pages does not support cron triggers directly. The scheduled() export in _worker.js
+  // will only run if this code is deployed as a standalone Worker. For autonomous ingestion on Pages,
+  // we need either: (a) separate Worker with cron calling the Pages endpoint, or (b) external scheduler.
+  // The cron config block was removed after validation error. Environment vars retained for potential
+  // reuse by an external triggering mechanism.
   "kv_namespaces": [
   { "binding": "EF_SHARES", "id": "93333a061a734ceca8da9f055cf189d1" },
   { "binding": "EF_STATS", "id": "cccc1a708dd74aa8aabd91c8bfc33c3f" }
@@ -17,5 +22,21 @@
       "database_name": "ef_index",
       "database_id": "cfc8fecb-9fe1-4ad0-98ed-525772d13ff0" // provisioned 2025-09-07 (feature/indexer)
     }
-  ]
+  ],
+  // Chain ingestion required vars (bound at build to ensure runtime availability). Secrets with sensitive values
+  // should still be set via `wrangler pages secret put`, these placeholders document expected keys.
+  // PYROPE_RPC: Public/read RPC endpoint (non-auth); WORLD_ADDRESS: world contract; DEPLOY_BLOCK: deployment block
+  // CONFIRM_DEPTH: confirmations to treat head as finalized.
+  "vars": {
+    "PYROPE_RPC": "https://rpc.pyropechain.com",
+    "WORLD_ADDRESS": "0x7085f3e652987f656fB8dEE5aA6592197Bb75de8",
+    "DEPLOY_BLOCK": "7288348",
+  "CONFIRM_DEPTH": "8",
+  "INDEXER_CRON_ENABLED": "1",
+  "INDEXER_CRON_MAX_BLOCKS": "4000",
+  "INDEXER_CRON_SEGMENT_BLOCKS": "300",
+  "INDEXER_CRON_ROW_CAP": "50000"
+  ,"INDEXER_AUTH_DISABLED": "1"
+  ,"INDEXER_TABLE_ALLOWLIST": "1"
+  }
 }

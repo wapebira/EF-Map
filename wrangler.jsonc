@@ -7,10 +7,7 @@
   // Updated KV namespace IDs after creating fresh namespaces via CLI.
   "kv_namespaces": [
     { "binding": "EF_SHARES", "id": "93333a061a734ceca8da9f055cf189d1" },
-    { "binding": "EF_STATS", "id": "cccc1a708dd74aa8aabd91c8bfc33c3f" }, // synced to authoritative historical namespace
-  { "binding": "EF_DRIFT", "id": "4f87b8b5b23744ed920a10a8f8efffad" },
-  // Temporary binding to old stats namespace for migration copy (will remove after merge)
-  { "binding": "EF_STATS_OLD", "id": "32c9bc0ca7c840d293d2d9c3c806fd79" }
+    { "binding": "EF_STATS", "id": "cccc1a708dd74aa8aabd91c8bfc33c3f" }
   ],
   "d1_databases": [
     {
@@ -20,7 +17,12 @@
     }
   ],
   // For Pages, specify the build output dir so Wrangler can unify config if desired.
-  "pages_build_output_dir": "eve-frontier-map/dist"
+  "pages_build_output_dir": "eve-frontier-map/dist",
+  // Paced cron ingestion tuning (used by root worker scheduled() when deployed as standalone Worker with cron triggers)
+  "vars": {
+    "INDEXER_CRON_THROTTLE_MS": "1500",
+    "INDEXER_CRON_MAX_SEGMENTS": "3"
+  }
   // Future additions:
   // - variables / feature flag bindings
   // - routes if switching back to direct Worker deployment
