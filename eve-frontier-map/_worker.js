@@ -249,7 +249,7 @@ async function handleIndexerHealth(env, url){
     if(!probe.results || probe.results.length === 0){
       return json({ status:'uninitialized', world:null, chain:{ chainId, ...chainDeploy } });
     }
-    const { results } = await env.INDEX_DB.prepare("SELECT version_number, world_address, contracts_version FROM world_version WHERE archived_at IS NULL ORDER BY version_number DESC LIMIT 1").all();
+  const { results } = await env.INDEX_DB.prepare("SELECT version_number, world_address, contracts_version FROM world_version WHERE archived_at IS NULL ORDER BY version_number DESC LIMIT 1").all();
     const world = results?.[0] || null;
     const details = url.searchParams.get('details')==='1';
   let counts=null;
@@ -276,7 +276,7 @@ async function handleIndexerHealth(env, url){
         } catch { /* ignore */ }
       } catch { /* swallow */ }
     }
-    // Cursor snapshot + ingestion lag
+  // Cursor snapshot + ingestion lag
     let cursor=null; let ingestionLagMs=null;
     try {
       const cur = await env.INDEX_DB.prepare("SELECT id, last_block_number, last_log_index, updated_at FROM event_cursor WHERE id=1").all();
@@ -337,6 +337,67 @@ async function handleIndexerHealth(env, url){
       }
     }
   const includeProbeStats = url.searchParams.get('probeStats')==='1';
+  // DB metrics helper (page_count/page_size + raw_logs stats)
+  async function dbMetrics(db){
+    if(!db) return null;
+    const pickFirstVal = (row)=>{ if(!row) return 0; const k = Object.keys(row)[0]; return Number(row[k]||0); };
+  let page_count = 0, page_size = 0, approx_size_bytes = 0;
+  let size_method = 'unknown';
+    try {
+      const pc = await db.prepare('PRAGMA page_count').all();
+      page_count = pickFirstVal((pc.results||[])[0]);
+    } catch { /* ignore */ }
+    try {
+      const pz = await db.prepare('PRAGMA page_size').all();
+      page_size = pickFirstVal((pz.results||[])[0]);
+    } catch { /* ignore */ }
+    // Fallbacks for D1 environments where PRAGMA may not return values via prepare('PRAGMA ...')
+    if(!(page_count>0)){
+      try {
+        const pc2 = await db.prepare('SELECT page_count FROM pragma_page_count').all();
+        page_count = Number(pc2.results?.[0]?.page_count||0);
+      } catch { /* ignore */ }
+    }
+    if(!(page_size>0)){
+      try {
+        const pz2 = await db.prepare('SELECT page_size FROM pragma_page_size').all();
+        page_size = Number(pz2.results?.[0]?.page_size||0);
+      } catch { /* ignore */ }
+    }
+    if(page_count>0 && page_size>0){ approx_size_bytes = page_count * page_size; size_method='pragma_pages'; }
+    let raw_logs = null;
+    try {
+      const rl = await db.prepare('SELECT MIN(block_number) AS min_block, MAX(block_number) AS max_block, COUNT(1) AS count FROM raw_logs').all();
+      const r0 = (rl.results||[])[0] || {};
+      raw_logs = { count: Number(r0.count||0), min_block: r0.min_block ?? null, max_block: r0.max_block ?? null };
+    } catch { /* table may not exist */ }
+    // Optional dbstat fallback for size if still missing (may be unavailable on D1)
+    if(!(approx_size_bytes>0)){
+      try {
+        const ds = await db.prepare('SELECT SUM(pgsize) AS s FROM dbstat').all();
+        const s = Number(ds.results?.[0]?.s||0);
+        if(s>0){ approx_size_bytes = s; size_method='dbstat_sum'; }
+      } catch { /* ignore */ }
+    }
+    // Final fallback: do not guess size to avoid heavy scans; expose only counts and method
+    if(!(approx_size_bytes>0)){
+      size_method = 'unavailable';
+    }
+    return { page_count, page_size, approx_size_bytes, raw_logs, diag:{ size_method } };
+  }
+  // Collect metrics for primary and archives if bound
+  let db = { primary: null, a1: null, a2: null };
+  try { db.primary = await dbMetrics(env.INDEX_DB); } catch { db.primary = null; }
+  try { if(env.INDEX_DB_A1) db.a1 = await dbMetrics(env.INDEX_DB_A1); } catch { db.a1 = null; }
+  try { if(env.INDEX_DB_A2) db.a2 = await dbMetrics(env.INDEX_DB_A2); } catch { db.a2 = null; }
+  // Archiver summary (fill pct relative to 10GB soft cap)
+  const capBytes = 10 * 1024 * 1024 * 1024;
+  const archiver = {
+    primaryCount: db.primary?.raw_logs?.count ?? null,
+    archivedCount: (db.a1?.raw_logs?.count||0) + (db.a2?.raw_logs?.count||0),
+    a1FillPct_10g: db.a1?.approx_size_bytes!=null? Math.round((db.a1.approx_size_bytes/capBytes)*1000)/10 : null,
+    a2FillPct_10g: db.a2?.approx_size_bytes!=null? Math.round((db.a2.approx_size_bytes/capBytes)*1000)/10 : null
+  };
   // Snapshot advisory (no side effects). Compute only when classification performed.
   let snapshotRecommended=false; let snapshotReason=null; let changeSummary=null;
   if(pendingChanges && pendingChanges.classified){
@@ -367,7 +428,7 @@ async function handleIndexerHealth(env, url){
   const stallNoProgressMs = parseInt(env.INDEXER_STALL_NO_PROGRESS_MS||'120000',10);
   const staleAgeMs = parseInt(env.INDEXER_STALE_AGE_MS||'1500000',10); // 25m default
   const rpcTimeoutMs = parseInt(env.INDEXER_RPC_TIMEOUT_MS||'15000',10);
-  return json({ status:'ok', world, chain: chainDeploy? { chainId, ...chainDeploy }: null, counts, lastRun, cursor, ingestionLagMs, pendingChanges, snapshotRecommended, snapshotReason, changeSummary, hasAdminToken, migrationsApplied, probeStats: includeProbeStats? _pendingProbeStats : undefined, activeRunAgeMs, lastProgressAgoMs, thresholds:{ stallNoProgressMs, staleAgeMs, rpcTimeoutMs } });
+  return json({ status:'ok', world, chain: chainDeploy? { chainId, ...chainDeploy }: null, counts, lastRun, cursor, ingestionLagMs, pendingChanges, snapshotRecommended, snapshotReason, changeSummary, hasAdminToken, migrationsApplied, probeStats: includeProbeStats? _pendingProbeStats : undefined, activeRunAgeMs, lastProgressAgoMs, thresholds:{ stallNoProgressMs, staleAgeMs, rpcTimeoutMs }, db, archiver });
   } catch(e){
     return json({ status:'error', error:String(e), chain: chainDeploy? { chainId, ...chainDeploy }: null, counts, lastRun });
   }
@@ -985,6 +1046,16 @@ async function loadSnapshot(kv, key){
   }
   try { return JSON.parse(raw); } catch { return { version:1, updatedAt:new Date().toISOString(), counters:{}, sums:{} }; }
 }
+// Apply a usage event definition to a snapshot in-place. Returns true if applied.
+function applyEvent(snapshot, type, body){
+  const def = EVENT_MAP.get(type); if(!def) return false;
+  snapshot.updatedAt = new Date().toISOString();
+  if(def.counters){ def.counters.forEach(k=>{ snapshot.counters[k] = (snapshot.counters[k]||0)+1; }); }
+  if(def.extraCounters){ (def.extraCounters(body||{})||[]).forEach(k=>{ snapshot.counters[k] = (snapshot.counters[k]||0)+1; }); }
+  if(def.countersDynamic){ (def.countersDynamic(body||{})||[]).forEach(k=>{ snapshot.counters[k] = (snapshot.counters[k]||0)+1; }); }
+  if(def.sum){ const v = Number(body?.[def.sum.valueField]); if(isFinite(v) && v>=0){ snapshot.sums[def.sum.key] = (snapshot.sums[def.sum.key]||0)+v; snapshot.sums[def.sum.countKey] = (snapshot.sums[def.sum.countKey]||0)+1; } }
+  return true;
+}
 async function handleUsageEvent(req, env){
   if(req.method !== 'POST') return new Response('Method Not Allowed',{ status:405 });
   let body={}; try { body = req.headers.get('content-type')?.includes('application/json') ? await req.json():{}; } catch { return new Response('Invalid JSON',{ status:400 }); }
@@ -1052,6 +1123,20 @@ async function handleStats(url, env){
         try { const text = await env.EF_STATS.get(k); if(text){ history.push(JSON.parse(text)); } }
         catch(e){ if(debug){ history.push({ date:k.split('/').pop(), parse_error:true, message:String(e).slice(0,80) }); } }
       }
+      // Ensure "today" appears in history even if no events have fired yet (synthetic zero snapshot)
+      try {
+        const today = new Date().toISOString().slice(0,10);
+        const todayKey = 'daily/'+today+'.json';
+        const haveTodayKey = foundKeys.includes(todayKey);
+        const haveTodayInHistory = history.some(h=>{
+          const d = (h && typeof h==='object') ? (h.date ? String(h.date).replace(/\.json$/,'') : (h.updatedAt? String(h.updatedAt).slice(0,10): '')) : '';
+          return d === today;
+        });
+        if(!haveTodayKey && !haveTodayInHistory){
+          history.push({ version: SCHEMA_VERSION, updatedAt: new Date().toISOString(), counters:{}, sums:{}, date: today });
+          // Do not mutate KV; this is a view-only placeholder so charts/table include today's row.
+        }
+      } catch { /* ignore synthetic today errors */ }
     } catch(e){ if(debug){ history.push({ error:'list_failed', message:String(e) }); } }
   }
   if(debug){
@@ -1236,6 +1321,76 @@ export default {
   if(p === '/api/indexer-overlay') return handleIndexerOverlay(url, env);
   if(p === '/api/indexer-rawlogs-range') return handleIndexerRawLogsRange(url, env);
   if(p === '/api/indexer-gap-report') return handleIndexerGapReport(req, env);
+  if(p === '/api/indexer-rawlogs-archive-chunk') {
+    if(req.method !== 'POST') return json({ error:'Method Not Allowed' },405);
+    // Auth: allow preview bypass (openPreview=1 on *.pages.dev) or admin token. Same pattern as other mutating endpoints.
+    const token = req.headers.get('X-Indexer-Admin');
+    const expected = (env.INDEXER_ADMIN_TOKEN||'').trim();
+    const host = req.headers.get('host')||''; const isPreviewHost = host.endsWith('.pages.dev');
+    let bypass=false; try { const u=new URL(req.url); bypass = isPreviewHost && u.searchParams.get('openPreview')==='1' && (!!expected ? token?.trim()!==expected : !token); } catch{}
+    if(expected && token?.trim()!==expected && !bypass) return json({ error:'Unauthorized' },401);
+    if(!env.INDEX_DB) return json({ error:'INDEX_DB binding missing' },500);
+    // Destination binding: support INDEX_DB_A1 initially (more can be added later via dest param)
+    const destKey = 'INDEX_DB_A1';
+    const dest = env[destKey];
+    if(!dest) return json({ error:'Archive DB binding missing', binding: destKey },500);
+    let body={}; try { if(req.headers.get('content-type')?.includes('application/json')) body = await req.json(); } catch { return json({ error:'Invalid JSON' },400); }
+    const from = parseInt(body.from,10), to = parseInt(body.to,10);
+    const dryRun = body.dryRun===true || body.dryRun==='1';
+    const limit = Math.min(5000, Math.max(1, parseInt(body.limit||'2000',10)||2000));
+    if(!Number.isInteger(from) || !Number.isInteger(to) || to < from) return json({ error:'invalid_range' },400);
+    // Ensure destination schema exists (raw_logs + indexes)
+    try {
+      await dest.exec("CREATE TABLE IF NOT EXISTS raw_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, block_number INTEGER NOT NULL, log_index INTEGER NOT NULL, tx_hash TEXT NOT NULL, address TEXT NOT NULL, topic0 TEXT NULL, topic1 TEXT NULL, topic2 TEXT NULL, topic3 TEXT NULL, data TEXT NOT NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP);");
+      await dest.exec("CREATE UNIQUE INDEX IF NOT EXISTS u_raw_logs_block_logindex ON raw_logs(block_number, log_index);");
+      await dest.exec("CREATE INDEX IF NOT EXISTS idx_raw_logs_block ON raw_logs(block_number);");
+      await dest.exec("CREATE INDEX IF NOT EXISTS idx_raw_logs_address ON raw_logs(address);");
+      await dest.exec("CREATE INDEX IF NOT EXISTS idx_raw_logs_topic0 ON raw_logs(topic0);");
+    } catch(e){ return json({ error:'dest_schema_failed', message:String(e) },500); }
+    // Fetch a page from primary
+    let rows=[]; try {
+      const sel = await env.INDEX_DB.prepare("SELECT block_number, log_index, tx_hash, address, topic0, topic1, topic2, topic3, data FROM raw_logs WHERE block_number BETWEEN ? AND ? ORDER BY block_number, log_index LIMIT ?").bind(from,to,limit).all();
+      rows = sel.results||[];
+    } catch(e){ return json({ error:'select_failed', message:String(e) },500); }
+    if(!rows.length){
+      // Also report remaining for visibility
+      try {
+        const r2 = await env.INDEX_DB.prepare("SELECT COUNT(1) AS c FROM raw_logs WHERE block_number BETWEEN ? AND ?").bind(from,to).all();
+        return json({ status:'empty', copied:0, deleted:0, remaining: r2.results?.[0]?.c||0, dryRun });
+      } catch { return json({ status:'empty', copied:0, deleted:0, remaining:null, dryRun }); }
+    }
+    if(dryRun){
+      // Do not mutate; return sample and counts
+      let remaining=null; try { const r = await env.INDEX_DB.prepare("SELECT COUNT(1) AS c FROM raw_logs WHERE block_number BETWEEN ? AND ?").bind(from,to).all(); remaining = r.results?.[0]?.c||0; } catch{}
+      return json({ status:'dry_run', page: rows.length, sample: rows.slice(0,3), remaining });
+    }
+    // Insert into destination in batches respecting D1 var limit (9 vars/row; cap 100 vars)
+    const VARS_PER_ROW = 9, D1_PARAM_LIMIT=100;
+    const maxRowsPerStmt = Math.max(1, Math.floor(D1_PARAM_LIMIT / VARS_PER_ROW));
+    let inserted=0; let firstErr=null;
+    for(let i=0;i<rows.length;){
+      const slice = rows.slice(i, i+maxRowsPerStmt);
+      const placeholders = slice.map(()=> '(?,?,?,?,?,?,?,?,?)').join(',');
+      const flat=[]; for(const r of slice){ flat.push(r.block_number, r.log_index, r.tx_hash||'', (r.address||'').toLowerCase(), r.topic0||null, r.topic1||null, r.topic2||null, r.topic3||null, r.data||'0x'); }
+      try {
+        const res = await dest.prepare(`INSERT OR IGNORE INTO raw_logs (block_number, log_index, tx_hash, address, topic0, topic1, topic2, topic3, data) VALUES ${placeholders}`).bind(...flat).run();
+        const changes = (res && res.meta && typeof res.meta.changes==='number')? res.meta.changes: 0;
+        inserted += changes;
+      } catch(e){ if(!firstErr) firstErr=String(e).slice(0,160); }
+      i += slice.length;
+    }
+    // Delete the rows that we selected (by exact keys)
+    let deleted=0;
+    for(const r of rows){
+      try {
+        const del = await env.INDEX_DB.prepare("DELETE FROM raw_logs WHERE block_number=? AND log_index=?").bind(r.block_number, r.log_index).run();
+        const ch = (del && del.meta && typeof del.meta.changes==='number')? del.meta.changes:0; deleted += ch;
+      } catch{ /* continue */ }
+    }
+    // Report remaining in range after deletion
+    let remaining=null; try { const r = await env.INDEX_DB.prepare("SELECT COUNT(1) AS c FROM raw_logs WHERE block_number BETWEEN ? AND ?").bind(from,to).all(); remaining = r.results?.[0]?.c||0; } catch{}
+    return json({ status:'ok', moved: inserted, deleted, page: rows.length, remaining, dest: destKey, firstErr });
+  }
   if(p === '/api/indexer-topic-map') {
     if(!env.INDEX_DB) return json({ error:'INDEX_DB binding missing' },500);
     try {

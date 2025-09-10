@@ -21,6 +21,11 @@
       "binding": "INDEX_DB",
       "database_name": "ef_index",
       "database_id": "cfc8fecb-9fe1-4ad0-98ed-525772d13ff0" // provisioned 2025-09-07 (feature/indexer)
+    },
+    {
+      "binding": "INDEX_DB_A1",
+      "database_name": "ef_index_archive_1",
+  "database_id": "d06e2eef-a125-4d9d-9d27-4116ef87d42e" // provisioned 2025-09-10
     }
   ],
   // Chain ingestion required vars (bound at build to ensure runtime availability). Secrets with sensitive values

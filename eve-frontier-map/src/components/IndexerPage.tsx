@@ -9,6 +9,8 @@ interface Health {
   cursor?: any;
   ingestionLagMs?: number|null;
   pendingChanges?: any;
+  db?: { primary?: any; a1?: any; a2?: any };
+  archiver?: { primaryCount?: number|null; archivedCount?: number; a1FillPct_10g?: number|null; a2FillPct_10g?: number|null };
 }
 interface RunsResp {
   status:string;
@@ -38,13 +40,7 @@ const IndexerPage: React.FC = () => {
   };
   useEffect(()=>{ load(); const id=setInterval(load, 30000); return ()=> clearInterval(id); }, []);
 
-  const trigger = async ()=>{
-    try { await fetch(`/api/indexer-trigger${qp}`, { method:'POST'}).then(r=> r.json()); load(); } catch {/* ignore */}
-  };
-  const reset = async ()=>{
-    if(!window.confirm('Reset active run & rewind cursor to deploy block - 1?')) return;
-    try { await fetch(`/api/indexer-reset${qp}`, { method:'POST'}).then(r=> r.json()); load(); } catch {/* ignore */}
-  };
+  // Read-only dashboard: no trigger/reset exposed
 
   const renderStatus = (r:any)=>{
     if(!r) return '-';
@@ -82,9 +78,7 @@ const IndexerPage: React.FC = () => {
       )}
       <div style={{display:'flex', gap:12, flexWrap:'wrap', marginBottom:16}}>
         <button onClick={load} disabled={loading} style={{padding:'8px 14px'}}>Refresh</button>
-        <button onClick={trigger} style={{padding:'8px 14px'}}>Run Now</button>
-        <button onClick={reset} style={{padding:'8px 14px'}}>Reset (Rewind)</button>
-        {loading && <span style={{opacity:.7}}>Loading…</span>}
+  {loading && <span style={{opacity:.7}}>Loading…</span>}
       </div>
       {!health && <div style={{opacity:.7}}>No health data yet.</div>}
       {health && (
@@ -96,7 +90,7 @@ const IndexerPage: React.FC = () => {
           </div>
           <div style={cardStyle}>
             <h3 style={cardTitle}>World</h3>
-            <div>{health.world? health.world.world_address : '-'}</div>
+            <div style={{ wordBreak:'break-all', overflowWrap:'anywhere' }}>{health.world? health.world.world_address : '-'}</div>
           </div>
           <div style={cardStyle}>
             <h3 style={cardTitle}>Cursor</h3>
@@ -135,31 +129,55 @@ const IndexerPage: React.FC = () => {
           </div>
         </div>
       )}
-      <h2 style={{margin:'0 0 8px 0', fontSize:22}}>Recent Runs</h2>
-      <div style={{overflowX:'auto'}}>
+      {/* DB metrics & archiver health */}
+      {health?.db && (
+        <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(220px,1fr))', gap:14, margin:'0 0 22px 0'}}>
+          <div style={cardStyle}>
+            <h3 style={cardTitle}>Primary DB</h3>
+            {hasSize(health.db.primary?.approx_size_bytes) && (
+              <div>Size: {bytes(health.db.primary?.approx_size_bytes)}</div>
+            )}
+            <div style={subtle}>raw_logs: {num(health.db.primary?.raw_logs?.count)}</div>
+          </div>
+          <div style={cardStyle}>
+            <h3 style={cardTitle}>Archive A1</h3>
+            {hasSize(health.db.a1?.approx_size_bytes) && (
+              <div>Size: {bytes(health.db.a1?.approx_size_bytes)}</div>
+            )}
+            <div style={subtle}>raw_logs: {num(health.db.a1?.raw_logs?.count)}{(hasSize(health.db.a1?.approx_size_bytes) && health.archiver?.a1FillPct_10g!=null)? ` (${health.archiver.a1FillPct_10g}% of 10GB)` : ''}</div>
+          </div>
+          <div style={cardStyle}>
+            <h3 style={cardTitle}>Archive A2</h3>
+            {hasSize(health.db.a2?.approx_size_bytes) && (
+              <div>Size: {bytes(health.db.a2?.approx_size_bytes)}</div>
+            )}
+            <div style={subtle}>raw_logs: {num(health.db.a2?.raw_logs?.count)}{(hasSize(health.db.a2?.approx_size_bytes) && health.archiver?.a2FillPct_10g!=null)? ` (${health.archiver.a2FillPct_10g}% of 10GB)` : ''}</div>
+          </div>
+          <div style={cardStyle}>
+            <h3 style={cardTitle}>Archiver</h3>
+            <div>Primary logs: {num(health.archiver?.primaryCount)}</div>
+            <div>Archived logs: {num(health.archiver?.archivedCount)}</div>
+          </div>
+        </div>
+      )}
+  <h2 style={{margin:'0 0 8px 0', fontSize:22}}>Recent Runs</h2>
+  <div style={{overflowX:'auto', maxHeight: '48vh', overflowY:'auto', border:'1px solid rgba(255,255,255,0.12)', borderRadius:8}}>
         <table style={{width:'100%', borderCollapse:'collapse', fontSize:13, lineHeight:1.35}}>
           <thead>
             <tr style={theadRowStyle}>
-              {['ID','Mode','Started','Finished','Rows(+SoFar)','Attempted','SegReq','Flushes','BatchCur','Restarts','Errors','Dur(ms)','Status','Notes'].map(h=> <th key={h} style={thStyle}>{h}</th>)}
+      {['ID','Started','Finished','Rows (inserted)','Errors','Dur(ms)','Status'].map(h=> <th key={h} style={thStyle}>{h}</th>)}
             </tr>
           </thead>
           <tbody>
             {runs?.runs?.map(r=> (
               <tr key={r.id} style={{background: r.run_finished_at? 'rgba(255,255,255,0.02)':'rgba(255,170,0,0.08)'}}>
                 <td style={tdStyle}>{r.id}</td>
-                <td style={tdStyle}>{r.mode}</td>
                 <td style={tdStyle}>{fmt(r.run_started_at)}</td>
                 <td style={tdStyle}>{fmt(r.run_finished_at)}</td>
-                <td style={tdStyle}>{r.rows_added}{!r.run_finished_at && (r.rows_so_far!=null) ? ` (${r.rows_so_far})` : ''}</td>
-                <td style={tdStyle}>{r.attempted_logs ?? '-'}</td>
-                <td style={tdStyle}>{(r.seg_requests_so_far != null ? r.seg_requests_so_far : (r.seg_requests != null ? r.seg_requests : 0))}</td>
-                <td style={tdStyle}>{r.batch_flushes ?? 0}</td>
-                <td style={tdStyle}>{r.adaptive_batch_current ?? '-'}</td>
-                <td style={tdStyle}>{r.stall_restarts ?? 0}</td>
+                <td style={tdStyle}>{r.run_finished_at? (r.rows_added ?? 0) : (r.rows_so_far ?? 0)}</td>
                 <td style={tdStyle}>{r.error_count}</td>
                 <td style={tdStyle}>{r.run_duration_ms ?? '-'}</td>
                 <td style={tdStyle}>{renderStatus(r)}</td>
-                <td style={{...tdStyle, maxWidth:240, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'}} title={r.notes||''}>{r.notes||''}</td>
               </tr>
             ))}
             {!runs?.runs?.length && <tr><td style={tdStyle} colSpan={8}>No runs.</td></tr>}
@@ -178,5 +196,8 @@ const theadRowStyle: React.CSSProperties = { background:'rgba(255,255,255,0.08)'
 const thStyle: React.CSSProperties = { textAlign:'left', padding:'6px 8px', fontWeight:600, fontSize:12, letterSpacing:'.5px', borderBottom:'1px solid rgba(255,255,255,0.15)' };
 const tdStyle: React.CSSProperties = { padding:'6px 8px', borderBottom:'1px solid rgba(255,255,255,0.08)', fontFamily:'monospace' };
 const chipStyle = (bg:string, fg:string): React.CSSProperties => ({ display:'inline-block', padding:'2px 6px', borderRadius:12, background:bg, color:fg, fontSize:11, fontWeight:600 });
+const bytes = (n?:number|null)=> (n==null||!isFinite(n))? '-' : (n>1e9? (n/1e9).toFixed(2)+' GB' : n>1e6? (n/1e6).toFixed(2)+' MB' : n>1e3? (n/1e3).toFixed(2)+' KB' : n+' B');
+const num = (n?:number|null)=> (n==null||!isFinite(n))? '-' : n.toLocaleString();
+const hasSize = (n?:number|null)=> (typeof n==='number' && isFinite(n) && n>0);
 
 export default IndexerPage;

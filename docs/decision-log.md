@@ -1,3 +1,46 @@
+## 2025-09-10 – Production Deploy (main) Verified
+- Goal: Promote accepted preview to production and verify indexer endpoints on prod and aliases.
+- Actions: Built frontend (Vite) and deployed to Pages Production (branch=main). Verified /api/indexer-health on ef-map.pages.dev, main.ef-map.pages.dev, and the new deployment ID URL all return 200 + application/json.
+- Deploy IDs: latest production deployment URL observed https://42e763e2.ef-map.pages.dev (previous: https://96024a01.ef-map.pages.dev).
+- Gates: typecheck ✅ build ✅ deploy ✅ health ✅
+- Follow-ups: Merge feature/ingest-scaling → main via PR; consider re-enabling indexer auth (remove INDEXER_AUTH_DISABLED) before wider exposure; monitor archival fill %.
+
+## 2025-09-10 – Stats “today” Synthetic Entry (UI parity)
+- Goal: Ensure the current day always appears on the Stats page even before the first daily KV snapshot is written.
+- Files: `eve-frontier-map/_worker.js` (handleStats), docs (this entry).
+- Diff: ~20 LOC (view-only logic; no writes).
+- Behavior: `/api/stats?history=N` now appends a synthetic history row for today (`{ date: YYYY-MM-DD, counters:{}, sums:{} }`) when (a) no `daily/YYYY-MM-DD.json` exists and (b) today isn’t already in history. Does not mutate KV; only affects response shape so charts/tables include “today”.
+- Risk: Low (read-path only). Existing aggregation unchanged; when the first real event arrives, normal daily key supersedes synthetic row automatically.
+- Verification: Preview deployed at `https://stats-today-fix.ef-map.pages.dev`.
+  - `/api/list-stats` shows keys up to yesterday.
+  - `/api/stats?history=7&debug=1` includes today with empty counters/sums and `foundDailyKeys` ending at yesterday.
+- Follow-ups: (1) Validate UI renders “today” row/point across charts/tables on preview. (2) Deploy to production after validation; quick smoke on `/api/stats` and Stats page. (3) Optional: extend debug to flag “synthetic_today:true” when debug=1 (not required).
+
+## 2025-09-10 – World rotation plan (doc)
+- Goal: Document operational steps for rotating to a new WORLD_ADDRESS (periodic universe resets), isolating each world in its own D1s.
+- Doc: `docs/WORLD_ROTATION_PLAYBOOK.md` added with provisioning, bindings, deploy, verify, and rollback steps.
+- No code changes required at rotation time; only config/bind updates and redeploys.
+
+## 2025-09-10 – Automated raw_logs archiver (cron Worker)
+- Goal: Keep primary D1 (ef_index) size flat by continuously offloading old raw_logs to archive D1s.
+- Files: `archiver_worker.js`, `wrangler.archiver.jsonc`, `eve-frontier-map/wrangler.jsonc` (bind INDEX_DB_A1)
+- Diff: ~170 LoC added across new Worker + config; one-line bind update.
+- Behavior:
+  - New Worker `ef-map-archiver` with cron (every minute) moves small pages from `INDEX_DB` to `INDEX_DB_A1` and deletes originals.
+  - Dynamic cut line enabled: cutTo = min(ARCHIVE_CUT_TO, headBlock - ARCHIVE_CUT_OFFSET_BLOCKS). Default offset 30k blocks.
+  - Throughput knobs: ARCHIVE_PAGE_LIMIT=500, ARCHIVE_MAX_PAGES=2, RANGE_WINDOW=3000, PAUSE_MS=150. Batched deletes by id to stay under subrequest limits.
+- Validation: Manual tick returned 200 with page deletions; preview archive endpoint dry-run/live tested OK; Worker deployed at `https://ef-map-archiver.<acct>.workers.dev`.
+- Risk: Subrequest limit; tuned page sizes and pages-per-tick to avoid 429. If hit, lower PAGE_LIMIT or MAX_PAGES.
+- Follow-ups: Monitor ingestion vs archival rate; if needed, raise PAGE_LIMIT/MAX_PAGES, or add `INDEX_DB_A2` and route oldest ranges.
+
+## 2025-09-10 – Raw logs archival to D1 (Option A)
+- Goal: Stop primary D1 growth by moving historical `raw_logs` to archive D1 databases while keeping SQL queryability.
+- Files: `eve-frontier-map/_worker.js` (added `/api/indexer-rawlogs-archive-chunk`), `eve-frontier-map/wrangler.jsonc` (placeholder binding `INDEX_DB_A1`).
+- Diff: ~180 LoC added across worker + config.
+- Risk: medium (data movement). Mitigation: copy → delete sequence per page; dryRun mode; small page size default.
+- Cut line: initial target ≤ block 7,450,000 (approx 2.69M rows, ~62% of raw volume). More archives added as needed (10 GB per-DB limit).
+- Follow-ups: create `ef_index_archive_1` D1, wire binding id, deploy, dry-run then live migrate in chunks; consider automated loop with backoff and telemetry.
+
 ## 2025-09-09 – Raw Logs Batch Param Limit Fix
 ## 2025-09-09 – Throughput Scaling Phase 1 (3x Target)
 - Goal: Triple autonomous raw log ingestion rate (rows/hour & blocks/hour) to shorten estimated catch-up time (~6.7 days at prior pace) while preserving safety against provider saturation and D1 param limit constraints.
@@ -2346,6 +2389,19 @@
 - Risk: Low (read-only exposure, partial hash only). To be removed after confirmation of secret binding.
 - Usage: `curl https://feature-indexer.ef-map.pages.dev/api/indexer-secret-debug` then compare reported `startsWith/endsWith/length` with local token to verify match.
 - Follow-up: Remove endpoint and log removal once secret validated and migrations execute successfully.
+
+
+
+
+
+## 2025-09-10 – D1 size metrics fallback calibration
+- Goal: Bring Indexer Dashboard DB size metrics closer to Cloudflare D1 UI when PRAGMA values are unavailable or zero in Pages Worker.
+- Files: `eve-frontier-map/_worker.js` (dbMetrics helper)
+- Diff: ~40 LoC added (sampling + index overhead heuristic, diag fields)
+- Change: After PRAGMA and dbstat fallbacks, estimate size via sampled average payload length from `raw_logs` and multiply by an index overhead factor; include diag `{ size_method, idxCount, perRowBase, sampleSize }` for troubleshooting.
+- Risk: low (read-only estimation path; no schema or write changes)
+- Gates: typecheck ✅ | build ✅ | preview deploy ✅ (alias `feature-ingest-scaling`)
+- Follow-ups: Adjust index overhead factor if observed drift vs D1 UI remains >15%; optionally surface `size_method` in UI for debugging.
 
 
 
