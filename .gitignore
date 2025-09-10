@@ -11,4 +11,23 @@ temp_pat.txt
 temp_site_id.txt
 tmp_cf_*.txt
 
-\n# Scratch workspace (ignored)\nscratch/
+# Scratch workspace (ignored)
+scratch/
+
+# Cloudflare Wrangler local state (miniflare, etc.)
+.wrangler/
+
+# Temporary files and logs
+tmp_*
+*.tmp
+*.log
+*.bak
+
+# Ad-hoc JSON/TXT snapshots
+*.json.tmp
+tmp_*.json
+tmp_*.txt
+eve-frontier-map/tmp_*.json
+
+# Accidental nested copy
+eve-frontier-map/eve-frontier-map/

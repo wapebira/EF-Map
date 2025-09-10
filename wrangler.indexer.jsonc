@@ -1,0 +1,14 @@
+{
+  // Standalone indexer worker config
+  "name": "ef-indexer-dev",
+  "main": "indexer-worker.js",
+  "compatibility_date": "2025-09-08",
+  "vars": {
+    "WORLD_ADDRESS": "0x7085f3e652987f656fb8dee5aa6592197bb75de8",
+    "DEPLOY_BLOCK": "7288348",
+    "CONFIRM_DEPTH": "8"
+  },
+  "d1_databases": [
+    { "binding": "INDEX_DB", "database_name": "ef_index", "database_id": "ef_index" }
+  ]
+}

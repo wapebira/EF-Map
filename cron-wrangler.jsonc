@@ -1,0 +1,18 @@
+// Standalone Worker configuration for autonomous cron ingestion (trigger-only mode)
+// Deploy with: wrangler deploy --config cron-wrangler.jsonc
+// This worker does NOT bind D1; it simply calls the Pages deployment which owns DB writes.
+// If future direct ingestion here is desired, re-add D1 + logic parity.
+{
+  "name": "ef-indexer-cron",
+  "main": "cron-indexer-worker.js",
+  "compatibility_date": "2025-09-07",
+  "triggers": { "crons": ["*/5 * * * *"] },
+  "vars": {
+    // Base Pages URL (no trailing slash). Use production or branch URL.
+  "PAGES_BASE_URL": "https://cron-autonomous-ingest.ef-map.pages.dev",
+    // Ingestion tuning mirrors Pages env; adjust centrally here as needed.
+    "INDEXER_CRON_MAX_BLOCKS": "4000",
+    "INDEXER_CRON_SEGMENT_BLOCKS": "300",
+    "INDEXER_CRON_ROW_CAP": "50000"
+  }
+}
