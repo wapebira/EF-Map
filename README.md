@@ -1,7 +1,7 @@
 <div align="center">
     <h1>EVE Frontier Interactive Map</h1>
     <p><strong>Client‑side 3D starmap, routing & optimization tools, reachability analysis and usage stats for EVE Frontier.</strong></p>
-    <sub>React + TypeScript + Vite • Three.js custom shaders • Web Workers • Cloudflare Pages Worker (KV) • Zero PII instrumentation</sub>
+    <sub>React + TypeScript + Vite • Three.js custom shaders • Web Workers • Cloudflare Pages + Worker (KV + optional D1) • Zero PII instrumentation</sub>
 </div>
 
 ---
@@ -16,9 +16,10 @@
 7. Reachability & Routing  
 8. Usage Metrics & Privacy  
 9. Development Workflow  
-10. Deployment Notes  
-11. Contributing  
-12. License / Attribution
+10. Indexer (optional)  
+11. Deployment Notes  
+12. Contributing  
+13. License / Attribution
 
 ---
 
@@ -26,7 +27,11 @@
 This repository contains two loosely coupled parts:
 
 * **Map / App Frontend (`eve-frontier-map/`)** – A performant WebGL (Three.js) visualization with routing (A*/Dijkstra), ship jump vs. gate differentiation, scout optimization, reachability bubble + dimming, cinematic mode, shareable routes, usage stats and optional station overlays.
-* **Data Preparation Scripts (root)** – Python utilities to transform raw universe exports into a compact SQLite + auxiliary JSON assets consumed only at build/runtime load by the frontend.
+* **Data Preparation Scripts (root)** – Python utilities to transform raw universe exports into a compact SQLite + auxiliary JSON assets consumed by the frontend.
+
+Optional subsystem:
+
+* **Indexer (D1‑backed, optional)** – A lightweight ingestion + archival pipeline used for longitudinal usage snapshots and diagnostics. It keeps the primary D1 small via automated archival rollover and is surfaced in a small dashboard inside the app. If you don’t need it, you can ignore this entirely – the map works fully client‑side.
 
 Raw extraction of game files is performed by a separate toolkit:  
 ➡ https://github.com/VULTUR-EveFrontier/eve-frontier-tools  
@@ -51,9 +56,10 @@ This repo focuses on *transforming* + *serving* that data and implementing inter
 | Workers | Heavy algorithms off main thread | Web Workers (`routing_worker.ts`, `scout_optimizer_worker.ts`, others) |
 | Data Access | Lazy open + query prebuilt SQLite in-browser | `sql.js` (WASM) wrapped by `lib/sql.ts` |
 | Serverless | Shares & usage metrics APIs | Cloudflare Pages Worker (`/api/*`) using KV (EF_SHARES / EF_STATS) |
+| Indexer (optional) | Longitudinal ingest + cleanup | Cloudflare D1 (primary + archival rollover) + scheduled Workers |
 | Instrumentation | Anonymous event batching | `src/utils/usage.ts` batching + server whitelist in `usage-event.js` |
 
-Persistence: All share + usage data now lives in Cloudflare KV namespaces (EF_SHARES, EF_STATS). Abstraction remains in place for future D1 analytical expansion (schema draft present under `migrations/`).
+Persistence: All share + usage data lives in Cloudflare KV namespaces (EF_SHARES, EF_STATS). An optional Indexer uses Cloudflare D1 (primary + archival rollover). Schema draft is under `migrations/`.
 
 ## 4. Directory Map
 ```
@@ -62,6 +68,10 @@ root/
     filter_map_data.py        # Post-process filters (hiding regions, etc.)
     verify_db.py              # Sanity checks for generated DB
     docs/decision-log.md      # Running architectural / feature decisions
+    wrangler.jsonc            # Cloudflare Pages/Worker config (root)
+    archiver_worker.js        # (optional) scheduled archival worker
+    cron_worker.js            # (optional) scheduled maintenance worker
+    wrangler.*.jsonc          # (optional) worker configs (indexer/archiver)
     eve-frontier-map/         # Frontend app (see below)
         src/
             App.tsx               # Core scene + global state + instrumentation bridges
@@ -69,7 +79,7 @@ root/
             modules/RouteRibbon.ts# Custom ribbon geometry + shaders
             utils/usage.ts        # Client event batching (sole origin of usage events)
             workers/              # Optimization / routing workers
-            netlify/functions/    # Legacy Netlify functions (historical reference – not invoked post‑cutover)
+        _worker.js             # Pages Worker for `/api/*` (KV + optional D1/indexer endpoints)
         migrations/             # D1 schema drafts (future analytical/indexer work)
         public/map_data.db      # Generated SQLite universe data (do not edit manually)
 ```
@@ -129,22 +139,43 @@ Station data: When `map_data_v2.db` contains `stations` table `{ system_id TEXT 
 | `npm run build` | Type check + production build. |
 | `npm run preview` | (If added) Preview dist output locally. |
 
-## 10. Deployment Notes
-Current: Cloudflare Pages + Worker (primary) serving `/api/*` backed by KV (shares, usage stats). Legacy Netlify function code remains only for historical review and will be removed after final cleanup phase.  
+## 10. Indexer (optional)
+The map works fully client‑side. If you enable the optional Indexer, you’ll get a small dashboard and longitudinal aggregates:
+
+- Cloudflare D1 database for ingestion with automated archival rollover to keep the primary small.
+- Scheduled Workers orchestrate copy‑then‑delete archival in bounded batches.
+- Minimal UI surface under the Indexer page inside the app; safe to hide if unused.
+
+Operator docs: see `docs/MIGRATION_PLAN.md` (Cloudflare cutover notes) and `docs/decision-log.md` for implementation deltas. The 
+schema draft lives in `migrations/`.
+
+## 11. Deployment Notes
+Cloud platform: Cloudflare Pages + Worker (primary). `/api/*` is served by the Pages Worker, backed by KV (shares, usage stats).  
+Legacy Netlify logic is no longer invoked; remaining files are historical only and will be removed during final cleanup.
+
+Preview & production deploys typically use Wrangler. Example (project already configured):
+
+```bash
+# from eve-frontier-map/
+npm run build
+# Deploy preview for current branch (uses Pages project config)
+wrangler pages deploy dist --branch <your-branch>
+```
+
 Rollback Strategy: Revert recent Worker commits & redeploy (no Netlify fallback paths exist in client).  
 Encoding Hardening: Worker defensively strips a UTF‑8 BOM before JSON parsing of daily stats snapshots (prevents history gaps if manual KV writes introduce BOM).  
 Future: Optional Cloudflare D1 usage for richer longitudinal analytics / indexing (schema draft in `migrations/001_init.sql`).
 
 Cache Busting: When DB schema changes, increment filename (e.g., `map_data_v2.db`) and document in decision log. Frontend lazily loads whichever name it expects; avoid breaking existing deployed bundles.
 
-## 11. Contributing
+## 12. Contributing
 Lightweight guidelines:
 * Open an issue (or add to decision log) for substantial feature proposals.
 * Keep diffs minimal & localized; avoid broad refactors piggy-backing on feature PRs.
 * Maintain shader performance: throttle progress messages in workers (≤5Hz).  
 * Add comments for any new global (`window.__efSomething`) and mirror established naming.
 
-## 12. License / Attribution
+## 13. License / Attribution
 Project license: See `LICENSE` (MIT unless otherwise specified).  
 Raw game data / universe structure is derived from EVE Frontier assets (CCP Games) – this repository redistributes only transformed, non-proprietary derivative metadata suitable for visualization and does not include original proprietary binaries.  
 Original extraction tools: https://github.com/VULTUR-EveFrontier/eve-frontier-tools (credit & thanks).  
