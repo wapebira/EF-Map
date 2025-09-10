@@ -11,3 +11,4 @@ temp_pat.txt
 temp_site_id.txt
 tmp_cf_*.txt
 
+\n# Scratch workspace (ignored)\nscratch/

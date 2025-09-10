@@ -171,6 +171,10 @@ button:focus-visible,
   border-color: var(--accent);
 }
 
+/* Indexer badge sits to the LEFT of the persistent logo with small gap; scale with UI */
+.ef-indexer-badge { transform: scale(var(--ui-scale)); transform-origin: bottom right; }
+.ef-indexer-badge button { border-color: rgba(255,255,255,0.14) !important; }
+
 /* Support button wrapper sits to the LEFT of the persistent logo (logo: 96px wide + 20px gap) */
 /* Legacy bottom-right support wrapper removed (button now in top toolbar). */
 .ef-support-btn { background:var(--accent); color:#fff; border:none; padding:6px 12px; font-size:13px; font-weight:600; letter-spacing:.5px; border-radius:4px; cursor:pointer; box-shadow:0 2px 6px rgba(0,0,0,0.45); display:flex; align-items:center; gap:6px; line-height:1.15; max-width:160px; text-align:center; white-space:normal; }

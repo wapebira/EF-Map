@@ -39,6 +39,8 @@ import DonateCryptoModal from './components/DonateCryptoModal';
 import { Suspense, lazy } from 'react';
 import TransmissionPanel from './components/Transmission/TransmissionPanel';
 const StatsPage = lazy(()=> import('./components/StatsPage'));
+const IndexerPage = lazy(()=> import('./components/IndexerPage'));
+import IndexerStatusBadge from './components/Indexer/IndexerStatusBadge';
 // Station icon (ensure file added at assets/icons/station.png)
 // Will be lazy loaded via TextureLoader when toggle active
 import stationIconUrl from './assets/icons/station.png';
@@ -163,6 +165,13 @@ function App() {
     return (
       <Suspense fallback={<div style={{padding:20,color:'#ccc',fontSize:14}}>Loading stats…</div>}>
         <StatsPage />
+      </Suspense>
+    );
+  }
+  if (typeof window !== 'undefined' && window.location.pathname === '/indexer') {
+    return (
+      <Suspense fallback={<div style={{padding:20,color:'#ccc',fontSize:14}}>Loading indexer…</div>}>
+        <IndexerPage />
       </Suspense>
     );
   }
@@ -4911,9 +4920,11 @@ function App() {
       </div>
   <div ref={mountRef} style={{ width: '100vw', height: '100vh' }} />
   <div className="ef-vignette" />
-  {/* Small persistent logo and referral code */}
+  {/* Small persistent logo and indexer status */}
   {/* Persistent logo (always visible even when UI hidden) */}
   <img src={logo} alt="EF Map" className="ef-small-logo" />
+  {/* Read-only Indexer status badge; appears bottom-right by default. */}
+  <IndexerStatusBadge />
     </>
   );
 }

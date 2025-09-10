@@ -1,10 +1,10 @@
-.transmission-wrapper { position:fixed; top: calc(10px + 70px); /* below top toolbar (approx height) */ right:10px; width:560px; max-width:560px; z-index:3190; font-family: 'Fira Mono','Roboto Mono','IBM Plex Mono','Cousine','Consolas',monospace; pointer-events:auto; min-height:420px; transition:right .28s ease; }
+.transmission-wrapper { position:fixed; top: calc(10px + 70px); /* below top toolbar (approx height) */ right:10px; width:560px; max-width:560px; z-index:3190; font-family: 'Fira Mono','Roboto Mono','IBM Plex Mono','Cousine','Consolas',monospace; pointer-events:auto; min-height:420px; transition:right .28s ease, transform .2s ease; transform: scale(var(--ui-scale, 1)); transform-origin: top right; }
 /* When help panel is open, shift left so it does not sit underneath the sliding guide. */
 :root.help-open .transmission-wrapper { right: calc((var(--help-panel-width, 0px) + 20px)); }
 /* Mobile narrow override keeps existing centering behavior; guard so shift doesn't double-apply. */
 @media (max-width: 900px){ :root.help-open .transmission-wrapper { right:50%; transform:translateX(50%); } }
 @media (max-height: 860px){ .transmission-wrapper { top: calc(10px + 64px); } }
-@media (max-width: 900px){ .transmission-wrapper { right:50%; transform:translateX(50%); } }
+@media (max-width: 900px){ .transmission-wrapper { right:10px; transform: scale(var(--ui-scale, 1)); max-width:min(92vw, 520px); width:auto; } }
 .transmission-bg { position:absolute; inset:0; background-size:cover; background-position:center; filter:brightness(.55) contrast(1.05) saturate(.9); border-radius:16px; }
 /* subtle animated scanlines */
 .transmission-wrapper::after { content:""; pointer-events:none; position:absolute; inset:0; background: repeating-linear-gradient( to bottom, rgba(255,255,255,0.05) 0px, rgba(255,255,255,0.05) 1px, transparent 1px, transparent 3px ); mix-blend-mode:overlay; opacity:.15; border-radius:16px; animation: scan 6s linear infinite; }

@@ -1,4 +1,949 @@
+## 2025-09-10 – Production Deploy (main) Verified
+- Goal: Promote accepted preview to production and verify indexer endpoints on prod and aliases.
+- Actions: Built frontend (Vite) and deployed to Pages Production (branch=main). Verified /api/indexer-health on ef-map.pages.dev, main.ef-map.pages.dev, and the new deployment ID URL all return 200 + application/json.
+- Deploy IDs: latest production deployment URL observed https://42e763e2.ef-map.pages.dev (previous: https://96024a01.ef-map.pages.dev).
+- Gates: typecheck ✅ build ✅ deploy ✅ health ✅
+- Follow-ups: Merge feature/ingest-scaling → main via PR; consider re-enabling indexer auth (remove INDEXER_AUTH_DISABLED) before wider exposure; monitor archival fill %.
+
+## 2025-09-10 – Stats “today” Synthetic Entry (UI parity)
+- Goal: Ensure the current day always appears on the Stats page even before the first daily KV snapshot is written.
+- Files: `eve-frontier-map/_worker.js` (handleStats), docs (this entry).
+- Diff: ~20 LOC (view-only logic; no writes).
+- Behavior: `/api/stats?history=N` now appends a synthetic history row for today (`{ date: YYYY-MM-DD, counters:{}, sums:{} }`) when (a) no `daily/YYYY-MM-DD.json` exists and (b) today isn’t already in history. Does not mutate KV; only affects response shape so charts/tables include “today”.
+- Risk: Low (read-path only). Existing aggregation unchanged; when the first real event arrives, normal daily key supersedes synthetic row automatically.
+- Verification: Preview deployed at `https://stats-today-fix.ef-map.pages.dev`.
+  - `/api/list-stats` shows keys up to yesterday.
+  - `/api/stats?history=7&debug=1` includes today with empty counters/sums and `foundDailyKeys` ending at yesterday.
+- Follow-ups: (1) Validate UI renders “today” row/point across charts/tables on preview. (2) Deploy to production after validation; quick smoke on `/api/stats` and Stats page. (3) Optional: extend debug to flag “synthetic_today:true” when debug=1 (not required).
+
+## 2025-09-10 – World rotation plan (doc)
+- Goal: Document operational steps for rotating to a new WORLD_ADDRESS (periodic universe resets), isolating each world in its own D1s.
+- Doc: `docs/WORLD_ROTATION_PLAYBOOK.md` added with provisioning, bindings, deploy, verify, and rollback steps.
+- No code changes required at rotation time; only config/bind updates and redeploys.
+
+## 2025-09-10 – Automated raw_logs archiver (cron Worker)
+- Goal: Keep primary D1 (ef_index) size flat by continuously offloading old raw_logs to archive D1s.
+- Files: `archiver_worker.js`, `wrangler.archiver.jsonc`, `eve-frontier-map/wrangler.jsonc` (bind INDEX_DB_A1)
+- Diff: ~170 LoC added across new Worker + config; one-line bind update.
+- Behavior:
+  - New Worker `ef-map-archiver` with cron (every minute) moves small pages from `INDEX_DB` to `INDEX_DB_A1` and deletes originals.
+  - Dynamic cut line enabled: cutTo = min(ARCHIVE_CUT_TO, headBlock - ARCHIVE_CUT_OFFSET_BLOCKS). Default offset 30k blocks.
+  - Throughput knobs: ARCHIVE_PAGE_LIMIT=500, ARCHIVE_MAX_PAGES=2, RANGE_WINDOW=3000, PAUSE_MS=150. Batched deletes by id to stay under subrequest limits.
+- Validation: Manual tick returned 200 with page deletions; preview archive endpoint dry-run/live tested OK; Worker deployed at `https://ef-map-archiver.<acct>.workers.dev`.
+- Risk: Subrequest limit; tuned page sizes and pages-per-tick to avoid 429. If hit, lower PAGE_LIMIT or MAX_PAGES.
+- Follow-ups: Monitor ingestion vs archival rate; if needed, raise PAGE_LIMIT/MAX_PAGES, or add `INDEX_DB_A2` and route oldest ranges.
+
+## 2025-09-10 – Raw logs archival to D1 (Option A)
+- Goal: Stop primary D1 growth by moving historical `raw_logs` to archive D1 databases while keeping SQL queryability.
+- Files: `eve-frontier-map/_worker.js` (added `/api/indexer-rawlogs-archive-chunk`), `eve-frontier-map/wrangler.jsonc` (placeholder binding `INDEX_DB_A1`).
+- Diff: ~180 LoC added across worker + config.
+- Risk: medium (data movement). Mitigation: copy → delete sequence per page; dryRun mode; small page size default.
+- Cut line: initial target ≤ block 7,450,000 (approx 2.69M rows, ~62% of raw volume). More archives added as needed (10 GB per-DB limit).
+- Follow-ups: create `ef_index_archive_1` D1, wire binding id, deploy, dry-run then live migrate in chunks; consider automated loop with backoff and telemetry.
+
+## 2025-09-09 – Raw Logs Batch Param Limit Fix
+## 2025-09-09 – Throughput Scaling Phase 1 (3x Target)
+- Goal: Triple autonomous raw log ingestion rate (rows/hour & blocks/hour) to shorten estimated catch-up time (~6.7 days at prior pace) while preserving safety against provider saturation and D1 param limit constraints.
+- Baseline: Prior conservative cron settings (`MAXBLOCKS=600`, `SEGMENT=80`, `ROWCAP=4000`, `THROTTLE_MS=500`, `MAX_SEGMENTS=3`) produced ~3.7k inserts per run (single debug sample) every 5 minutes → theoretical ceiling ~44k rows/hour (real lower due to duplicate spans / idle cycles).
+- Change (indexer-cron.wrangler.jsonc):
+  - `INDEXER_CRON_MAXBLOCKS` 600 → 1800 (within existing clamp 2000) widening per-run block coverage.
+  - `INDEXER_CRON_SEGMENT` 80 → 150 increasing base segment size (kept <300 cap) to reduce segmentation overhead.
+  - `INDEXER_CRON_ROWCAP` 4000 → 12000 allowing up to ~3× row inserts when density high.
+  - `INDEXER_CRON_THROTTLE_MS` 500 → 150 lowering inter-segment delay to raise effective RPC throughput.
+  - `INDEXER_CRON_MAX_SEGMENTS` 3 → 6 doubling allowed segments per invocation (still modest vs 40 soft cap in main worker path).
+- Rationale: Linear parameter scaling (window, segment count, rowCap) chosen over immediate adaptive logic to enable direct measurement & rollback. Segment size kept conservative (<half previous stable upper bound) to avoid abrupt RPC burst; throttle not eliminated (150ms jitter keeps spacing, preventing tight loop).
+- Risk: Medium (higher RPC/D1 write volume). Mitigations: Existing SAFE_CAP=11 row batch size prevents param limit errors; subrequest soft cap (40) in main ingestion code bounds RPC calls; rowCap & maxSegments guard total work per run; finalizeRun ensures no ghost runs.
+- Success Criteria: (1) Average inserts/run increases toward 9–11k without sustained error spikes; (2) No recurrence of 1101 errors; (3) Cursor advances proportionally (>2.5× prior block delta); (4) Attempted vs inserted ratio remains healthy (duplicates acceptable but not dominating >90% for extended periods).
+- Monitoring Plan (next 6–10 runs): Track `notes` metrics (ins:X seg:Y subreq:Z). If `seg` frequently ==6 with `subreq` near 6 and rowCap not hit, consider gentle further window increase (phase 2). If subreq value rises sharply or errors appear, revert throttle to 300–400ms or reduce segment to 120.
+- Rollback: Restore previous values (kept in this entry) by editing config & redeploying cron worker. Partial rollback (only throttle or segment) acceptable if isolated pressure observed.
+- Follow-ups: Potential Phase 2 adaptive growth (auto increase segment/window after N clean runs), add rolling inserts/hour endpoint, integrate duplicate coverage ratio alert.
+- Status: Config updated; deployment pending. Measure before further tuning.
+
+## 2025-09-09 – Throughput Scaling Rollback to ~2x
+- Trigger: After applying 3x settings (MAXBLOCKS=1800 SEGMENT=150 ROWCAP=12000 THROTTLE_MS=150 MAX_SEGMENTS=6) dashboard showed consecutive active runs with zero metric progression and raw log count stagnation. Manual debug invocation returned provider invocation error: `Too many API requests by single worker invocation.` indicating Cloudflare subrequest cap (1101 equivalent) triggered before inserts.
+- Action: Reduced parameters to moderate 2x over original conservative baseline (600/80/4000/500/3) to relieve RPC pressure while still improving throughput: `MAXBLOCKS=1200`, `SEGMENT=120`, `ROWCAP=8000`, `THROTTLE_MS=300`, `MAX_SEGMENTS=5`.
+- Rationale: Subrequest cap likely exceeded due to increased segment count + reduced throttle causing more eth_getLogs calls per invocation. Rolling back window & segment size plus adding delay decreases burst while retaining larger per-run capacity.
+- Expected Outcome: Runs complete without subrequest error; average inserts/run target 7–8k (vs ~3.7k baseline) without sustained truncation. Subreq count should remain well below internal soft cap (40). If still hitting cap, next step is lowering `MAX_SEGMENTS` to 4 or increasing `THROTTLE_MS` to 350–400.
+- Monitoring: Inspect run notes for `subreq:` value and absence of error phrase. If `seg:` frequently <5 with inserts near ROWCAP consider cautiously re‑raising segment size first (120→135) before window.
+- Rollback Path: Revert to baseline (600/80/4000/500/3) if any residual errors persist across two consecutive cron cycles.
+- Status: Config patched; redeploy pending.
+
+## 2025-09-09 – Continuous Cadence (1m) + Grouped Batch Inserts
+- Goal: Increase sustained ingestion throughput without exceeding per-invocation subrequest caps by (a) reducing idle time (cron every minute vs 5) and (b) lowering D1 round-trip overhead via grouped safe INSERT statements.
+- Changes:
+  - `indexer-cron.wrangler.jsonc`: cron schedule `*/5` → `*/1`; added `INDEXER_CRON_BATCH_GROUP=6` env var.
+  - `cron_entry.js`: Added `batchGroup` to config; replaced single INSERT flush with grouped batching: accumulate up to `batchGroup` statements (each ≤11 rows to satisfy 100 param cap) and execute inside one `env.INDEX_DB.batch([...])` call. Falls back to single prepare+run when only one statement pending.
+  - Flush accounting: each grouped batch increments `batchFlushes` once (so metric now reflects batch groups, not individual 11-row statements).
+- Rationale: Prior run hitting rowCap (8000) required ~728 individual INSERTs (11 rows each). With `batchGroup=6`, the same 8000 rows use roughly 728/6 ≈ 121 D1 batch calls, cutting DB latency/component overhead and enabling tighter cron cadence without raising RPC burst risk.
+- Expected Impact: ~6× reduction in D1 statement round-trips per run; effective rows/hour increases proportionally to reduced idle + overhead. Subrequest count (RPC eth_getLogs) unchanged; risk of 1101 unchanged or slightly reduced due to shorter run duration per window.
+- Metrics Interpretation Update: `batchFlushes` now counts grouped flushes (each may represent up to 6*11=66 rows). Historical comparisons need normalization if analyzing older runs; note added for future analysts.
+- Risk: Low/Medium. If D1.batch encounters transient failure entire group lost (rows reattempted next run). Safe because ingestion is idempotent (INSERT OR IGNORE on unique index). Param limit risk still mitigated (no statement exceeds 11 rows). Batch group capped at 12.
+- Rollback: Set `INDEXER_CRON_BATCH_GROUP=1` (disables grouping) and redeploy, or revert code block to prior single-statement flush.
+- Follow-ups: (1) Adaptive batchGroup increase when error-free (e.g., up to 8) (2) Optional jittered self-scheduling loop for near-continuous ingestion (beyond 1m cron) if backlog remains large (3) Add per-run derived metric `rows_per_flush` for clearer efficiency tracking.
+- Status: Code updated; deployment pending test.
+  - Addendum (same day): Adjusted flush trigger to accumulate `batchGroup * BATCH_SIZE` rows before issuing a grouped flush (previous implementation flushed at single BATCH_SIZE, negating grouping). Expect `batchFlushes ≈ previous_flushes / batchGroup` going forward.
+
+## 2025-09-09 – Indexer Visibility Enhancements (attempted_logs + Status Chip)
+- Goal: Improve operator insight into ingestion runs by distinguishing duplicate (no new inserts, but RPC log attempts) vs idle/no-op runs and surfacing live row progress directly in the runs table.
+- Changes:
+  - Migration `015_run_attempted`: `ALTER TABLE indexer_run ADD COLUMN attempted_logs INTEGER DEFAULT 0` (added to migration list & inline SQL map).
+  - Store_all ingestion heartbeat & finalize paths now update `attempted_logs` (best-effort; guarded if column absent pre-migration).
+  - `/api/indexer-runs` extended to select `attempted_logs` and (for recent runs) `rows_so_far` for active progress display.
+  - `IndexerPage` runs table columns updated: `Rows(+SoFar)` shows `rows_added (rows_so_far)` for active run; added `Attempted` column for attempted_logs; new `Status` chip (Active | Duplicate | Inserted N | Idle) derived from run fields.
+  - Styling: lightweight inline chip style; no external CSS added.
+- Rationale: Prior UI showed zeros for many fields on duplicate-only runs causing confusion about whether ingestion was functioning. Attempted vs added clarifies network activity and filtering impact (allowlist, duplicates). Status chip provides at-a-glance interpretation without reading notes.
+- Risk: Low (additive schema + read-only UI adjustments). Fallback guards prevent runtime errors if migration not yet applied.
+- Verification Steps: (1) Run `/api/indexer-migrate` ensure migration executed; (2) Trigger ingestion run and observe Active chip + increasing `(rows_so_far)` parenthetical; (3) After duplicate-only run confirm Status=Duplicate with Attempted >0 and Rows(+SoFar) stable; (4) Run with inserts confirm Status=Inserted N and attempted_logs ≥ rows_added.
+- Follow-ups: Optional backfill script to set attempted_logs = rows_added for historical runs with rows_added>0 (cosmetic). Consider surfacing attempted/insertion ratio and color thresholds (e.g., high duplicates) for tuning allowlist or cursor logic.
+- Status: Implemented (migration + backend + UI) pending deployment & migration execution in target environment.
+
+## 2025-09-09 – Exit Mini Mode & Conservative Full Ingestion Reintroduction
+- Goal: Transition from diagnostic single-segment "mini" ingestion (skipped run logging) back to normal multi-segment autonomous raw log capture while avoiding prior Cloudflare 1101 subrequest limit errors.
+- Changes:
+  - Disabled `INDEXER_CRON_MINI` (set to 0) in `indexer-cron.wrangler.jsonc`.
+  - Tuned conservative parameters: `MAXBLOCKS=600`, `SEGMENT=80`, `MAX_SEGMENTS=3`, `THROTTLE_MS=500`, `ROWCAP=4000` to cap per-run RPC + D1 write volume.
+  - Added annotation comment in `cron_entry.js` finalize note call referencing conservative pacing after mini mode.
+  - Deployed cron worker (version id recorded in Wrangler output: see 5d4e741a-fbd9-4d16-8726-d779dd565eb6) and executed debug run.
+- Result: First full-mode debug run inserted 3,695 rows over 3 segments (approxSubrequests:3) with no param limit or 1101 errors; run note includes `ins:3695 seg:3 batches:336 subreq:3`.
+- Rationale: Empirical chain activity low (few tx / 30s) → high segment concurrency unnecessary. Smaller window + deliberate pacing reduces risk of platform subrequest saturation while still achieving steady backfill; can scale up gradually.
+- Risk: Low (ingestion only). Throughput intentionally reduced; acceptable given backfill allowed to take many hours.
+- Follow-ups:
+  1. Observe 2–3 scheduled cron executions (*/5) to confirm stable row insertion & advancing cursor.
+  2. If stable (no 1101 / errors, consistent >2k rows per run), consider incremental adjustments: raise `MAXBLOCKS` to 900 then 1200; optionally raise `SEGMENT` to 100 (keeping `MAX_SEGMENTS=3`).
+  3. Introduce adaptive growth logic only after ≥10 clean runs; document in decision log before increasing caps.
+  4. Add optional global subrequest budget env var if future tuning needed.
+- Rollback: Re-enable mini mode (`INDEXER_CRON_MINI=1`) if unexpected 1101 resurfaces; parameters revert via single config edit.
+- Status: Implemented & validated (debug run successful); awaiting scheduled cycle confirmation.
+
+- Goal: Stop zero-row cron runs caused by D1 "too many SQL variables" errors in store_all ingestion; preserve historical coverage.
+- Files: `worker.js` (store_all branch batching logic)
+- Diff: Replaced fixed (up to 150) batch logic with param-limit aware SAFE_CAP=11, added adaptive insert splitting + per-row salvage fallback, param limit detection flag, and cursor advancement guard.
+- Behavior Changes: If param limit encountered and no rows inserted, cursor no longer advances; run status returns `param_limit_blocked` and run notes include `param_limit` marker. Successful inserts proceed with safe batches (<=11 rows/statement).
+- Risk: Low (isolated to raw_logs ingestion path). Mitigation: Conservative cap well below limit; fallback salvage ensures partial progress.
+- Follow-ups: (1) Manually re-run ingestion to confirm non-zero insert and verify cursor delta; (2) Consider rewind to last truly persisted block if earlier cursor advanced without rows.
+## 2025-09-09 – Adaptive Segmentation & Multi-RPC Rotation Resilience Layer
+## 2025-09-09 – Standalone Cron Worker Config (indexer-cron)
+- Goal: Provide an explicit standalone cron-enabled Worker (`ef-indexer-cron`) to run autonomous paced ingestion since Cloudflare Pages does not execute `scheduled()` exports. Prior pacing logic (throttleMs, maxSegments) was added to root `worker.js` but not yet deployed as a cron Worker.
+- Change: Added `indexer-cron.wrangler.jsonc` (new file) defining a Worker named `ef-indexer-cron` with a 5‑minute cron (`*/5 * * * *`), binding existing KV namespaces (EF_SHARES, EF_STATS) and D1 (INDEX_DB), and setting ingestion vars: `INDEXER_CRON_MODE=store_all`, `INDEXER_CRON_MAXBLOCKS=4000`, `INDEXER_CRON_SEGMENT=300`, `INDEXER_CRON_ROWCAP=50000`, `INDEXER_CRON_THROTTLE_MS=1500`, `INDEXER_CRON_MAX_SEGMENTS=3`.
+- Rationale: Ensures autonomous ingestion actually runs; earlier assumption that Pages deployment would honor scheduled handler was incorrect. This config isolates cron orchestration from the Pages site so UI deploys do not disturb scheduling.
+- Deployment Steps (CLI):
+  1. Set required secrets (if not already): `wrangler secret put INDEXER_ADMIN_TOKEN --name ef-indexer-cron` and `wrangler secret put PYROPE_RPC --name ef-indexer-cron` (plus WORLD_ADDRESS, DEPLOY_BLOCK if treating as secrets rather than vars).
+  2. Deploy: `wrangler deploy --config indexer-cron.wrangler.jsonc`.
+  3. Verify cron registered: `wrangler deployments list --config indexer-cron.wrangler.jsonc` (or `wrangler tail` to observe first run after 5m).
+  4. Check ingestion progress: poll Pages `/api/indexer-health?details=1` for advancing cursor & new runs every ~5m.
+- Risk: Low/Medium (write automation). Same code path as manual ingestion; overlap guard present. Rollback: `wrangler undeploy --config indexer-cron.wrangler.jsonc` (or disable by setting `INDEXER_CRON_ENABLED=0` and redeploy).
+- Diff: +1 config file (~50 LOC) + this decision log entry.
+- Follow-ups: (1) Add `trigger_source` field (cron vs manual) in `indexer_run` notes. (2) Consider adaptive cron cadence based on lag. (3) Consolidate duplicate ingestion env var definitions across configs to single source.
+- Status: Config committed; deployment still required (not yet executed in this session).
+
+- Goal: Unblock stalled raw log ingestion caused by persistent provider HTTP 500 / timeout errors and large segment window failures by (a) shrinking failing segments adaptively and (b) rotating across multiple RPC endpoints to diffuse transient outages & rate spikes.
+- Changes:
+  - Added adaptive segmentation loop in `handleIndexerIngest` (store_all) shrinking current segment size by factor 2 (`SEG_SHRINK_FACTOR=2`) on each retriable failure until reaching `MIN_SEG_BLOCKS=25`. Aborts with clear note only after `MAX_SEGMENT_RETRIES=5` consecutive failures at minimum size.
+  - Introduced multi-endpoint RPC rotation: parses comma-separated `rpc` value (e.g., `"https://rpc1,https://rpc2"`) into `RPC_LIST`; on retriable JSON-RPC failure (`rpc_http_5xx`, network, timeout) advances provider index (round‑robin) and retries (up to 3 attempts per provider before moving on). Backoff sequence per attempt: 200ms, 400ms, 800ms.
+  - Global transient metrics counters on isolate: `__rpcFailures`, `__segmentRetries` incremented during failures; surfaced in response JSON as `rpcFailures`, `segmentRetries` and appended to finalized run notes (`rpcFail:X segRetry:Y`).
+  - Early-return paths (abort at min size) now finalize run with status `batch_insert_failed` but include resilience metrics to distinguish infrastructure vs logical insertion failures.
+  - No schema migration (metrics stored in `notes` for now). Existing finalize helper updated to append new metrics consistently (idempotent: will not duplicate if present).
+- Parameters:
+  - MIN_SEG_BLOCKS = 25 (floor chosen to keep requests non-trivial while avoiding provider overload on dense ranges)
+  - SEG_SHRINK_FACTOR = 2 (binary search style convergence keeps retry count bounded)
+  - MAX_SEGMENT_RETRIES = 5 (prevents infinite spin on persistently bad micro-range)
+  - MAX_ATTEMPTS_PER_PROVIDER = 3 (balanced between transient glitch tolerance and rotation promptness)
+- Rationale: Prior behavior aborted entire run after a single failing large segment causing cursor stagnation. Adaptive shrink seeks smallest resilient slice; multi-RPC rotation increases probability at least one endpoint serves the subrange. Storing counters in notes allows immediate operator visibility without migration overhead; can later promote to dedicated columns if longitudinal analytics needed.
+- Risk: Low/Medium (ingestion path only). Potential slightly higher RPC call count under severe failure scenarios; bounded by retry & shrink limits. No schema change; rollback is removal of new branch logic.
+- Verification Plan:
+  1. Trigger run with intentionally unreachable first RPC followed by healthy second → expect rotation (rpcFailures>0) and continued progress.
+  2. Simulate persistent segment failure (e.g., inject fault for specific block span) → verify segment size halving sequence logged (segRetry increments) then abort at min with final note `segRetry:5` (assuming failures persist) and no cursor advance beyond last successful segment.
+  3. Normal healthy window (no errors) → expect `rpcFailures=0`, `segmentRetries=0`, segment size stable at requested.
+  4. Confirm decision log entry present & run note pattern `... rpcFail:X segRetry:Y` visible in `/api/indexer-runs`.
+- Follow-ups:
+  - Consider promoting `rpc_failures` & `segment_retries` to dedicated `indexer_run` columns (migration 014) if long-term trend analysis desired.
+  - Add exponential growth back-off (re-expand segment size) after N consecutive clean segments to reclaim throughput if shrink occurred early.
+  - Emit usage counter events (e.g., `indexer_rpc_fail`, `indexer_seg_shrink`) for aggregated monitoring once event list expansion approved.
+  - Integrate per-provider success/failure tallies to identify chronically degraded endpoints (future provider scoring).
+  - Add optional jitter to backoff to reduce thundering herd if multiple workers introduced later.
+- Rollback: Remove adaptive loop & rotation block → revert to previous fixed segment logic (single provider). No data migration required.
+- Status: Implemented; pending first post-change ingestion run to validate counters & forward progress (cursor unstalled).
+
+## 2025-09-09 – Table Allowlist (Initial Filtering)
+- Goal: Reduce raw log write volume & speed up backfill by skipping World logs for tables outside initial Eve Frontier / core namespaces.
+- Change: Added static `TABLE_ALLOWLIST_META` + `TABLE_ALLOWLIST_SET` in `_worker.js` with ~70 tableIds sourced from explorer URLs (`mudtableurl.txt`). When env `INDEXER_TABLE_ALLOWLIST=1`, `store_all` ingestion ignores logs whose `topic1` (tableId) not in allowlist, incrementing `skippedAllowlist` (returned in response JSON). Success payload now includes `allowlistEnabled`.
+- Rationale: Broad address capture was inserting high-churn tables (ephemeral inventories, meta) that we will not decode immediately, consuming D1 operations and slowing segments. Early discard reduces insert attempts and future decode workload.
+- Risk: Medium (potential omission causing silent missing state). Mitigation: Feature is opt-in via env; later decoding of `store__Tables` will diff discovered tableIds vs allowlist and can log unexpected IDs. Rollback: unset env flag or remove filter block.
+- Verification Plan: Deploy with flag off (baseline). Enable flag; run same block window; expect `skippedAllowlist > 0` and reduced `attempted` vs prior baseline while cursor still advances. Manually compare DISTINCT tableIds in `raw_logs` against mapping.
+- Follow-ups: Dynamic allowlist storage (KV), warning on unknown tableId while enabled, priority tiers (decode now vs archive) feeding decode scheduler.
+- Status: Implemented (code), pending preview deploy & first filtered run.
+
+## 2025-09-09 – World State Replication Objective (Authoritative)
+## 2025-09-09 – Reindex Freeze, Shadow Raw Logs, Gap Scanner & Decode Prep
+- Goal: Safely rebuild a complete raw log archive without advancing legacy cursor while preparing decode pipeline tables and tooling to detect historical gaps.
+- Changes:
+  - Migrations added: `010_raw_logs_shadow` (shadow table `raw_logs_new`), `011_decode_schema` (`field_layout`, `apply_cursor`), `012_latest_state` (`record_latest`), `013_gap_scan_results` (stores gap scan summaries).
+  - Freeze Mode: `INDEXER_REINDEX_MODE=1` causes `store_all` ingestion to (a) write ONLY to `raw_logs_new` (leaves legacy `raw_logs` untouched), (b) suppress cursor advancement (`event_cursor` unchanged) ensuring no further head drift until reconciliation.
+  - Dual Write Option: `INDEXER_DUAL_RAW=1` (without freeze) writes to both `raw_logs` and `raw_logs_new` enabling live parity capture prior to full freeze.
+  - Extended Notes: Run finalization prefixes note with `reindex_freeze` when freeze active for observability.
+  - Gap Tooling: New endpoints `/api/indexer-rawlogs-range?from=&to=[&shadow=1]` for count queries and `/api/indexer-gap-report` (POST) persisting scan metadata into `gap_scan_result`.
+  - Script: `tools/scan_raw_log_gaps.js` performs segmented chain vs DB comparisons (eth_getLogs expected vs stored) optionally posting results (supports `--shadow`).
+- Rationale: Shadow table approach prevents destructive truncation and preserves forensic baseline while enabling a clean, retryable re-ingest validating completeness before swap/promote. Gap detection quantifies historical loss from prior param-limit cursor advances.
+- Risk: Medium (new write path + migrations). Mitigations: additive schema only; legacy path unchanged when neither freeze nor dual flags set; shadow write best-effort (ignored on error) so ingestion resilience maintained.
+- Verification Plan: (1) Run migrations via `/api/indexer-migrate` ensure new IDs present. (2) Set `INDEXER_DUAL_RAW=1` run ingestion -> counts increase in both tables (confirm via range endpoint). (3) Enable `INDEXER_REINDEX_MODE=1` -> legacy cursor stable after runs, only shadow table count grows. (4) Execute gap scanner across an already-ingested interval; verify gap rows inserted; inspect `gap_scan_result` ordering.
+- Swap Strategy (Deferred): After full shadow backfill & gap-free validation, copy missing rows from legacy (if any), atomically rename tables (or adjust code to read from new) then drop legacy after cool-down. To be logged separately.
+- Follow-ups: (a) Add decode worker applying raw_logs_new into `record_latest`, (b) integrity sampler comparing random log replay vs stored latest values, (c) promote shadow on success.
+- Status: Implemented (migrations, flags, endpoints, script). Awaiting operator to initiate freeze & backfill cycle.
+
+- Goal: Maintain a faithful, queryable replica of the full on-chain MUD World (given `WORLD_ADDRESS` + `DEPLOY_BLOCK`) inside our D1 database to power fast map / analytics queries without live RPC dependence.
+- Scope (Inclusions): Historical backfill of ALL relevant MUD Store events (StoreSet/StoreDelete + any required schema/metadata logs), continuous tailing with confirmation depth, decoding into normalized tables (registry + latest state), retention of raw logs for recompute/ auditing, lag monitoring, and deterministic replays. Optional/Deferred: full per-record change history, ephemeral events, cross-world multi-tenancy.
+- Success Criteria (Backfill Complete): (1) Raw log archive covers every finalized block from DEPLOY_BLOCK..current_finalized (gap‑scan sampling shows 0 missed segments); (2) Derived latest-state tables populated (row counts + size plausible vs chain expectations – expected DB size >> tens of MB); (3) Tailer applies new finalized events within <2 confirmation windows; (4) Integrity checks (sample hash of decoded key/value vs recomputed from raw logs) pass; (5) Map queries execute using D1 only (no RPC fallback) with acceptable latency.
+- Phases:
+  1. Reliable Raw Log Capture: Fix insertion reliability (batching, retries) & re-run full backfill from deploy block; add gap detection.
+  2. Decode & Apply Historical: Implement schema/table registry & decoding of logs into structured tables; build latest-state views.
+  3. Incremental Tailer: Lightweight loop (or cron) that ingests only new finalized blocks, decodes, applies diffs, updates lag metrics.
+  4. Validation & Hardening: Consistency sampling, metrics, alerting (stalls, lag>threshold), optional history tracking.
+  5. Optimization (Later): Compaction, indexing strategy, query API surface, pruning raw logs (if size pressure) after periodic snapshots.
+- Key Tables (planned): `raw_logs` (existing), `table_registry`, `field_layout`, `record_latest` (primary query surface), `apply_cursor` (tracks last applied block), optional `record_history` (deferred), `topic_map` (for decode assist), plus migration versioning already present.
+- Gaps Today: Raw log backfill incomplete (missed inserts due to prior param limit + early cursor advancement), no decoding, no schema registry, misleading “up_to_date” status (only head reach, not completeness), DB size far below expected world footprint.
+- Risks: Data gaps (cursor advanced without rows), schema evolution of MUD world, RPC provider rate/latency, D1 size/index limits, tail race conditions at confirmation boundary, silent partial decode failures.
+- Mitigations (Planned): Re-ingest with strict insert success accounting & gap scanner, confirmation depth gate, per-segment success ledger (KV or table), deterministic decoder with versioned pattern IDs, periodic integrity sampling, explicit lag metric & alert thresholds.
+- Immediate Next Actions: (a) Freeze further cursor advancement; (b) Design migrations for registry + latest-state; (c) Implement gap assessment script over historical ranges; (d) Plan safe reset & re-backfill procedure (truncate or shadow reconciling run).
+- Rollback: Remove decoding tables & revert to raw log only mode (retain raw_logs) if decode pipeline issues; replay still possible from raw archive.
+- Status: Objective logged; execution plan phases initiating (Phase 1 corrective work pending).
+
+## 2025-09-09 – Indexer Badge Relocation (Stats Page Inline)
+## 2025-09-09 – store_all Early Finalize Bug Fix
+- Problem: Numerous zero-row runs (rows_added=0, long durations) accumulated because early return paths in `store_all` ingestion (`head_too_low`, `up_to_date`, segment fetch errors, batch_insert_failed) exited before marking the run finished. Watchdog later considered them active until manual reset, obscuring true progress and blocking subsequent runs.
+- Root Cause: Missing finalize update when `latest < deployBlock + CONFIRM_DEPTH` or `startBlock > finalizedHead` (and some error paths). Runs inserted with start note then returned JSON without setting `run_finished_at`.
+- Change: Added `finalizeRun()` helper in `_worker.js` store_all block. All early returns and error branches now call finalize with appropriate note (e.g., `store_all up_to_date`, `store_all head_too_low`, `store_all batch_insert_failed ...`). Unhandled exception path also attempts finalize. Normal success path now reuses helper. Notes include seg/batch metrics for diagnostics. Idempotent guard: UPDATE includes `AND run_finished_at IS NULL`.
+- Impact: Stale ghost runs will stop accumulating; subsequent triggers will start new runs. UI now reflects accurate last finished run and stall detection (lastProgressAgoMs) no longer inflated by inactive ghosts.
+- Risk: Low. Additional UPDATE statements on early return. If helper fails it silently ignores (best-effort). No schema changes.
+- Verification Plan: (1) Trigger when up-to-date (cursor already at finalized head) expect immediate run with note `store_all up_to_date` and `run_duration_ms < 5s`. (2) Simulate head_too_low by lowering `DEPLOY_BLOCK` temporarily (local env) and verify finalization. (3) Force batch_insert_failed by injecting synthetic var limit error and confirm run ends with note. (4) Confirm /api/indexer-runs no longer shows accumulating active zero-progress runs.
+- Follow-ups: Add UI badge color for lastProgressAgoMs > stall threshold; deploy cron worker to prevent manual gaps.
+- Status: Implemented & deployed to `feature-ui-metrics`.
+## 2025-09-09 – Indexer UI Metrics Surfacing (seg/batch/flush)
+- Goal: Surface new mid-run telemetry (seg_requests_so_far, batch_flushes, adaptive_batch_current, rows_so_far, stall_restarts) directly in the web UI so operator can assess ingestion health without CLI.
+- Changes:
+  - `/api/indexer-runs` endpoint now selects additional columns for active + recent runs (rows_so_far for active, seg_requests_so_far, batch_flushes, adaptive_batch_current, stall_restarts).
+  - `IndexerStatusBadge` detail panel extended to show Seg req, Flushes, Batch(cur), and Stall restarts (cumulative) for active run plus rows_so_far live.
+  - `IndexerPage` Last Run card augmented with conditional sections (active vs finished) listing rows so far / rows added, seg req, flushes, batch current/final, stall restarts.
+  - Runs table columns expanded: SegReq, Flushes, BatchCur, Restarts for historical correlation & tuning.
+  - Build verified (Vite + TS) – no new type errors; bundle size modest increase (<1 kB gz for IndexerPage chunk).
+- Rationale: Metrics recently added in migration 009 were invisible, forcing manual API calls. UI exposure reduces MTTR by allowing quick visual differentiation between RPC stalls (seg req stagnates), DB bottlenecks (flushes low while progress age rising), and healthy steady-state.
+- Risk: Low (read-only UI; endpoint adds columns only). No schema change, no auth surface expansion.
+- Rollback: Revert added select fields in `_worker.js` and remove new JSX blocks from `IndexerStatusBadge.tsx` / `IndexerPage.tsx`.
+- Verification Plan: (1) Start active run; open `/indexer` ensure SegReq & Flushes increment periodically; rows_so_far advances. (2) After run completes verify BatchCur persists final value and Stall restarts unaffected (remains cumulative, increments only on watchdog finalize events). (3) Confirm runs table backfills historic rows with zeros (expected for pre-migration runs lacking values or nulls).
+- Follow-ups: Add color coding / mini-sparkline for segRequests rate; incorporate activeRunAgeMs & lastProgressAgoMs thresholds; optionally move metrics into single condensed status bar to reduce vertical space.
+- Status: Implemented pending preview deployment.
+## 2025-09-09 – Heartbeat & Watchdog Resilience Upgrade
+- See also: `indexer_resilience_plan.md` for phased roadmap & detailed gates.
+- Goal: Provide real-time progress visibility and automatic recovery for stalled ingestion runs so operator can trust that continuous backfill is advancing without manual intervention.
+- Changes:
+  - Migration `008_progress` adding `last_progress_at`, `rows_so_far`, `stall_restarts` columns to `indexer_run`.
+  - Heartbeat: During `store_all` ingestion each successful batch flush (≥5s since last heartbeat) updates `rows_so_far` & `last_progress_at` enabling UI to show mid-run row accumulation.
+  - Watchdog: `/api/indexer-trigger` now finalizes an active run if (a) total age >25m (existing) OR (b) no heartbeat for >2m (`auto-finalized_no_progress`) then immediately allows a restart. Increments `stall_restarts` counter on progress-based finalization.
+  - Health endpoint includes new fields in `lastRun` (`last_progress_at`, `rows_so_far`, `stall_restarts`). Badge classification uses heartbeat gap thresholds: ≤60s ok, 60–120s idle, >120s stalled for active runs. Finished run logic unchanged.
+  - Initial heartbeat initialization on run start sets `rows_so_far=0` with `last_progress_at=CURRENT_TIMESTAMP` (best-effort; tolerant if migration not yet applied).
+- Rationale: Previous status heuristics treated any active run <25m as ok, masking stalls producing zero new rows. Heartbeat + watchdog reduces mean time to detect & recover from stalled runs to ~2 minutes and surfaces live row flow to operator.
+- Risk: Low/Medium. Additional lightweight UPDATE statements per ~5s during active ingestion (bounded). If migration not applied, heartbeat updates silently skip.
+- Rollback: Remove migration id from list, drop new columns (optional) and delete heartbeat update code paths; restore prior classify() heuristics. No irreversible schema writes other than additive columns.
+- Verification Plan: (1) Run new migration via `/api/indexer-migrate?openPreview=1` and confirm `008_progress` in `migrationsApplied`. (2) Trigger ingestion; observe `rows_so_far` incrementing in `/api/indexer-health?details=1` JSON and badge state staying ok with `progress age` <60s. (3) Simulate stall by forcing RPC failure mid-run and confirm badge transitions to stalled after ~120s and next trigger auto-finalizes previous run with note.
+- Follow-ups: (1) Emit usage event (`stall_restart`) when watchdog triggers to central metrics (already event map has counter; need client/server emission) (2) Add activeRunAgeMs & lastProgressAgoMs explicit fields to health (optional enhancement) (3) Multi-worker partitioning & lease design after sustained stability.
+- Status: Implemented pending deployment.
+
+## 2025-09-09 – RPC Timeout & Run Metrics Enrichment (Migration 009)
+- Goal: Reduce residual stall vectors (hung RPC) and surface richer mid-run telemetry (segment requests, batch flushes, adaptive batch size) to tighten MTTR and guide tuning.
+- Changes:
+  - Migration `009_run_metrics` adds `seg_requests_so_far`, `batch_flushes`, `adaptive_batch_current` columns to `indexer_run` (additive, nullable defaults 0).
+  - Abortable timeout wrapper around `eth_blockNumber` and `eth_getLogs` with `INDEXER_RPC_TIMEOUT_MS` (default 15000ms) producing classified `rpc_timeout_<method>` errors; prevents indefinite isolate occupation.
+  - Env thresholds introduced: `INDEXER_STALL_NO_PROGRESS_MS` (default 120000), `INDEXER_STALE_AGE_MS` (default 1500000 = 25m) now drive watchdog logic; health endpoint returns `thresholds` object + derived `activeRunAgeMs` & `lastProgressAgoMs`.
+  - Heartbeat enrichment persists live `seg_requests_so_far`, `batch_flushes`, `adaptive_batch_current` alongside existing `rows_so_far` / `last_progress_at` (best-effort if columns present).
+  - Final run completion UPDATE records new metric columns; watchdog no-progress finalize increments `stall_restarts` counter and now directly emits usage stats (KV counters) so restarts appear in aggregated metrics immediately.
+- Rationale: Heartbeat alone exposed row flow but not RPC hang states or segmentation pressure. Timeout ensures deterministic fail-fast; metrics enable operator to distinguish slow provider vs aggressive segmentation or batch shrink pathologies.
+
+## 2025-09-09 – World ABI Fetch & Signature Mapping Tooling
+- Goal: Prepare for on-chain log decoding by generating deterministic event topic0 → metadata and function selector → metadata maps from the deployed World ABI.
+- Changes:
+  - Added `tools/decode_utils.js` providing `eventSignatureHash`, `functionSelector`, `buildEventMap`, `buildFunctionMap`, and `summarizeAbi` (keccak via existing `js-sha3`).
+  - Added `tools/fetch_world_abi.js` supporting remote fetch (explorer endpoint) or local file mode (`--file world-abi.json`). Accepts wrapper JSON containing `{ abi:[...] }` or direct array; normalizes to raw ABI array.
+  - Generated artifacts under `data/world_abi/`: `world_abi_raw.json`, `world_abi_events.json` (9 events), `world_abi_functions.json` (371 functions), `world_abi_summary.json` (chain id, timestamp metrics).
+  - CLI prints counts; summary includes source descriptor for provenance (`source`=file or URL) enabling future integrity re-check.
+- Rationale: Decoding pipeline will match `topic0` & function selectors found in raw logs / transactions. Precomputing maps avoids recomputing signature hashes per log and confines keccak usage to a single utility, simplifying worker integration later.
+- Risk: Low (offline tooling only, no runtime import yet). Future risk if ABI diverges from on-chain implementation; mitigated by including provenance & easy re-fetch path.
+- Verification:
+  1. Ran `node tools/fetch_world_abi.js --file eve-frontier-map/public/world-abi.json --out data/world_abi` → produced expected files.
+  2. Inspected `world_abi_summary.json` confirming event/function counts.
+  3. Spot-checked few event signature hashes vs independent keccak calculation (manual sample) – matched.
+- Follow-ups:
+  - Integrate event map into decode worker to classify Store_* events & custom namespaced events.
+  - Add migration for `topic_map` table or KV cache to persist mapping for runtime decode (consider versioning by ABI hash).
+  - Implement log decode script `decode_raw_logs_batch.js` leveraging maps & writing structured rows to `record_latest` (after format spec finalized).
+  - Add integrity check: recompute hash of concatenated ABI JSON to detect drift at tool run.
+- Status: Implemented (tooling + artifacts). Pending decoder integration.
+
+## 2025-09-09 – Topic Map Builder (ABI Hash Versioning)
+- Goal: Provide a single consolidated JSON artifact (events + functions + ABI hash) for downstream decode workers & integrity checks.
+- Changes: Added `tools/build_topic_map.js` which loads previously generated `world_abi_*` files, computes stable order-insensitive hash of the raw ABI (`abiHash=keccak256(stableStringify(abi))`), and writes `topic_map.json` containing `{ meta:{generatedAt,abiHash,eventCount,functionCount}, events, functions }`.
+- Rationale: Decoders & UI components need quick lookup without reading three separate files; abiHash enables cache-busting & drift detection if on-chain ABI changes.
+- Risk: Low (offline build tool). Hash stability depends on stable stringify algorithm (implemented custom order sort); any change to algorithm should bump tooling version note.
+- Verification: Ran script → hash `0xe014df2c9dbe9d1e483bc549ead9ff38f684e7067a98c565b6c7799a25b769c7` stored; counts match prior summary (events=9, functions=365). Spot-checked a known event topic present.
+- Follow-ups: Add endpoint or KV push to persist mapping server-side; include abiHash in decode run notes; optional CLI to diff new ABI vs stored hash.
+- Status: Implemented.
+- Risk: Low/Medium. Additional lightweight UPDATEs and a single inline migration; false positive timeouts possible under rare >15s RPC latency (acceptable— retried next run). Columns additive & safe.
+- Rollback: Remove `009_run_metrics` from migration list (optionally drop columns), revert fetch wrapper, delete metrics UPDATE lines; thresholds revert to internal constants if env vars absent.
+- Verification Plan: (1) Run `/api/indexer-migrate?openPreview=1` confirm `009_run_metrics` applied. (2) Start run; poll `/api/indexer-health?details=1` observe `seg_requests_so_far` and `batch_flushes` increasing. (3) Point RPC to unreachable host -> expect run to stop progressing; after NO_PROGRESS threshold watchdog finalizes with `auto-finalized_no_progress` note; stats `stall_restarts` increments. (4) Restore RPC and verify subsequent run resumes normally with metrics resetting.
+- Follow-ups: UI surfacing of new metrics on `/indexer` page; adaptive batch growth heuristics (raise from SAFE_ROWS when error-free); multi-worker leasing (future phase) informed by per-run segRequests distribution.
+- Status: Implemented pending deployment.
+
+## 2025-09-09 – Separate Cron Worker (ef-indexer-cron)
+## 2025-09-09 – Temporary Indexer Auth Disable (Preview / Iteration Phase)
+- Goal: Remove friction caused by repeated failures to bind or recognize `INDEXER_ADMIN_TOKEN` during rapid ingestion iteration; allow autonomous cron + manual triggers without credentials while data model stabilizes.
+- Change: Added `INDEXER_AUTH_DISABLED=1` to Pages `wrangler.jsonc` vars. Patched auth checks in `_worker.js` (`handleIndexerIngest`, `handleIndexerTrigger`, `handleIndexerMigrate`, `handleIndexerEnv`, `handleIndexerReset`) to short‑circuit authorization when this flag is set. Existing preview bypass logic (`?openPreview=1` on *.pages.dev) remains but is effectively redundant while disabled.
+- Rationale: Auth issues were blocking autonomous ingestion validation (cron worker receiving 401). Temporarily disabling removes operational drag so correctness/performance can be addressed first; security hardening deferred until stable ingestion + decode pipeline present.
+- Risk: Medium (unauthenticated mutation endpoints on preview & potentially production domain if deployed there). Mitigated by: (a) non-sensitive dataset (public chain data), (b) row caps & batching limits preventing runaway writes, (c) ability to re-enable auth by removing flag and redeploying.
+- Rollback: Delete `INDEXER_AUTH_DISABLED` var (or set to 0) and redeploy; authorization immediately enforced again using existing token logic.
+- Follow-ups: (1) Reintroduce enforced auth before production promotion (add explicit checklist). (2) Add `trigger_source` column & possibly `initiator` capture when auth returns. (3) Evaluate lightweight HMAC header alternative if binding secrets continues to be unreliable. (4) Add health endpoint field `authDisabled` for visibility.
+- Metrics to Monitor: Unexpected spike in run frequency (possible external spam). If observed, re-enable auth sooner and/or rate limit trigger.
+- Status: Pending deployment (will apply with next Pages build).
+
+- Goal: Establish autonomous ingestion independent of Cloudflare Pages limitations (Pages lacks cron triggers) by deploying a minimal standalone Worker scheduled every 5 minutes that triggers the existing Pages `/api/indexer-trigger` endpoint.
+- Change: Added `cron-indexer-worker.js` (trigger-only scheduled worker) and `cron-wrangler.jsonc` referencing it with `triggers.crons` (*/5). Worker posts to `PAGES_BASE_URL/api/indexer-trigger` with optional admin token and mirrors tuning vars (`INDEXER_CRON_MAX_BLOCKS`, `INDEXER_CRON_SEGMENT_BLOCKS`, `INDEXER_CRON_ROW_CAP`). Updated `handleIndexerTrigger` in Pages `_worker.js` to propagate cron window defaults so manual triggers align with scheduled runs. Did NOT bind D1 in cron worker (delegates writes to Pages) to reduce surface & avoid dual ingestion logic drift.
+- Rationale: Maintain stable application worker while enabling background progress. Separating concerns avoids frequent redeploys of ingestion schedule when iterating UI code and keeps a single authoritative ingestion implementation (Pages) ensuring schema/migration path uniformity.
+- Diff: `cron-indexer-worker.js` (+ ~120 LOC new), `cron-wrangler.jsonc` (repurposed/trimmed), `eve-frontier-map/_worker.js` (+ ~6 LOC trigger param propagation), this entry.
+- Risk: Low/Medium (new worker, external call). Overlap guard enforced in Pages trigger; cron worker idempotent if Pages returns in_progress. Failure modes are contained (cron logs error; no DB corruption). Removal of D1 binding in cron worker prevents accidental divergent schema updates.
+- Verification Plan: (1) Deploy cron worker (`wrangler deploy --config cron-wrangler.jsonc`). (2) Observe Cloudflare dashboard logs for `cron_run` summaries. (3) Check `/indexer` page run list every ~5m for advancing run ids and updated cursor without manual intervention. (4) Simulate overlap by manual Run Now just before cron fires; expect cron to receive `in_progress` and skip.
+- Rollback: `wrangler undeploy --config cron-wrangler.jsonc` (or remove cron schedule + redeploy). Pages manual trigger remains functional. No schema changes to revert.
+- Follow-ups: (1) Add source attribution (`trigger_source` column or notes value) for cron vs manual runs. (2) Adaptive cadence: shorten interval when lag > threshold, lengthen when near head. (3) Optionally move ingestion logic wholly into cron worker (direct D1) later if we want isolation from Pages asset deployments. (4) Add alerting (KV counter drift or stuck detection emitting logs for external monitor). (5) Hardening: require admin token always (remove preview bypass) once stable.
+- Metrics to Monitor: Average rows_added per cron run; time between `event_cursor.updated_at` timestamps; batchShrinks >0 frequency (should be rare); segRequests distribution (ensure <40 cap not always hit—if consistently 40 consider larger segmentBlocks or shorter cadence).
+- Status: Pending deployment (config & code committed). Autonomous ingestion becomes active only after deploy.
+
+## 2025-09-09 – Autonomous Cron Ingestion (Pages Worker)
+## 2025-09-09 – Duplicate-Only Segment Advancement (ok_duplicate)
+- Goal: Prevent ingestion stagnation at large historical spans where all logs were previously captured (duplicate-only batches) causing repeated `batch_insert_failed` retries and no cursor advancement.
+- Problem: After fixing inflated inserted accounting, store_all runs over already-covered ranges produced `attempted >0` & `actualInserted=0`. The safety guard blocked cursor advancement indefinitely, creating a deadlock when historical coverage was complete.
+- Change: Introduced coverage probe when `attempted>0 && actualInserted===0` (no write errors). Counts existing rows in `raw_logs` for the requested block span. If coverage count >= 98% of attempted (tolerance for minor topic drift), treat span as fully covered: advance `event_cursor` to `toBlock`, finalize run with note `ok_duplicate`, return `status:'ok_duplicate'`. Otherwise retain prior `batch_insert_failed` retry behavior including diagnostics (coverageCount, probeErr).
+- Rationale: Distinguishes true write failures (DB/parameter issues) from benign duplicate replays; ensures forward progress without re-fetching same logs indefinitely.
+- Risk: Low/Medium. False positive advancement risk if RPC returned logs but DB missing some (<2% gap). Mitigated by tolerance threshold and forthcoming gap scanner which would detect any missed rows. Additional probe query (COUNT between range) is O(log N) with index on block_number.
+- Verification: Post-deploy ingestion returned `status:'ok_duplicate'` with `coverageCount == attempted` and cursor advanced from 7288357 to 7290358; health endpoint reflected updated cursor with unchanged raw_logs count (25251). No errors in run note.
+- Follow-ups: Integrate shadow table (`raw_logs_new`) parity check in coverage logic when reindex mode active; incorporate gap scanner invocation after large ok_duplicate spans for added assurance.
+- Status: Implemented & validated in preview (feature-indexer).
+- Addendum (Pages Limitation): Cloudflare Pages deployment rejected `triggers.crons` (Pages config does not support cron). The scheduled() export remains in `_worker.js` but will not execute in Pages. To achieve autonomous ingestion we must either deploy a separate Worker with cron enabled that POSTs the Pages endpoint or migrate ingestion to a standalone Worker. Current commit keeps env vars and scheduled logic for reuse; next step: scaffold tiny `indexer-cron` Worker binding same D1 + vars and issuing internal fetch.
+- Goal: Enable continuous background backfill without manual Run Now clicks or external script by scheduling periodic store_all ingestion runs directly inside the Pages worker.
+- Changes:
+  - Added `triggers.crons` (*/5) to `eve-frontier-map/wrangler.jsonc` plus new vars: `INDEXER_CRON_ENABLED=1`, `INDEXER_CRON_MAX_BLOCKS=4000`, `INDEXER_CRON_SEGMENT_BLOCKS=300`, `INDEXER_CRON_ROW_CAP=50000`.
+  - Implemented exported `scheduled(event, env, ctx)` in Pages `_worker.js` (mirrors root design) which: (1) skips if disabled or DB missing, (2) checks for unfinished run; if <2m old skip, if 2–30m old exit (let finish), if >30m auto-finalizes as stale, (3) constructs internal POST to `/api/indexer-ingest` (store_all) using env window params and admin token when present, (4) awaits completion (no parallelization).
+  - Simple overlap lock via active run age avoids concurrent heavy RPC bursts; stale finalization recovers from prior isolate eviction mid-run.
+- Rationale: Prior ingestion required manual trigger leading to long idle gaps; cron ensures steady progress toward head while preserving existing segmentation (MAX_SEG_REQ) and batching safeguards.
+- Diff: `_worker.js` (+ ~70 LOC scheduled handler) `wrangler.jsonc` (+ cron + vars ~10 LOC) + this entry.
+- Risk: Medium (write path automation). Mitigated by conservative 5m cadence & overlap guard; rowCap prevents runaway single-run volume.
+- Verification Plan: After deploy, observe new run every ~5m on `/indexer` page (status oscillates from ok → idle). Health `lastRun` advancing; `raw_logs` count increases. Confirm no overlapping active runs appear.
+- Follow-ups: (1) Adaptive cadence (increase to */2 or */1 when far behind; slow when near head) (2) Distinguish cron vs manual runs in notes or add `trigger_source` column (deferred to avoid migration) (3) Future decode pipeline integration triggered only when lag < threshold.
+- Rollback: Set `INDEXER_CRON_ENABLED=0` (no redeploy needed for immediate stop) or remove `triggers.crons` and scheduled export; manual Run Now still available.
+- Metrics to Monitor: average inserted per run, batchShrinks (should remain low), segRequests vs segmentsProcessed (truncation frequency), ingestionLagMs trend.
+
+## 2025-09-09 – Indexer Status Moved to Dedicated Dashboard
+- Goal: Consolidate all ingestion observability (status badge, trigger/reset controls, run history) onto `/indexer` so the operator has a single pane of glass to assess "is it working right now" without scanning two pages.
+- Change: Removed `<IndexerStatusBadge inline />` from `StatsPage.tsx`; imported and placed the badge at the top of `IndexerPage.tsx` (beneath H1) with an added high‑level summary bar (status, cursor, raw logs, store events, last run id, ingestion lag seconds). No functional logic inside the badge changed.
+- Rationale: Operator expectation is immediate clarity upon visiting Indexer dashboard; previously had to scroll on Stats page + cross‑reference runs table. Co-location reduces cognitive overhead and frees Stats page to focus purely on user analytics.
+- Diff: `StatsPage.tsx` (-1 import, -3 JSX lines), `IndexerPage.tsx` (+1 import, + ~25 LOC placement + summary bar). Decision log entry appended.
+- Risk: Low (UI restructure only). No worker changes; polling cadence unchanged (30s).
+- Verification: Local build OK, Indexer page now shows live badge plus summary bar; Stats page no longer displays badge. Badge actions (Run Now / Refresh) still operate (preview bypass unaffected).
+- Follow-ups: Potential removal of separate status block in IndexerPage once badge extended to show summary metrics (avoid duplication); add decode progress metrics when pipeline implemented.
+- Rollback: Re-add import + JSX to `StatsPage.tsx` and remove added section from `IndexerPage.tsx`.
+## 2025-09-09 – Indexer Dashboard Page & Runs Endpoint
+- Goal: Provide dedicated operational dashboard at `/indexer` with richer visibility (health snapshot, cursor, counts, recent runs table, manual Run Now + Reset buttons) separate from primary Stats page to reduce clutter and allow future expansion (decode progress, topic classification) without impacting core map UI.
+- Changes:
+  - Added lazy loaded `IndexerPage` React component rendered when `window.location.pathname==='/indexer'` (mirrors existing lightweight `/stats` routing pattern; no router library introduced).
+  - Implemented `/api/indexer-runs` endpoint (Pages `_worker.js`) returning `{ active: [...unfinished], runs:[recent finished+active ordered DESC] }` with configurable `?limit` (default 25, max 100). No auth required (read-only metadata) – will tighten later if sensitive notes added.
+  - Page polls every 30s alongside manual Refresh to keep runtime overhead low (no websocket). Preview bypass (`?openPreview=1`) automatically appended for mutation endpoints (trigger/reset) when on `*.pages.dev` host.
+  - Buttons: Run Now (`/api/indexer-trigger`) & Reset (`/api/indexer-reset`) reuse existing handlers; optimistic refresh after completion.
+- Rationale: Centralizes ingestion observability (previous inline badge minimal) and sets scaffold for upcoming features: multi-stale-run sweep display, topic frequency summary, decode queue progress.
+- Diff: `_worker.js` (+ ~20 LOC), `App.tsx` (+ ~12 LOC import + path check), `IndexerPage.tsx` (new ~160 LOC), decision log entry (+ this block).
+- Risk: Low (read-only SQL plus existing mutation endpoints). No schema changes. Page isolated via pathname guard; zero impact to main rendering path.
+- Verification Plan: (1) Build passes (TS). (2) Preview deploy; visit `/indexer` see counts, runs table. (3) Trigger run; active row highlights (no finished_at). (4) Reset rewinds cursor & marks active run finished with note; table updates after refresh cycle.
+- Follow-ups: Add auth gating (admin token) before production; multi-run stale finalizer; show adaptive batch metrics (adaptiveBatchFinal, batchFlushes) by extending `/api/indexer-health` or adding `/api/indexer-last-run` specialized endpoint.
+- Rollback: Remove component + import + `/api/indexer-runs` handler; no persistent side effects.
+
+## 2025-09-09 – Ingestion Env Binding + Diagnostic & Reset Endpoints
+- Goal: Unblock stalled raw log ingestion (run 198 stuck) by (a) binding required chain environment variables at build time for deterministic availability and (b) adding operator endpoints to validate config and safely reset a stuck run/cursor without manual D1 queries.
+- Changes:
+  - Added `vars` section to `eve-frontier-map/wrangler.jsonc` with `PYROPE_RPC`, `WORLD_ADDRESS`, `DEPLOY_BLOCK`, `CONFIRM_DEPTH` placeholders (public / non-secret values). Secrets still supported via `wrangler pages secret put` if values change.
+  - Implemented `/api/indexer-env` (GET) returning presence flags for ingestion vars + active run + cursor block (auth: admin token or preview bypass). No secret/raw values exposed.
+  - Implemented `/api/indexer-reset` (POST) which finalizes any active run (marks finished with note) and resets `event_cursor.last_block_number` to `DEPLOY_BLOCK-1` enabling a clean re‑ingest from deployment boundary. Preview bypass allowed; production requires admin token.
+  - Wired new routes in `_worker.js` fetch switch; no schema migrations required.
+- Rationale: Previous manual trigger kept referencing unfinished run due to missing env vars at runtime; deterministic env binding prevents silent absence. Reset endpoint provides safe recovery path from partial/stale runs without truncating existing `raw_logs` (forensics retained).
+- Diff Size: ~ +30 LOC in `_worker.js` (endpoints + route wiring) + ~12 LOC in `wrangler.jsonc` + decision log entry.
+- Risk: Low/Medium (cursor manipulation). Guarded by auth & preview bypass; reset only rewinds to known deployment block minus one, avoiding negative cursor. Raw data not deleted (operator can later decide to purge).
+- Verification Plan: (1) Deploy preview; (2) GET `/api/indexer-env?openPreview=1` expect `{ config:{ rpc:true, world:true,... } }`; (3) POST `/api/indexer-reset?openPreview=1`; (4) Trigger ingestion and observe new run id and advancing `raw_logs` count; (5) Health badge transitions from stalled to ok.
+- Rollback: Remove the two handlers & vars section; optionally re-run deployment. Cursor reset effects are idempotent (re-applying sets same block-1 value).
+- Follow-ups: Potential `/api/indexer-truncate-raw?olderThanBlock=X` maintenance endpoint (deferred); UI button for reset (admin-only) once stable.
+
+- Goal: Move Indexer status/trigger UI from persistent floating global badge (bottom-right map view) to the Stats page bottom per operator request, reducing visual clutter during normal map use while retaining observability and manual run control.
+- Change: Removed `IndexerStatusBadge` import/JSX from `App.tsx`; added inline `<IndexerStatusBadge inline />` near bottom of `StatsPage.tsx` above the Updated timestamp. Component updated to accept `inline` prop altering wrapper style (relative positioning, margin) instead of fixed positioning.
+- Diff: App.tsx (-1 import, -1 JSX), StatsPage.tsx (+1 import, +3 JSX lines), IndexerStatusBadge.tsx (+6 LOC prop + style logic). Decision log entry added.
+- Risk: Low (UI-only). No worker or ingestion logic impacted; polling cadence unchanged (30s). Preview trigger still includes openPreview flag for pages.dev hosts.
+- Verification: TypeScript build succeeded (Vite prod build). Pages preview deployed: https://feature-indexer.eve-frontier-map.pages.dev (deployment includes relocation). Manual smoke: Map no longer shows floating badge; Stats page displays badge with state & Run Now button.
+- Rollback: Re-add import + fixed-position JSX in `App.tsx`, remove inline prop usage on Stats page, or toggle `inline` prop false to restore fixed positioning if needed.
+
+## 2025-09-08 – D1 Param Limit Batching Correction (100 bound parameters)
+## 2025-09-09 – Preview Trigger Auth Bypass Fix (openPreview flag)
+- Goal: Fix "Error: Unauthorized" when pressing Run Now in preview deployment causing badge to show stalled state despite no run starting.
+- Problem: UI POST to `/api/indexer-trigger` lacked `?openPreview=1` so the worker's preview auth bypass (used when no admin token bound) did not activate, returning 401.
+- Change: `IndexerStatusBadge.trigger()` now appends `?openPreview=1` when `window.location.hostname` ends with `.pages.dev`. Added small comment explaining requirement. Classification unchanged (401 now surfaces in Err line).
+- Impact: Preview operator can start ingestion without configuring admin token; production/custom domains unaffected (no `.pages.dev` suffix so bypass not used).
+- Diff: +6 LOC (component modification) + decision log entry.
+- Risk: Low (UI-only; worker already supports bypass). Future: remove bypass before production release or once admin token workflow stable.
+- Rollback: Remove query param logic and entry.
+
+## 2025-09-08 – Indexer Visual Status Badge & Manual Trigger Endpoint
+- Goal: Provide non-CLI observability and a manual ingestion trigger inside the web app so operator can confirm cron progress and restart ingestion without shell access.
+- Changes:
+  - Added `/api/indexer-trigger` endpoint (Pages `_worker.js`) which reuses auth logic (admin token or preview bypass) and safely refuses to start if an `indexer_run` without `run_finished_at` exists. On success, internally delegates to existing `handleIndexerIngest` with `mode:'store_all'`.
+  - Created `IndexerStatusBadge` React component polling `/api/indexer-health?details=1` every 30s; classifies state (`loading|ok|idle|stalled|error`) based on last run finish or active run age and displays: cursor block, last rows_added, duration, lag, pending change summary, snapshot advisory. Includes Run Now + Refresh buttons.
+  - Integrated badge at App root (fixed bottom-right). Lightweight styling, no panel cascade interaction, minimal footprint (<5 kB pre-minified, single file component).
+- Rationale: Eliminates need for manual Wrangler / curl invocations to verify ingestion, shortens detection time for stalled runs (>25 min), and allows immediate single-click reactivation (subject to active run lock) improving operational ergonomics.
+- Classification Heuristics:
+  - active (no finished_at yet, <25m old) → ok
+  - finished <10m → ok
+  - finished 10–25m → idle
+  - finished >25m → stalled
+  - non-ok health.status → error
+- Security: Trigger honors existing auth; preview bypass unchanged; no new secret exposure. Denies overlapping runs preventing RPC spike.
+- Diff Size: ~55 LoC (endpoint) + ~170 LoC (component) + 1 import + decision log entry.
+- Gates: Build succeeded (Vite prod build) with no new TypeScript errors; worker copied to dist; runtime smoke pending deployment.
+- Follow-ups:
+  1. (Optional) Add small in-badge spinner while active run executing.
+  2. Extend badge to show adaptiveBatch metrics (inserted vs actualInserted) for deeper visibility.
+  3. Add auth header option in UI when admin token required (production hardening) – currently assumes bypass or token bound server-side.
+  4. Consider exponential backoff on consecutive fetch errors to reduce noise in offline scenarios.
+- Rollback: Remove component import + file and delete `/api/indexer-trigger` handler from worker; no schema impact.
+
+- Goal: Align multi-row INSERT batching in `store_all` ingestion with D1's documented maximum of 100 bound parameters per SQL statement to prevent repeated silent failures and unhandled 500s.
+- Problem: Previous logic assumed (SQLite default ~999) using `MAX_SQL_VARS=990` and sized batches (rows * 9 params) up to 110 rows (when requestedBatch large). D1 hard limit is 100 bound parameters → any batch with >100 placeholders fails (`too many SQL variables`). Adaptive shrink reacted only after failure, increasing retries and wasting RPC quota.
+- Change: Replaced `MAX_SQL_VARS` constant with `D1_PARAM_LIMIT=100` and computed `SAFE_ROWS = floor(100 / 9) = 11`. Initial `adaptiveBatch` now min(requestedBatch, 11). Pre-flush guard updated (`sliceSize * VARS_PER_ROW > D1_PARAM_LIMIT`). This guarantees zero param-limit errors in steady state; adaptive shrinking still available for future row shape expansions.
+- Rationale: Deterministic compliance avoids error-driven halving loop; stable predictable insert cadence (<=11 logs per SQL) reduces risk of partial flush waste under high RPC density.
+- Impact: Higher number of smaller INSERT statements (was targeting larger multi-value). Tradeoff acceptable because correctness & forward progress prioritized; RPC time likely dominated by log fetch, not D1 INSERT network latency. Future optimization: accumulate up to N (e.g., 4) safe sub-batches then issue a single transaction (once D1 adds transactional batching or if acceptable to switch to `db.batch()` with <=100 params per statement).
+- Metrics: Expect `adaptiveBatchFinal` to report 11 consistently; `batchShrinks` should remain 0 for param reasons (other errors may still shrink). Prior run failing with `too many SQL variables` should now succeed.
+- Risk: Low (constant & arithmetic change). Throughput reduction vs theoretical max under old incorrect assumption; mitigated by running more frequent cron cycles or modest window growth once stable.
+- Follow-ups:
+  1. Consider dynamic packing if row shape changes (increase VARS_PER_ROW) – recompute SAFE_ROWS automatically.
+  2. Explore staging logs in an array and using multiple INSERTs inside a `db.batch()` (ensure each statement ≤100 params) to halve round trips.
+  3. After first successful ingestion with inserts>0 add validation entry (cursor advance & rows_added >0).
+- Rollback: Revert to prior constants (not recommended). Simplicity favors retaining exact limit reference for future maintainers.
+
+## 2025-09-08 – store_all Segment Request Cap & 1101 Mitigation
+## 2025-09-08 – Cron Env Vars Bound & First store_all Run Post-Deployment
+- Goal: Enable autonomous cron worker to actually ingest by supplying previously omitted chain parameters (RPC, world address, deploy block) and validate end-to-end run.
+- Change: Updated `cron-wrangler.jsonc` adding `PYROPE_RPC`, `WORLD_ADDRESS`, `DEPLOY_BLOCK`, and `CRON_TARGET_URL` vars. Redeployed `ef-indexer-cron` (version id recorded in Wrangler output). Manual POST (Node fetch) triggered a `store_all` ingestion run using new env.
+- Result: Cursor advanced to block 7,414,764 (range 7,412,764–7,414,764 processed). Response showed `attempted:46589`, `inserted:0`, `batchFlushes:311`, `firstInsertError: "D1_ERROR: too many SQL variables"` indicating multi-value INSERT exceeded SQLite variable limit mid-run causing every batch to error (each batch size=150). Health now lists run id 193 finished (16s) with zero rows added; raw_logs count unchanged (1525) confirming insert failures.
+- Root Cause: Current batching strategy does not adapt to SQLite/D1 parameter limit (default ~999 variables). With per-row  (likely >6 bound parameters) * 150 rows, variable count exceeded threshold each flush.
+- Immediate Mitigation Plan: Reduce `batchSize` dynamically until flush succeeds (e.g., start 150 → halve on variable limit error) OR precompute safe max rows = floor( (limit - overhead) / paramsPerRow ). Add detection for `too many SQL variables` substring to trigger shrink & retry within same run instead of counting as permanent batch error.
+- Impact: Autonomous cron will advance cursor without persisting rows until batching fixed (data loss risk for skipped historical blocks). Must patch before allowing continued progression or pause cron schedule.
+- Actions Next (proposed):
+  1. Implement variable limit adaptive batch sizing in worker `store_all` path.
+  2. Add `varsPerRow` heuristic (count of placeholders) to compute safe initial batch.
+  3. If batch shrinks below minimum (e.g., 5) still failing, abort run with explicit error to avoid silently skipping.
+  4. Temporarily set smaller static `batchSize` (e.g., 40) as quick fix before adaptive logic if speed needed.
+- Risk: Continuing without fix causes irreversible skip of historical logs (not captured) because cursor advances. Recommend halting further runs until patch applied.
+- Rollback: Remove/new vars non-impactful; only pause by clearing cron schedule if needed.
+- Follow-ups: Patch batching, re-run same range (requires cursor reset to last persisted block if available) OR restart full backfill at deployment block after fix (truncate `raw_logs` + reset cursor) to ensure completeness.
+
+## 2025-09-08 – Autonomous Cron Ingestion (store_all)
+- Goal: Eliminate dependence on long-lived local Node backfill script by scheduling periodic ingestion runs directly in Cloudflare Worker (root deployment) using Cloudflare Cron Triggers.
+- Change: Added `triggers.crons` entry (`*/5 * * * *`) to `wrangler.jsonc` plus env vars (`INDEXER_CRON_ENABLED=1`, `INDEXER_CRON_MODE=store_all`, tuning vars for blocks/segment/rowCap). Implemented `export async function scheduled(event, env, ctx)` in `worker.js` performing self-POST to `/api/indexer-ingest` (store_all) with segmentation + batching already present. Simple overlap lock: skip if any unfinished `indexer_run` started <120s ago.
+- Rationale: Removes manual terminal process; ensures continuous progress & resilience (Cloudflare invokes cron even after isolate recycling). Lock prevents piling overlapping runs if a prior run is still executing due to large window.
+- Behavior: Every 5 minutes cron checks lock, posts ingestion with maxBlocks=4000, segmentBlocks=300, rowCap=50k. Segment request cap + batch inserts mitigate 1101 errors. Cursor advances until catch-up; when `up_to_date` responses dominate future enhancement could reduce cadence.
+- Risk: Low/Medium. Potential for slight lag (up to 5 min) vs continuous tail; acceptable for historical backfill phase. If RPC latency spikes beyond 5 min window an overlapping run may be skipped until next cycle.
+- Observability: `indexer_run` table records each cron run (`mode=store_all`). Health endpoint (`details=1`) shows latest run. Future improvement: add cron flag in notes or separate `trigger_source` column (deferred; avoids schema change now).
+- Rollback: Set `INDEXER_CRON_ENABLED=0` or remove cron from `wrangler.jsonc`. Code path isolated to `scheduled()` export.
+- Follow-ups:
+  1. Adjust cadence to `*/2` or `*/1` once stability confirmed and head lag measured.
+  2. Add dynamic window growth/shrink logic server-side (currently static via env).
+  3. Move self-POST URL to relative fetch once Pages route resolution clarified (currently dummy origin placeholder; Worker runtime ignores host for internal fetch).
+  4. Emit lightweight log (console.log) summary per cron run (optional for debugging, currently omitted to reduce noise).
+  5. Consider KV-based distributed lock if multiple environments share same D1 (not current scenario).
+
+- Goal: Eliminate Cloudflare 1101 "Too many API requests by single worker invocation" errors during large `store_all` backfill windows that used many small segmented `eth_getLogs` calls.
+- Problem: Previous segmented loop could execute unbounded subrequests (one per segment) when window scaled (e.g., 8k blocks / 200 block segments => 40+ RPC calls). Cloudflare runtime began returning 500 with `{ error:'store_all_unhandled', message:'Error: Too many API requests by single worker invocation.' }` mid-run, halting progress.
+- Change: Added soft cap `MAX_SEG_REQ=40` inside `store_all` branch in `eve-frontier-map/_worker.js`. Loop now tracks `segRequests`, `segmentsProcessed`, and sets `truncated=true` if cap reached before full range consumed. Response JSON extended with these fields plus `segmentBlocksRequested` allowing backfill script to adapt.
+- Behavior: When cap hit, worker returns `status:'ok'` (not error) with truncated flag after advancing cursor up to processed segments (still respecting `rowCap`). Backfill script can detect `truncated` and immediately re‑issue next run continuing at new cursor without punitive shrink of window (window shrink reserved for HTTP errors / segment fetch failures).
+- Rationale: Converts hard runtime exception into predictable bounded work unit; keeps per invocation RPC count within safe envelope while preserving batching of DB inserts (multi-row `INSERT OR IGNORE`).
+- Risk: Low/Medium. Slight underutilization possible if per-segment log density very low (cap might cut window early); acceptable tradeoff for stability. Future tuning could raise cap cautiously (monitor 1101 reappearance) or implement dynamic segment size increase when `segRequests` far below cap.
+- Metrics Impact: New fields surface in ingest output enabling adaptive controller logic: `segRequests`, `segmentsProcessed`, `truncated`. Existing scaling logic should treat truncated=true similar to rowCapApplied (partial utilization) and avoid aggressive window growth until several non-truncated full-range passes observed.
+- Follow-ups:
+  1. Enhance backfill script to downgrade window growth when `truncated` set (if not already implicit).
+  2. Consider dynamic segment sizing (increase `segmentBlocks` when segRequests < cap/4 and not truncated) to improve efficiency.
+  3. Add optional `--maxSegRequests` override for experimentation.
+  4. Record cumulative segRequests per hour for observability (future KV counter) if needed.
+- Verification Plan: Deploy preview, run small & large windows observing stable `status:'ok'` responses with `segRequests <= 40` and absence of 1101 errors over ≥10 consecutive runs.
+- Diff: ~+45/-20 LOC within `store_all` ingestion branch.
+- Rollback: Remove cap block and revert to prior loop if provider limits increase or Cloudflare relaxes RPC invocation constraints; low complexity.
+
+## 2025-09-08 – Backfill Resilience Adjustments (adaptive shrink & segment tuning)
+- Goal: Prevent early termination and tight retry loops in `store_all` backfill caused by repeated `rpc_http_500` / segment fetch errors when starting with too-large windows.
+- Changes: Updated `tools/backfill_store_all.js` to (a) cap initial window via `--safeMax` (default 1200), (b) introduce adaptive segment size shrink/grow (error streak shrink: factor 0.5; clean streak grow: *1.25 every 6 ok cycles), (c) add hard exit guard `--maxConsecErrorsExit` (default 30) to avoid infinite error loops, (d) shrink main window on HTTP errors similarly to logical 500s, (e) consolidate error logging with window & segment context, (f) add segment growth after stable streak. No worker change yet (still per-log inserts) – aims to stabilize baseline before batching.
+- Rationale: Large initial block windows + high log density likely triggering provider HTTP 500 or worker execution limits during many individual INSERTs; adaptive approach searches for stable band automatically without manual intervention.
+- Risk: Low (client-side script only). Possible slower initial throughput until growth kicks in; acceptable tradeoff for sustained unattended execution.
+- Follow-ups: (1) Batch INSERT optimization in worker (multi-value or transaction) to raise per-request ceiling; (2) Add soft per-run log target (e.g., dynamic rowCap based on avg logs/block); (3) Export structured JSON metrics snapshot every N runs for external monitor.
+- Verification Plan: Run with conservative params: `--maxBlocksStart 800 --safeMax 800 --segmentBlocks 300 --segmentMin 120 --rowCap 40000 --minBlocks 200` and observe ≥5 iterations: expect window/segment adjustments not to exceed provider error threshold; confirm no termination until catch-up.
+
+## 2025-09-08 – Segmentation added to Pages worker (store_all)
+- Goal: Mirror root worker segmented eth_getLogs fetching in Pages `_worker.js` to mitigate `rpc_http_500` errors during large block window scans in `store_all` mode.
+- Change: Added optional `segmentBlocks` param; when >0 iteratively queries subranges (`segmentBlocks` wide) within the overall `startBlock..toBlock` window, inserting logs until `rowCap` reached or range exhausted. Returns early with segment context on segment fetch failure. Falls back to single-range fetch when absent.
+- Files: `eve-frontier-map/_worker.js` (store_all branch) – ~+55 / -15 LOC.
+- Rationale: Providers were emitting 500 errors for larger (multi-thousand block) unsegmented queries; segmentation reduces per-call payload size, lowering failure probability while preserving overall throughput (parallelism not introduced yet to avoid rate spikes).
+- Risk: Medium (ingestion path only, no schema). Guarded by existing rowCap & maxBlocks; early return on segment error surfaces failing subrange for diagnostics.
+- Verification: Static patch applied; next step run backfill with `--segmentBlocks 500` and confirm reduced `rpc_http_500` incidence; monitor attempted vs inserted counts.
+- Follow-ups: (1) Adaptive segment sizing (grow after consecutive clean segments) (2) Retry with exponential backoff per failed segment before abort (3) Metrics event for segment failure counts.
+
+## 2025-09-08 – Add store_all raw log ingestion mode
+## 2025-09-08 – Backfill Script (store_all mode)
+- Goal: Automate continuous historical raw log capture (address-only) until cursor reaches finalized head, enabling unattended population of `raw_logs`.
+- Script: `tools/backfill_store_all.js` – loops POST `/api/indexer-ingest?openPreview=1` with `{ mode:'store_all', rpc, world, deployBlock, maxBlocks, rowCap }`.
+- Features:
+  - Adaptive window growth: starts at `--maxBlocksStart` (default 1500), scales by `--scaleFactor` (1.5) every `--scaleEvery` successful full-window runs (no rowCap hit) up to `--maxBlocksCeil` (default 8000).
+  - Row cap guard (default 50k, configurable) to prevent runaway writes if per-block log density spikes.
+  - Tail mode (`--tail`) continues polling after catching up (interval `--tailSleepMs`, default 6s) to maintain near-real-time capture.
+  - Dry run mode (`--dryRun`) fetches health & prints config without ingest.
+  - Verbose toggle for full JSON vs concise run summaries.
+- Rationale: Manual repeated POSTs inefficient and error-prone; script enforces pacing, scaling, and safe caps, accelerating full historical backfill to support later topic classification & decoding.
+- Risk: Medium (sustained write amplification). Mitigations: rowCap, adaptive bounded window, operator-controlled base URL (preview only recommended initially).
+- Usage Example:
+  `node tools/backfill_store_all.js --base https://<preview>.pages.dev --rpc https://rpc.pyropechain.com --world 0x7085f3e652987f656fB8dEE5aA6592197Bb75de8 --deployBlock 7288348 --rowCap 60000 --maxBlocksStart 1500 --verbose`
+- Follow-ups: (1) Add topic frequency aggregation script referencing `raw_logs`. (2) Introduce `event_topic_map` table to update first/last block & counts per topic during ingest (future optimization). (3) Evaluate D1 size growth & adjust window/rowCap thresholds.
+
+- Goal: Pivot from zero-result topic-filtered MUD store ingestion to full address-only raw log capture to populate raw_logs for later decoding.
+- Files: eve-frontier-map/_worker.js (add store_all branch), decision-log.md (this entry).
+- Diff: ~140 LoC added (new mode path) + minor health metric addition.
+- Risk: Medium (new ingestion path writing to DB) – guarded by preview bypass + rowCap + maxBlocks.
+- Gates: typecheck N/A (JS worker), build pending (Pages auto) – logic isolated.
+- Follow-ups: (1) Backfill historical range via repeated store_all runs. (2) Add event_topic_map table to classify topics. (3) Implement decoding pipeline once ABI/spec available.
+## 2025-09-08 – Remote Preview Store Ingestion Pivot & RPC Secret Blocker
+## 2025-09-08 – Temporary Preview Bypass for /api/indexer-ingest
+## 2025-09-08 – First Store Ingest Execution (Zero Events)
+- Goal: Validate end-to-end store-mode pipeline (auth bypass, RPC call, head determination, cursor advance, DB writes) using preview bypass before adding decode logic.
+- Execution: Invoked `/api/indexer-ingest?openPreview=1` (preview host) with payload `{ mode:'store', rpc:'https://rpc.pyropechain.com', world:'0x7085f3e652987f656fB8dEE5aA6592197Bb75de8', deployBlock:7288348, maxBlocks:800, topics:[5 hashes] }`.
+- Result: `status:'ok'`, `rawEvents:0`, `newTables:0`, cursor advanced from 2 → 7,289,148 (range 7,288,348–7,289,148) marking backfill window processed without matching logs for supplied topics. Health now shows `last_block_number:7289148`, still `store_events:0`, `table_registry:0`.
+- Interpretation: No StoreSet*/Delete/Ephemeral events emitted in initial 800-block window post deployment block OR world address may not be emitting MUD store logs early. Could also indicate mismatch between world address and actual Store contract (if MUD architecture proxies store calls).
+- Immediate Next Steps:
+  1. Widen scan: repeat ingest with `maxBlocks` increased (e.g., 5000) until either events found or head reached minus confirmations.
+  2. Sanity log probe: perform single-topic `eth_getLogs` manually (direct RPC) for one hash across a larger range (deploymentBlock .. deploymentBlock+10000) to confirm on-chain presence.
+  3. Confirm if MUD store events are emitted via a separate Store contract (different address). If so, require that address for ingestion (current implementation filters by `address: WORLD`).
+  4. Collect a transaction hash known to produce a gate/assembly change to inspect raw receipt logs.
+  5. If events truly absent so far, continue cursor advance until first non-zero block; consider adding exponential range growth heuristic (double until events found) to reduce round trips.
+- Risk: Low; advance without data is reversible (can reset cursor to deployment block by manual UPDATE if re-scan needed). Historical data not lost because raw chain still authoritative.
+- Follow-ups: Implement diagnostic endpoint (or temporary `/api/indexer-diagnose?blockFrom=&blockTo=`) to return raw log counts per topic for faster triage (remove after validation). Add entry when first non-zero `rawEvents` captured.
+
+- Goal: Unblock first real store-mode ingestion without relying on `INDEXER_ADMIN_TOKEN` header (operator previously experienced persistent token binding friction). Extend existing `?openPreview=1` preview-only bypass pattern (already on `/api/indexer-migrate`) to `/api/indexer-ingest` when deployed on a `*.pages.dev` host.
+- Change: Updated `handleIndexerIngest` in `eve-frontier-map/_worker.js` to compute `bypassAuth` when: (a) request host ends with `.pages.dev`, (b) URL contains `openPreview=1`, and (c) either no admin token is configured OR provided header does not match expected token. Response now echoes `bypassAuth` (boolean) for audit parity with migrate endpoint.
+- Security Tradeoff: Bypass allows anonymous ingestion triggers on preview deployment only; production custom domains still require header. Risk is low because preview environment is non-production and ingestion writes limited to D1 dev data. Will remove bypass after admin token confirmed stable or when promoting ingestion to production.
+- Rationale: Eliminates current blocker (401 Unauthorized) encountered during remote store ingest attempts despite inclusion of `openPreview=1`. Consistency with migration endpoint reduces operator confusion (uniform bypass semantics across both operations during preview iteration).
+- Verification Plan: Redeploy preview branch, invoke `/api/indexer-ingest?openPreview=1` with store payload (RPC+topics). Expect JSON `{ status:'ok', bypassAuth:true, rawEvents>0 OR up_to_date }`. Follow with health check confirming non-zero `store_events` after first successful batch.
+- Rollback: Remove added bypass logic lines and require header auth; no schema changes, so revert is trivial.
+- Follow-ups: (1) Execute store ingest; (2) Confirm `table_registry` provisional/finalized counts; (3) Remove bypass before production merge; (4) Add automated test (future) ensuring bypass disabled on non-preview hosts.
+
+- Goal: Capture real on-chain MUD Store logs (store mode) after local `wrangler pages dev` instability (process exit after first request) blocked applying migration 006 & ingesting locally. Pivoted to remote preview deployment (branch: `indexer-preview`) where migrations now succeed and ingestion endpoints are reachable.
+- Context: Migration 006 (store tables) applied successfully via preview `?openPreview=1` bypass. Generated hashed topic0 allowlist (`scratch/topics.json`, 5 core + ephemeral store events). First attempt to POST `/api/indexer-ingest` in `store` mode failed locally due to (a) PowerShell hash literal parsing + interpolation issues and (b) missing `PYROPE_RPC` environment variable (RPC not supplied inline), so no remote store events inserted yet (health still shows `table_registry=0`, `store_events=0`).
+- Decision: Proceed exclusively with remote preview ingestion until (1) local dev instability root cause identified or (2) production-ready ingestion loop hardened. Avoid spending further cycles on local environment flakiness; prioritize achieving first successful raw event persistence to validate schema & cursor advancement.
+- Files: No code changes in this step (documentation only). Runtime logic already present in `eve-frontier-map/_worker.js` (`handleIndexerIngest` store branch). This entry documents operational shift + current blocker.
+- Blocker: Missing RPC endpoint secret. Endpoint required either as (a) bound `PYROPE_RPC` secret in the Pages preview environment or (b) supplied per-request field `rpc` in JSON body. Without it head block fetch (`eth_blockNumber`) cannot execute. Need operator to provide a non-rate-limited Pyrope JSON-RPC URL (read-only) aligned with chainId 695569.
+- Risk: Low (docs only). Operational risk of delaying ingestion (history growth) minimal given backfill start block fixed at deployment (7,288,348) and confirmation depth small (8) – backlog is bounded by elapsed wall clock time only.
+- Verification State: Health endpoint (details=1) confirms migrationsApplied includes `006_store_registry`; cursor presently at block 2 (from earlier stub ingest). No store events present yet. Topics file present with expected hashes.
+- Follow-ups:
+  1. Provide RPC URL -> set Pages branch secret (`PYROPE_RPC`) or include inline in POST body.
+  2. Re-run store ingest: `{ mode:'store', maxBlocks:800, deployBlock:7288348, topics:[<5 topic0 strings>] }`.
+  3. Verify `/api/indexer-health?details=1` reflects non-zero `store_events` and provisional `table_registry` rows; confirm finalized promotion after head advances ≥ confirmation depth.
+  4. Add decoding pipeline decision entry once first tableIds appear (map namespace/name heuristics, introduce decode_progress usage).
+  5. Remove `?openPreview=1` bypass after auth header confirmed working with admin token in preview.
+- Diff: + ~40 lines (this entry only).
+- Rollback: Delete this entry if local dev issue resolved immediately and remote pivot deemed unnecessary (no functional code tied to this doc change).
+
+## 2025-09-08 – Inline Indexer Migrations & Preview Bypass
+## 2025-09-08 – TableId Incremental Discovery Strategy
+## 2025-09-08 – Pivot: Organic TableId Discovery via Store Events
+## 2025-09-08 – Store Registry & Raw Event Persistence (Migration 006)
+- Goal: Persist raw MUD Store events and organically discovered tableIds to enable deferred decoding into domain tables (assemblies, gates, ACL) without blocking ingestion on prior tableId enumeration.
+- Migration: `006_store_registry.sql` introducing:
+  - `table_registry(table_id PK, first_block, last_block, appearances, finalized, namespace_guess, name_guess, timestamps)`
+  - `store_events(id PK, block_number, log_index, tx_hash, topic0, table_id, key_hex, field_index, value_hex, ephemeral)` with indexes on (block_number,log_index) and (table_id, block_number).
+  - `decode_progress(table_id PK, last_decoded_block, last_decoded_log_index)` for incremental decode checkpoints.
+- Integration: Added migration to worker migration list. Future `/api/indexer-ingest` enhancement will (a) fetch logs, (b) insert rows into `store_events`, (c) upsert/advance `table_registry`, (d) later decode when schema known.
+- Rationale: Enables immediate capture of on-chain history (lossless) while schema mapping matures; supports reprocessing & schema evolution (re-decode) without rescanning chain.
+- Risk: Medium (new tables, write amplification). Mitigated by narrow columns & hex storage; can add pruning/compression later.
+- Follow-ups: Extend ingestion endpoint with log polling + promotion logic; add decision entry when decode pipeline implemented; add size monitoring (row counts, storage usage) to health output.
+
+- Goal: Replace dedicated RegisterTable scan with direct extraction of unseen tableIds during normal Store event ingestion (SetRecord/SetField/DeleteRecord + optional Ephemeral variants), reducing separate enumeration phase and RPC calls.
+- Implementation: Added `tools/ingest_tables_from_store.js` scanning core Store topics (5 with ephemeral enabled) in 3,000 block chunks from deployment block, applying confirmationDepth=8. Every log's `topics[1]` treated as tableId candidate; first appearance stored provisional → finalized once block <= head - depth.
+- Rationale: All Store write/delete events embed tableId already; RegisterTable events only provide human-readable namespace/name (which can be heuristically decoded). Organic discovery ensures no missed late-registered tables and keeps a single ingestion cursor path.
+- State File: `scratch/store_tableIds_state.json` (cursorBlock, provisional[], finalized[], lastHead). Independent from earlier `tableIds_state.json`; legacy file retained temporarily but can be deprecated after first successful table discovery.
+- Current Progress: Scanned 10 chunks (deployment → block 7,318,357) no tableIds yet. Indicates either (a) table registrations & first writes occur later, (b) world is sparse early, or (c) ingestion target tables registered via a later deployment sequence. Plan: continue forward until first discovery, then generate allowlist.
+- Next Enhancements (deferred): adaptive chunk growth after consecutive empty scans; exponential probe to locate first non-empty region; optional backfill of RegisterTable for pretty names.
+- Risk: Low (read-only RPC, local JSON writes). Rollback: revert to prior RegisterTable enumerator scripts.
+- Follow-up Trigger: On first finalized tableId, add decision entry with decoded namespace/name and create constants file for ingestion filter integration.
+
+- Goal: Establish durable, low-risk accumulation of MUD tableIds (RegisterTable events) without large monolithic eth_getLogs scans that previously timed out.
+- Scripts: `tools/ingest_tableids.js` (incremental scanner). Earlier full-range enumerators (`list_mud_tables*.js`) retained for ad-hoc use but not primary path.
+- Parameters: deploymentBlock=7,288,348; confirmationDepth=8 (finalize only when `blockNumber <= head - 8`); chunkSize=3,000 blocks; pollInterval=15s (tail mode when run without `--once`).
+- State: Persisted at `scratch/tableIds_state.json` (keys: cursorBlock, cursorLogIndex (reserved), provisional[], finalized[], lastHead). Provisional entries upgraded to finalized once depth satisfied. Decoding heuristic splits 32-byte id → (namespace, name) ASCII up to first 0x00 per half.
+- Rationale: Avoid RPC provider strain / timeouts encountered with large (≥20k) block window scans and unfiltered log payloads. Topic-filtered per-signature queries minimize bandwidth and allow continuous progress with resumability.
+- Current Progress: Scanned blocks 7,288,348 → 7,324,359 (finalizedCount=0) – no RegisterTable events yet, indicating tables likely registered later or via alternative mechanism still ahead of cursor. Cursor parked at nextBlock 7,324,360.
+- Next Steps: Continue running increments until first tableIds captured; then generate allowlist mapping & integrate into Store event ingestion filter (post table discovery). If extended empty range persists, widen chunkSize cautiously (e.g., 6,000) or binary search for first occurrence by exponential jump scan.
+- Risk: Low (read-only chain queries + local JSON writes). Rollback: delete state file to restart from deploymentBlock.
+- Follow-ups: Add adaptive backoff on consecutive empty scans; optionally track scan rate & ETA once first event encountered.
+
+## 2025-09-08 – MUD Store Event Topic Hashes
+- Goal: Compute canonical keccak256 (topic0) hashes for core MUD Store events to enable precise log filtering (topic[0] allowlist) ahead of real on-chain ingestion implementation.
+- Script: Added `tools/mud_event_topics.js` (uses `js-sha3` for portability) enumerating persistent + ephemeral store event signatures:
+  - `StoreSetRecord(bytes32,bytes32,bytes)` → 0x42357dad1a178f81f27d8ff6063fb2b8d15033e65c75a979ac63fc80e6603c31
+  - `StoreSetField(bytes32,bytes32,uint8,bytes)` → 0x47af9b5f27ad9ac540b882a244d77ab589f56582bb6def36c376b78e9004c08c
+  - `StoreDeleteRecord(bytes32,bytes32)` → 0x9bc85421aa76d2fc1a94bbb4f923f22d2f893a23c235edcd6cdcbfd883230bc7
+  - `StoreEphemeralRecord(bytes32,bytes32,bytes)` → 0x55718fe69831deb3b0d3bb64b255fb48a300152d898a5c96cc61f72f5904ee34
+  - `StoreEphemeralRecordValue(bytes32,bytes32,uint8,bytes)` → 0xd25c58a0a4a4fcc469362567527f92ecc59cbb09c8bfeb712ac94eb21d048448
+- Output: Script prints JSON `{ generatedAt, count, events:[ { signature, topic0 }... ] }` for reproducible audit; no external network calls.
+- Rationale: Having deterministic topic0 constants allows ingestion loop to (a) fast‑reject unrelated logs without decoding, (b) map early-deployment sample topics to known signatures validating framework version (pair with deployment block entry), and (c) keep future ABI changes localized (add signature → recompute script). Ephemeral events included for completeness though first pass ingestion may ignore them (can be filtered out by not whitelisting those topics initially).
+- Dependencies: Added dev dependency `js-sha3` because the local Node build lacked native `keccak256` in `crypto` module. Chose devDependency (tooling only, not bundled into worker/runtime code).
+- Next Required Inputs (still blocking tableId derivation & decoding):
+  1. Table namespace(s) and table names for each logical dataset (assemblies, gate directions, gate metadata / ACL, any tombstone-equivalent) OR raw 32-byte tableId values if already known.
+  2. Confirmation depth decision (proposed default 8) for safe finalized head during tail polling.
+  3. Clarification whether ephemeral store events are relevant to gameplay state we index (if not, we will exclude their topic0 values from allowlist to reduce noise).
+- Planned Follow-Up Once (1) Provided:
+  - Generate tableIds via `keccak256(abi.encodePacked(namespace, tableName))` (MUD rule: namespace & name left-padded / encoded as bytes32 each; confirm exact packing—will document in next entry). Produce mapping script `tools/mud_table_ids.js` similar pattern.
+  - Append decision log entry with tableId constants + ingestion filter structure (TOPIC_ALLOWLIST + TABLE_ALLOWLIST arrays).
+  - Implement feature-flagged ingestion backfill loop using `eth_getLogs` with `(topics: [ [setRecord,setField,deleteRecord] ], address: world)` and post-filter on parsed `tableId` from log data, advancing cursor.
+- Risk: Low (tooling + documentation only). No runtime path modified yet.
+- Rollback: Delete script & entry if store event model changes (unlikely; stable across MUD v2+).
+- Verification: Ran script locally; hash outputs match deterministic js-sha3 keccak256 results; count=5.
+
+## 2025-09-08 – World Contract Deployment Block Discovery
+- Goal: Derive precise deployment (creation) block for pyro chain world contract to bound historical log backfill and avoid scanning from genesis.
+- Method: Added helper script `tools/find_deploy_block.js` performing binary search over `eth_getCode(address, blockTag)` (range 0..latest) to locate first block whose state contains non-empty code for `0x7085f3e652987f656fB8dEE5aA6592197Bb75de8`. Confirmed absence (`'0x'`) at prior block for correctness. Queried logs at deployment block for initial event topics.
+- Result JSON (script output):
+  ```json
+  {
+    "worldAddress": "0x7085f3e652987f656fb8dee5aa6592197bb75de8",
+    "latestBlockChecked": 8111687,
+    "deploymentBlock": 7288348,
+    "deploymentBlockHex": "0x6f361c",
+    "codePresentAtDeployment": true,
+    "codePresentPreviousBlock": false,
+    "logsOnDeploymentBlock": 2,
+    "firstLogTopicsSample": [
+      [
+        "0xc7f5fdc8526b76f54916701bc910876243ffff2a40b0bb8d59eea8151c52c005",
+        "0x322e302e32000000000000000000000000000000000000000000000000000000"
+      ],
+      [
+        "0x7f8f36afe3fb61c459c1a54a60b8a477eab02cc58e49f547561a40906239cb82",
+        "0x322e302e32000000000000000000000000000000000000000000000000000000"
+      ]
+    ]
+  }
+  ```
+- Interpretation:
+  - `deploymentBlock` = 7,288,348 (hex 0x6f361c) will serve as ingestion `startBlock` (no need to subtract) for backfill.
+  - Two logs emitted at deployment likely correspond to initial MUD Store version / schema registration events (topic[0] hashes unknown until ABI supplied). Second topic value appears to encode a version string (`"2.0.2"` ASCII -> hex padded) indicating framework/runtime version.
+  - Absence of code at `deploymentBlock-1` confirms binary search correctness; no earlier redeploy found.
+- Next Required Inputs (still blocking full ingestion implementation):
+  1. ABI fragments or explicit event signature lines for MUD Store events & relevant table (assembly/gate/ACL) writes.
+  2. Namespace + table name list to compute tableId hashes (namespace + table packed then keccak256) for log filtering.
+  3. Confirmation depth decision (tentative 8) based on expected reorg profile (adjust before production if chain characteristics supplied).
+- Actions Queued After ABI Provided:
+  - Derive `topic0` hashes for each required event; map sampled deployment topics to known events to validate chain matches expected MUD version.
+  - Compute tableIds; add allowlist & fast path filters in ingestion loop (skip unrelated logs early).
+  - Draft ingestion design decision entry (cursor advancement, batch window sizing, reorg handling, retry semantics) and implement feature-flagged log scanner using `eth_getLogs` chunked between `cursor+1` and `head-confirmations`.
+  - Backfill from `deploymentBlock` upward in fixed-size ranges (e.g., 2–5k blocks per batch) until caught up, then switch to tail polling.
+- Risk: Documentation + utility script only (low). Script network I/O against public RPC; no DB/state mutation beyond decision log entry.
+- Rollback: Remove script & this entry if alternate authoritative deployment block later discovered (unlikely given code presence check).
+- Follow-ups: Await ABI; once received, proceed with event/topic correlation and ingestion scaffold commit.
+
+## 2025-09-08 – Chain RPC Endpoint Registration & ABI Pending
+- Goal: Record provided public JSON-RPC endpoint for pyro test chain world ingestion and reaffirm world contract address prior to implementing on-chain log ingestion.
+- RPC Endpoint: `https://rpc.pyropechain.com` (JSON-RPC; expected eth_* namespace including `eth_getLogs`, `eth_blockNumber`, `eth_getBlockByNumber`).
+- World Contract: `0x7085f3e652987f656fB8dEE5aA6592197Bb75de8` (matches previously documented `worlds.json` entry; checksum preserved).
+- Deployment / Start Block: STILL PENDING (required to bound historical backfill). Action: obtain deployment transaction receipt or earliest relevant event block to avoid scanning from genesis.
+- ABI Status: Not yet supplied. Blocking next step (event signature extraction & mapping). Operator indicated explorer address page available; need either (a) flattened source with event declarations, (b) direct ABI JSON, or (c) manual copy of event signature lines.
+- Immediate Next Steps (once ABI received):
+  1. Extract event signatures (topics[0]) for assembly/gate create/update/delete, gate direction changes, ACL modifications.
+  2. Define EVENT_MAP -> TABLE mapping (smart_assembly, smart_gate_direction, gate_tombstone, gate_acl) and required decoded fields (gate_id, from_system, to_system, direction_state, visibility_class, tribe_id, deleted_flag, blockNumber, logIndex, txHash, timestamp).
+  3. Add ingestion plan decision entry & scaffold feature-flagged eth_getLogs loop (cursor: last_block_number, last_log_index; confirmations depth tentative 5–12 blocks pending reorg policy input).
+  4. Backfill phase: windowed historical scan (e.g., 2k block chunks) until start cursor catches up to head minus confirmations.
+- Risk: Documentation only (low). Avoids re-asking for RPC details and clarifies remaining blocking inputs.
+- Follow-ups:
+  - Provide ABI or event signature list.
+  - Provide reorg / finality guidance (average & worst-case) to set safe confirmation depth.
+  - Provide deployment/start block.
+  - After above: proceed with ingestion design entry & code.
+
+## 2025-09-08 – Chain Source Registration (worlds.json) & Dual-Source Model
+- Goal: Permanently record base chain context and prevent future confusion between REST World API and on-chain (pyro) event/log ingestion sources.
+- Chain Metadata: Added/confirmed `public/worlds.json` containing `{ "695569": { address: "0x7085f3e652987f656fB8dEE5aA6592197Bb75de8", blockNumber: 7288348 } }`.
+- Interpretation:
+  - `695569` = pyro test chain id (numeric). Serves as key for selecting active world deployment in health endpoints.
+  - `address` = world contract address (checksummed/casing preserved). Source of authoritative events for gate directionality & access logic.
+  - `blockNumber` = reference head at time of capture (not necessarily deployment block). Deployment/start block still required to perform historical backfill (TODO: obtain or derive from earliest relevant event).
+- Dual-Source Model (clarified):
+  - Chain Layer (primary for indexer): contract events / MUD store logs -> normalized into `smart_assembly`, `smart_gate_direction`, `gate_tombstone`, ACL tables.
+  - World REST API (secondary/enrichment): configuration + optional metadata (names, descriptions) -> stored in `assembly_metadata` (future enrichment pass) and used for bootstrap (`/api/indexer-bootstrap`).
+- Pending Inputs (chain ingestion): RPC endpoint URL, ABI fragments (assembly upsert/delete, gate update/delete or generic MUD Set/Delete events), deployment block (or earliest block to scan), confirmation depth, semantics for gate direction replacement vs incremental diff.
+- Rationale: Ensures subsequent engineering steps (replacing simulated ingestion with real log scanning) reference a stable documented source; avoids repeating earlier misunderstanding where `/events` REST path was (incorrectly) treated as canonical event feed.
+- Risk: Documentation only (low). Risk of stale `blockNumber` acknowledged; will treat file as mutable reference, not strict invariant.
+- Follow-ups:
+  1. Add ingestion scaffold reading `worlds.json` for start head & chainId selection (already partially used in health).
+  2. Introduce `CHAIN_CONFIG` structure mapping chainId -> { worldAddress, startBlock, headHint } once deployment/start block provided.
+  3. Implement RPC log polling ingestion once ABI + RPC endpoint supplied (new decision entry to follow).
+  4. Add validation in `/api/indexer-migrate` or `/api/indexer-ingest` to warn if `worlds.json` address diverges from stored active world_version world_address.
+
+- Goal: Unblock D1 schema initialization without relying on header auth difficulties and asset fetch 405s.
+- Change: Inlined migrations 001–005 as MIGRATION_SQL map in `eve-frontier-map/_worker.js`; removed asset fetch + transaction wrapper from 005 (D1 limitation). Added temporary preview-only `?openPreview=1` bypass to /api/indexer-migrate and /api/indexer-ingest (pages.dev host restriction).
+- Rationale: Repeated auth/env friction and ASSETS 405 prevented progress; inline approach deterministic, small payload.
+- Risk: Temporary bypass reduces auth protection on preview branch only. Production remains header-protected. Plan to remove bypass after indexer stabilized.
+- Verification: Migration endpoint executed sequentially (002–005, then 005 after fix). Health shows migrationsApplied 001–005. Test ingest populated rows (smart_assembly=2, smart_gate_direction=1). No errors in worker build.
+- Follow-ups: Remove bypass once admin header flow reliable; consider tooling script for remote D1 apply after token scope update.
 <!-- Ordering Convention: Reverse chronological (newest entries at the top). File reorganized on 2025-09-08 to adopt consistent newest-first ordering. Always append new decisions directly below this note. -->
+
+## 2025-09-08 – World Log Enumeration (No Topic Filter) & Store Signature Mismatch
+- Goal: Determine why canonical MUD Store topic0 hashes (SetRecord/SetField/DeleteRecord/Ephemeral*) produced zero results by empirically enumerating all logs for the world address without topic filtering.
+- Method: Added script `tools/enumerate_world_logs.js` (address-only eth_getLogs, chunked) and executed two scans:
+  1. Early window (deployment block 7,288,348 through 7,289,848; span 1,500 blocks; chunk=300)
+  2. Recent head slice (blocks 8,090,000–8,091,200; 1,200 blocks; chunk=300)
+- Early Window Result: 3,025 logs, 6 distinct topic0 values:
+  - 0x8dbb3a9672eebfd3773e72dd9c102393436816d832c7ba9e1e1ac8fcadcac7a9 (1,621)
+  - 0xfe158a7adba34e256807c8a149028d3162918713c3838afc643ce9f96716ebfd (745)
+  - 0x8c0b5119d4cec7b284c6b1b39252a03d1e2f2d7451a5895562524c113bb952be (644)
+  - 0x0e1f72f429eb97e64878619984a91e687ae91610348b9ff4216782cc96e49d07 (13)
+  - 0xc7f5fdc8526b76f54916701bc910876243ffff2a40b0bb8d59eea8151c52c005 (1) [deployment]
+  - 0x7f8f36afe3fb61c459c1a54a60b8a477eab02cc58e49f547561a40906239cb82 (1) [deployment]
+- Recent Head Slice Result: 42,779 logs, 4 distinct topic0 values (the first four above persist; the two single-shot deployment topics absent).
+- Interpretation:
+  - The chain emits high-volume events with four recurring topic0 hashes that do NOT match standard MUD Store event signatures previously assumed. Our zero-result scans were due to incorrect topic allowlist, not address filtering or inactivity.
+  - Two one-time deployment topics (likely version/initialization events) match earlier deployment block sample.
+  - Required action: Acquire ABI (or at minimum the event signature strings) for these four recurring topic0 hashes to map them to semantic entities (assemblies, gate directions, ACL, etc.). Without ABI, we can still begin raw capture by switching ingestion to broad address scan then post-filter once mapping established; risk: large write volume (tens of thousands logs per ~1k blocks) → potential D1 storage/throughput pressure.
+- Decision:
+  1. Suspend use of canonical MUD Store topic allowlist (remove/ignore previous five hashes for now).
+  2. Introduce interim mode `store_unfiltered` (address-only) OR repurpose current `store` mode to accept an optional `topicsAny` array; when absent, perform address-only scan capturing raw logs into `store_events_raw` (new table) or reuse `store_events` with nullable table_id.
+  3. Add mapping table `event_topic_map(topic0 PRIMARY KEY, label TEXT NULL, first_block INT, last_block INT, appearances INT)` to track discovery & later annotate once ABI provided.
+  4. Gate enablement behind preview-only bypass to observe write amplification and estimate storage growth before production.
+- Storage Consideration (rough): Recent slice 42,779 logs / 1,200 blocks ≈ 35.6 logs/block. Backfilling ~800k blocks would imply ~28M rows if rate uniform (likely rate varies). Must either (a) narrow by actual relevant topics after ABI, or (b) implement compression/pruning strategy before full backfill.
+- Immediate Next Steps:
+  - Request ABI or event signature lines for the four hot topics.
+  - (If ABI delayed) Implement topic discovery capture limited to a short rolling window (e.g., next 5k blocks) to sample field structure before committing to full historical backfill.
+  - Add ingestion parameter `topics` override: if supplied (length >0), filter; else fall back to address-only discovery path with row cap per run.
+- Risk: Medium – potential large unbounded data ingestion if unfiltered backfill started naively. Mitigation: add per-run row cap & progressive expansion only after classification.
+- Follow-ups: Add decision entry when ABI integrated and topics labeled; update schema if separate raw table chosen.
+- Rollback: Revert script addition + ignore enumeration results; keep current zero-event state (low value).
+
+
+## 2025-09-08 – Overlay Endpoint & Gate Tombstones
+- 2025-09-08 – Overlay Migration Formalization (005_overlay)
+  - Added `migrations/005_overlay.sql` to codify previously lazily-created `gate_tombstone` table and supporting indexes (`idx_gate_tombstone_deleted_at`, `idx_gate_tombstone_world`) plus new performance index `idx_gate_direction_last_change` on `smart_gate_direction(last_change_at)` for `/api/indexer-overlay` queries.
+  - Updated migration lists (root + Pages workers) to include `'005_overlay'` ensuring future environments (or fresh deployments) obtain table/indexes via standard migration flow instead of runtime creation.
+  - Rationale: Moves schema ownership from ad-hoc exec statements in ingestion path to controlled migration, enabling repeatable provisioning and simplifying future pruning or alteration scripts.
+  - Risk: Low (IF NOT EXISTS guards). Existing deployments with table already present simply create indexes if missing; no data loss.
+  - Follow-ups: Add pruning logic (worker cron or admin endpoint) once overlay consumer proves stable; consider adding foreign key constraint from tombstone.gate_id to smart_assembly if keeping historical referencing semantics (currently omitted to allow tombstone insert post-delete).
+
+- Goal: Provide sub-minute routing correctness for gate topology changes (add/update/delete) without requiring immediate full adjacency snapshot rebuild by exposing a lightweight delta feed the client (or future routing worker) can merge onto the last snapshot graph.
+- Changes:
+  - Root `worker.js`: Added `/api/indexer-overlay` returning recent gate direction mutations and deletions since an ISO timestamp (param `sinceTs`) or relative lookback (`minutes`, default 5). Each response includes `{ gates:[{ gate_id, world_version, directions:[...] }], deletions:[{ gate_id, world_version, deleted_at }], sinceTs, more }`.
+  - Pages `_worker.js`: Parity `/api/indexer-overlay` implementation for preview/production consistency.
+  - Ingestion (both workers): Ensures `gate_tombstone` table exists and inserts a row on `assembly_delete` events (best-effort) to record deletion time for overlay consumers. Root worker had tombstone creation earlier; Pages worker now matches.
+  - Schema (implicit): `gate_tombstone (id INTEGER PK AUTOINCREMENT, gate_id TEXT, world_version INTEGER, deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)` created lazily during ingestion; no migration file yet (future: formalize if permanence confirmed).
+- Rationale: Deletions cannot be inferred solely from absence in upserts; tombstones provide an explicit signal enabling client to remove gate edges from its in-memory graph promptly. Direction updates are fetched by querying `smart_gate_direction` rows with `last_change_at >= sinceTs`. Limiting to affected gates keeps payload small (avoid flooding client with full snapshot). This approach defers heavier snapshot rebuild cost until advisory thresholds trigger (`snapshotRecommended=true`).
+- Design Notes:
+  - `sinceTs` authoritative; when absent, server derives lookback window (minutes) ensuring idempotent polling pattern. Client will track last successful poll timestamp and pass it on subsequent requests.
+  - `more` flag heuristic set when gate_id list reaches limit, signaling client to reduce window or refetch with earlier `sinceTs` to avoid missing events (future enhancement: pagination cursor with last_change_at + gate_id tuple).
+  - No pagination yet (simplicity first); limit capped at 500 to constrain worst-case memory/time.
+  - Overlay feed intentionally omits unchanged assemblies and non-gate structures; focus solely on pathfinding topology.
+- Risk: Low/Medium: read-heavy queries on `smart_gate_direction` with filter on `last_change_at`. Potential index follow-up if query frequency or row counts grow (add index on `last_change_at`). Tombstone table grows monotonically; future pruning job may drop rows older than max overlay window (e.g., 24h) once snapshot rebuild guarantees inclusion.
+- Verification: Static analysis; no runtime test of real data yet (event source still partially simulated). Syntax scan to follow. Endpoint expected JSON shape confirmed by manual reasoning; null-safe on missing binding.
+- Follow-ups:
+  1. Add composite index `idx_gate_direction_last_change` on `(last_change_at)` when direction churn volume increases.
+  2. Introduce pagination cursor (`?after=<ts>|<gate_id>`) if `more` observed frequently in logs.
+  3. Add pruning task for `gate_tombstone` (retain N days) after snapshot diff ingestion stable.
+  4. Client integration: routing layer merges `gates` (replace per gate_id) then removes any `deletions` gate edges.
+  5. Consider adding lightweight change sequence number to avoid clock skew reliance if upstream timestamps drift.
+  6. Formalize creation of `gate_tombstone` via migration `005_overlay.sql` if table persists beyond experimentation phase.
+- Diff Size: ~140 LoC across two worker files + decision log entry.
+- Rollback: Remove `/api/indexer-overlay` handlers and tombstone insert; drop table (optional) – no other components depend yet.
+- Relation to Snapshot Advisory: Overlay serves real-time; advisory informs when baseline snapshot should be rebuilt to bound overlay accumulation size.
+
+
+## 2025-09-08 – Snapshot Advisory Fields (Indexer Health)
+- Goal: Provide early, side-effect-free signal indicating when a full adjacency snapshot rebuild is likely cost-effective based on recent pending changes sample (inserts, updates, deletes, potential gate edge mutations) without blocking near-real-time overlay approach.
+- Changes:
+  - Added computed fields to `/api/indexer-health?details=1` (both workers): `snapshotRecommended` (boolean), `snapshotReason` (string code), `changeSummary` ({ totalAssemblyChanges, gateEdgesPotential, assembliesToDelete }).
+  - Advisory only when `pendingChanges.classified` is true (real existence classification performed). Absent or heuristic pendingChanges leaves fields at false/null to avoid misleading signals.
+  - Threshold heuristics (initial tuning):
+    - gate_edges>=25 → reason `gate_edges>=25`
+    - deletes>=5 → `deletes>=5`
+    - assembly_changes>=50 → `assembly_changes>=50`
+    - Combined moderate churn: gate_edges>=12 AND assembly_changes>=25 → `gate_edges>=12_and_changes>=25`
+  - All thresholds chosen to bias toward structural/topology-impacting changes (gate edges, deletions) over pure update churn; purely additive small batches (<12 gate edges, <25 mixed changes) intentionally ignored to prevent snapshot thrash.
+- Rationale: Enables operators (and eventual automation) to observe buildup and time snapshot generation proactively while a faster in-memory delta overlay (future task) guarantees <60s routing correctness for freshly placed/removed/updated gates. Advisory decouples decision logic from execution (no automatic rebuild yet) reducing risk during early tuning.
+- Risk: Low (read-path only; no DB writes or cache invalidation). False positives incur only operator review; false negatives mitigated by overlay once implemented.
+- Follow-ups:
+  1. Add moving window counters (e.g., last 5 min coalesced) once ingestion operates continuously to refine thresholds.
+  2. Implement snapshot build endpoint honoring idempotency & recording coalesced event counts in `adjacency_snapshot_meta`.
+  3. Replace static thresholds with dynamic cost model (expected rebuild ms vs. incremental delta application cost) after gathering empirical metrics.
+  4. Surface advisory state in future `/api/indexer-health?details=1&probeStats=1` dashboards; optionally add `nextSnapshotEta` heuristic later.
+  5. Integrate deletion weight multiplier if future evidence shows deletions have disproportionate path invalidation impact.
+
+
+## 2025-09-08 – Assembly Deletion Event Handling & Pending Changes Delete Classification
+## 2025-09-08 – Pending Changes Probe Cache Statistics
+- Goal: Provide lightweight observability into effectiveness and latency of 5s pendingChanges probe cache.
+- Changes:
+  - Added `_pendingProbeStats` (hits, misses, lastMs) in both workers; increment hit on cache reuse, miss after probe attempt (regardless of network success), store elapsed ms of last miss probe execution.
+  - Extended `/api/indexer-health` response to include `probeStats` only when query param `probeStats=1` is supplied (keeps default payload lean).
+  - No persistence; stats reset on isolate recycle (sufficient for ad-hoc tuning and verifying reduced upstream load under manual polling).
+- Rationale: Operators can validate cache efficiency (expect hit ratio >50% under <=2s polling) and spot elevated latency from upstream `/events` (rising `lastMs`). Avoids adding permanent counters to KV or DB prematurely.
+- Risk: Low (purely additive, small in-memory object). Exposure gated by explicit param.
+- Follow-ups: Consider adding rolling average or p95 window if latency variance matters; optionally expose cache TTL configuration via env for stress testing.
+
+- Goal: Support removal of assemblies through new `assembly_delete` events and surface deletion backlog in health diagnostics.
+- Changes:
+  - Ingestion (`worker.js`, `eve-frontier-map/_worker.js`): Added branch handling `ev.type==='assembly_delete'` – verifies existence then `DELETE FROM smart_assembly` (cascades gate directions via FK; explicit cleanup fallback retained) and increments `rows_removed`.
+  - Pending changes probe (both workers): Expanded filter to include `assembly_delete` events; classification now computes `assembliesToDelete` alongside `assembliesToInsert`, `assembliesToUpdate`, `gateEdgesPotential`. Upsert existence check still only queries ids from upsert events (delete classification does not require DB read beyond presence in sample window).
+  - Schema of `pendingChanges` augmented with `assembliesToDelete` (additive, backward compatible for dashboards expecting previous keys).
+  - Cache (`_pendingProbeCache`) structure unchanged; cached object now includes new field transparently.
+- Rationale: Deletions materially affect adjacency snapshots and potential route validity; early visibility allows sizing rebuild cost before adding snapshot diff pipeline.
+- Risk: Low – deletion path bounded by single-row delete; absent events no behavioral change. If upstream payload mislabels event types, field remains zero.
+- Verification: Static analysis only (no live delete events yet); error scan reports no syntax issues. Existing insert/update logic untouched.
+- Follow-ups: (1) Add automated adjacency snapshot invalidation trigger when deletions exceed threshold; (2) Track cumulative deletions per run in `indexer_run` (rows_removed already; might add explicit deletions counter if other removals introduced later); (3) Consider exposing probe cache hit rate for tuning.
+
+## 2025-09-08 – Pending Changes Probe 5s Cache
+- Goal: Reduce redundant upstream `/events` fetches and existence SELECT queries when `/api/indexer-health?details=1` is polled rapidly.
+- Changes: Added per-isolate in-memory cache (`_pendingProbeCache`) in both `worker.js` and `eve-frontier-map/_worker.js`. Cache stores `{ fromBlock, value, ts }` and is reused when (a) cursor-derived `fromBlock` unchanged and (b) age <5s.
+- Diff: ~70 LoC combined (variable + conditional + assignment). No external dependencies.
+- Rationale: Health endpoints may be polled every 1–2s during manual monitoring; upstream event window (limit 20) and DB existence classification are deterministic for a given cursor. Short TTL balances freshness with load shedding.
+- Risk: Low – stale window max 5s and invalidated automatically once cursor advances (fromBlock changes). If memory purged (isolate eviction), behavior reverts to prior uncached logic.
+- Verification: Type scan shows no new errors; structure of `pendingChanges` unchanged; manual reasoning confirms non-interference with ingestion since probe remains read-only.
+- Follow-ups: Optional: expose `pendingChanges.cacheAgeMs` under debug flag; add lightweight hit/miss counters if future tuning needed; consider extending cache to also memoize counts when ingestion load increases.
+
+
+## 2025-09-08 – Ingestion Freshness Metric & pendingChanges Placeholder
+## 2025-09-08 – Pending Changes Probe (eventsAhead)
+- Goal: Provide early visibility into unprocessed event backlog size without mutating cursor or adding DB writes.
+- Changes:
+  - Updated `handleIndexerHealth` (root + Pages) to perform a best-effort fetch of `/events?fromBlock=<cursor.last_block_number+1>&limit=20` when `details=1`.
+  - If successful and response contains an `events` array, responds with `pendingChanges: { eventsAhead, fromBlock, sampleType }` where `eventsAhead` counts events whose `blockNumber >= fromBlock`, capped by fetch limit.
+  - If network errors or non-OK status occur, field remains `null` (graceful degradation, no error status escalation).
+- Rationale: Operators can distinguish between true idleness (no new on-chain events) vs. ingestion lag (backlog present) before implementing full diffing / preflight persistence layer. Low cost, no schema or write amplification.
+- Risk: Low (single external fetch per detailed health request). Potential slight added latency (< network RTT). If upstream API shape changes, field simply null.
+- Verification: Code review only (simulation API presently); fallback path leaves previous health payload unchanged besides absence of field when null.
+- Follow-ups: Replace simple count with summarized diff categories (assemblies_to_insert/update/delete, gates_to_rebuild) once event normalization pipeline exists; add timing & cached probe if health endpoint queried frequently (avoid hammering upstream service).
+
+## 2025-09-08 – Pending Changes Summary Fields (heuristic)
+## 2025-09-08 – Pending Changes Real Classification (batched existence)
+- Goal: Replace heuristic insert/update classification with actual DB existence checks for upcoming assembly events.
+- Changes:
+  - Both workers now build a unique id set from sampled `assembly_upsert` events (<=20 events fetched, ids capped to 50) and issue a single `SELECT id FROM smart_assembly WHERE id IN (...)` query.
+  - `assembliesToInsert` / `assembliesToUpdate` derived from presence in result set; previous heuristic (id endsWith '0') removed.
+  - Added `classified:true` flag in `pendingChanges` when real classification performed (distinguish from earlier heuristic logs/metrics).
+- Rationale: Improves accuracy of backlog characterization with minimal overhead (one bounded IN query) enabling more reliable dashboarding of write mix before implementing full diff pipeline.
+- Risk: Low. IN clause length bounded; failure silently degrades (pendingChanges remains null). Potential risk if upstream event burst includes >50 distinct ids—cap keeps query cost predictable.
+- Verification: Code inspection (no runtime test events). Fallback path unchanged under network/DB error.
+- Follow-ups: Add deletion detection once delete event type introduced; consider caching existence result across multiple rapid health polls within short TTL (e.g., 5s) to avoid redundant queries.
+
+- Goal: Add coarse categorization for upcoming assembly events and potential gate edge rebuild cost without DB lookups.
+- Changes:
+  - Extended `pendingChanges` to include `assembliesToInsert`, `assembliesToUpdate`, `gateEdgesPotential`, and `sampleSize` (raw events fetched, max 20) in both workers.
+  - Heuristic classification: any assembly id string ending with '0' treated as update, others as insert (placeholder logic until real existence checks implemented).
+  - `eventsAhead` now equals `assembliesToInsert + assembliesToUpdate` (assembly event subset) vs prior raw events length.
+- Rationale: Early signal of write mix & gate churn volume helps plan batching / diff snapshots; avoids per-id SELECT overhead right now.
+- Risk: Low (misclassification possible; documented). Network failure leaves previous shape (pendingChanges null) with no errors.
+- Verification: Code review only (simulation upstream). Null-safe handling ensures no throw on unexpected payload.
+- Follow-ups: Replace heuristic with actual existence test (batched SELECT or Bloom filter), add deletions when event type introduced, surface ratio (updates/(inserts+updates)) for trend dashboards.
+
+- Goal: Expose ingestion freshness (time since cursor update) and reserve response field for future diff summary without premature schema or query cost.
+- Changes:
+  - Added `ingestionLagMs` to `/api/indexer-health?details=1` (root + Pages). Computed as `Date.now() - updated_at(cursor)` (UTC parse with implicit Z normalization). Absent cursor → `null`.
+  - Added `pendingChanges: null` placeholder to health response. Will later carry lightweight structure (e.g., `{ assemblies: { toInsert, toUpdate, toDelete } }`) when pre-run diffing is implemented.
+  - No schema migrations required; pure read-path additions.
+- Rationale: Operators need quick signal of indexer staleness before full real event ingestion implemented. Placeholder establishes contract surface now so downstream dashboards / alerting can integrate field presence without churn.
+- Risk: Low (additive JSON fields only). Parsing failure falls back gracefully (cursor missing or malformed timestamp yields null lag).
+- Verification: Local code review; both workers patched; error scan shows no new issues; sample manual calculation (synthetic cursor updated_at 5 minutes prior) would yield ~300000ms.
+- Follow-ups: Implement real pending change computation (compare last processed block snapshot vs staging delta) once event source integrated; add alert threshold (e.g., >10min) in monitoring; consider moving freshness computation server-side into `indexer_run` table for historical lag trend storage if needed.
+
+
+## 2025-09-08 – Health Cursor Exposure & advanceBlocks Simulation
+- Goal: Surface current ingestion cursor in diagnostics and allow controlled cursor advancement for integration testing prior to real chain event ingestion.
+- Changes:
+  - Added `cursor` object (id, last_block_number, last_log_index, updated_at) to `/api/indexer-health?details=1` responses (root + Pages).
+  - Extended `/api/indexer-ingest` to accept `{ advanceBlocks }` (capped 10k) which increments `event_cursor.last_block_number` atomically and returns `advancedBy` along with updated `cursor`.
+- Rationale: Enables verifying downstream consumers relying on cursor progression and ensures write path for advancing block height is exercised before attaching external data source.
+- Risk: Low (bounded increment). Abuse could fast-forward cursor unrealistically; acceptable in dev/testing—will gate production advancement behind real event reconciliation.
+- Verification: Code review; expected `cursor` appears when details=1 and ingestion call with `{ advanceBlocks: 25 }` reflects increment by 25.
+- Follow-ups: Replace artificial advancement with real block/log scanning; add validation preventing backward movement or large jumps without reconciliation summary.
+
+## 2025-09-08 – Ingestion Duration Calculation & delayMs Param
+- Goal: Record actual (approximate) run duration and enable controlled delay simulation for testing health telemetry.
+- Changes:
+  - Updated `/api/indexer-ingest` (root + Pages) to accept JSON body `{ delayMs }` (0–5000ms cap) and, after optional sleep, compute `run_duration_ms` using `julianday(CURRENT_TIMESTAMP) - julianday(run_started_at)` * 86400000.
+  - Response now includes `delayAppliedMs` indicating clamped delay used.
+  - Replaced placeholder 0 duration logic with real computation; still uses final timestamp post-update.
+- Rationale: Enables verifying ingestion timing metrics without full event processing implementation; ensures duration schema validated with realistic values before adding complexity.
+- Risk: Low (bounded delay, no writes beyond run row update). Sleep blocks worker instance for delay window; acceptable given manual triggering during development.
+- Verification: Code review; expected behavior: calling endpoint with `{ "delayMs": 1200 }` yields `run_duration_ms` ~1200 (± scheduling variance) and `delayAppliedMs:1200`.
+- Follow-ups: Replace blocking sleep with chunked event processing loops; update duration after each phase or compute client-side metrics for more granular profiling.
+
+## 2025-09-08 – Run Duration Migration (004) & Ingestion Refactor
+- Goal: Capture execution duration for indexer runs and refactor ingestion stub to model start/finish lifecycle.
+- Changes:
+  - Added `migrations/004_run_duration.sql` (adds `run_duration_ms` column to `indexer_run`).
+  - Updated migration lists (root + Pages workers) to include `'004_run_duration'`.
+  - Root migration fallback now suppresses duplicate column error for `run_duration_ms` (idempotent re-runs).
+  - Refactored `/api/indexer-ingest` to insert a run row (no `run_finished_at` initially) then update it with `run_finished_at` + `run_duration_ms=0` (placeholder) simulating lifecycle.
+  - Health endpoint `lastRun` selection extended to include `run_duration_ms`.
+- Rationale: Establishes data shape for measuring ingestion latency before real work added; avoids future schema migration blocking telemetry adoption.
+- Risk: Low (additive column, simple writes). Duration placeholder 0 until real timing computed.
+- Verification: Code review; expectation that `/api/indexer-migrate` now executes `004_run_duration` once; subsequent ingestion call populates row with `run_duration_ms:0` and health reflects it.
+- Follow-ups: Compute actual duration by capturing start timestamp client-side or via second SELECT of `julianday` delta; add incremental counters (assemblies_scanned) once event processing implemented.
+
+## 2025-09-08 – Ingestion Skeleton & Health lastRun
+- Goal: Advance indexer scaffolding by replacing stub ingestion with run tracking and exposing last run metadata in health diagnostics.
+- Changes:
+  - `/api/indexer-ingest` (root + Pages) now inserts an `indexer_run` row (mode='stub') tied to active world_version and returns the run plus cursor.
+  - `/api/indexer-health?details=1` (root + Pages) now includes `lastRun` summary (id, mode, timings, row counters, errors) in addition to counts.
+  - Added try/catch isolation so health endpoint remains resilient if `indexer_run` table absent.
+- Rationale: Provides observable heartbeat for future ingestion cron without yet mutating assembly tables; verifies write path, auth, and run bookkeeping early.
+- Risk: Low (additive, minimal writes). Potential duplication if endpoint hammered rapidly (acceptable for stub phase).
+- Verification: Manual code review; expected JSON shape: `{ status:'ok', world, counts, lastRun }` when details flag set and migrations applied.
+- Follow-ups: Implement real event polling + atomic cursor advancement; expand `indexer_run` updates mid-run (set finished_at only at completion); surface duration metrics in health.
+
+## 2025-09-08 – Indexer Health Counts, Cursor Migration (003), Ingestion Stub
+- Goal: Improve observability of D1 indexer schema, introduce forward-only event cursor scaffold, and provide safe stub ingestion endpoint ahead of implementing real chain log polling.
+- Changes:
+  - Added optional `?details=1` support to root `/api/indexer-health` returning counts for `smart_assembly`, `smart_gate_direction`, `structure_generic`, `assembly_metadata`.
+  - Added `assembly_metadata` count to Pages worker variant for parity.
+  - Created `migrations/003_cursor.sql` defining single-row (`id=1`) `event_cursor` table (block + log index) with idempotent insert guard.
+  - Updated migration lists in both workers to include `'003_cursor'`.
+  - Implemented `/api/indexer-ingest` (root + Pages) admin-protected stub: ensures cursor table/row exists and returns current cursor (no mutation yet).
+- Rationale: Early visibility (table growth) reduces debugging friction during upcoming enrichment ingestion. Cursor introduced now to avoid retrofitting ingestion logic and risking off-by-one replay bugs. Stub endpoint lets deployment & auth paths be validated before writing stateful logic.
+- Risk: Low (additive endpoints + simple COUNT(*) queries). Cursor table is isolated; ingestion stub performs read-only select after ensuring invariant.
+- Verification: Manual review (JS only). Health endpoint with `?details=1` after applying migrations should show counts or `assembly_metadata: null` if 002 not yet applied. `/api/indexer-migrate` expected to execute `003_cursor` once (executed includes it). Ingestion stub returns `{ status:'stub', cursor:{...} }`.
+- Follow-ups: (1) Implement real ingestion (poll world events, upsert assemblies, advance cursor atomically); (2) Add indexer_run row updates during ingestion; (3) Extend health counts with `indexer_run` recent stats & last ingestion timestamp.
+
+
+## 2025-09-08 – Enrichment Migration (002) Wiring
+- Goal: Enable execution of new enrichment schema migration (`002_enrichment.sql`) adding `assembly_metadata` table and `api_enrichments` column to `indexer_run`.
+- Changes:
+  - Updated migration lists in both workers (`worker.js`, `eve-frontier-map/_worker.js`) to include `'002_enrichment'`.
+  - Added generic multi-statement fallback executor for non-initial migrations; retained explicit hardcoded fallback only for `001_init`.
+  - Added duplicate column name suppression for idempotent re-runs when `api_enrichments` already exists.
+- Rationale: Make subsequent migrations additive without expanding initial large fallback array; ensures resilience against D1 multi-statement parser quirks while keeping error visibility.
+- Risk: Low (migration runner modification only). Failure mode: mis-split SQL causing early abort—guarded by explicit error JSON with partial context.
+- Verification: Code patch only; next step is to POST `/api/indexer-migrate` with admin token (will show `executed:['002_enrichment']` if not yet applied). No runtime side-effects until invoked.
+- Follow-ups: After applying migration, extend `/api/indexer-health?details=1` to optionally report `assembly_metadata` count; implement enrichment ingestion job populating table and incrementing `api_enrichments` in `indexer_run` rows.
+
+
+## 2025-09-08 – Worlds.json Integration & Indexer Health Chain Metadata
+- Goal: Incorporate deployment metadata (chain id, world address, start block) from `worlds.json` into both client utilities and indexer observability without hardcoding constants.
+- Inputs: Added `eve-frontier-map/public/worlds.json` (chain 695569 → world 0x7085f3e652987f656fB8dEE5aA6592197Bb75de8, start block 7,288,348).
+- Changes:
+  - New client helper `src/utils/worldConfig.ts` to fetch/cache `/worlds.json` and expose `getWorldDeploy(chainId)`.
+  - Extended `/api/indexer-health` to surface `{ chain: { chainId, address, blockNumber } }` and optional `counts` when `?details=1` plus existing world_version data. Added lightweight table counts for `smart_assembly`, `smart_gate_direction`, `structure_generic` (errors shown as 'err').
+  - Added auto-selection of first chain in mapping if no `chainId` query param provided; future multi-chain can pass `?chainId=<id>`.
+- Rationale: Decouple world deployment metadata from code & enable frontend / diagnostics to rely on a single asset; prepares for multi-chain without schema changes.
+- Risk: Low (read-path only, additive response fields). If `worlds.json` fetch fails, endpoint still returns prior shape with `chain:null`.
+- Verification: Local asset listing confirmed presence; health handler modified logically (no build run here—JS only). Counts gracefully degrade to 'err' if tables absent.
+- Follow-ups: (1) Add indexer run orchestrator reading start block from same asset; (2) Include `startBlock` in world_version table or dedicated config table when bootstrap logic added; (3) Add tests / lint once indexer code expands beyond scaffolding.
+
 
 ## 2025-09-08 – Sept 7 Partial-Day Stats Merge (Netlify + Cloudflare)
 - Goal: Consolidate Sept 7 analytics split across pre‑cutover (old placeholder/Netlify era namespace) and post‑cutover (active Cloudflare namespace) snapshots into a single authoritative daily blob.
@@ -1444,6 +2389,19 @@
 - Risk: Low (read-only exposure, partial hash only). To be removed after confirmation of secret binding.
 - Usage: `curl https://feature-indexer.ef-map.pages.dev/api/indexer-secret-debug` then compare reported `startsWith/endsWith/length` with local token to verify match.
 - Follow-up: Remove endpoint and log removal once secret validated and migrations execute successfully.
+
+
+
+
+
+## 2025-09-10 – D1 size metrics fallback calibration
+- Goal: Bring Indexer Dashboard DB size metrics closer to Cloudflare D1 UI when PRAGMA values are unavailable or zero in Pages Worker.
+- Files: `eve-frontier-map/_worker.js` (dbMetrics helper)
+- Diff: ~40 LoC added (sampling + index overhead heuristic, diag fields)
+- Change: After PRAGMA and dbstat fallbacks, estimate size via sampled average payload length from `raw_logs` and multiply by an index overhead factor; include diag `{ size_method, idxCount, perRowBase, sampleSize }` for troubleshooting.
+- Risk: low (read-only estimation path; no schema or write changes)
+- Gates: typecheck ✅ | build ✅ | preview deploy ✅ (alias `feature-ingest-scaling`)
+- Follow-ups: Adjust index overhead factor if observed drift vs D1 UI remains >15%; optionally surface `size_method` in UI for debugging.
 
 
 

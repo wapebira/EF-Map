@@ -1,7 +1,7 @@
 <div align="center">
     <h1>EVE Frontier Interactive Map</h1>
     <p><strong>Client‑side 3D starmap, routing & optimization tools, reachability analysis and usage stats for EVE Frontier.</strong></p>
-    <sub>React + TypeScript + Vite • Three.js custom shaders • Web Workers • Lightweight serverless (Netlify Functions) • Zero PII instrumentation</sub>
+    <sub>React + TypeScript + Vite • Three.js custom shaders • Web Workers • Cloudflare Pages Worker (KV) • Zero PII instrumentation</sub>
 </div>
 
 ---
@@ -50,10 +50,10 @@ This repo focuses on *transforming* + *serving* that data and implementing inter
 | Frontend | 3D rendering, UI state, routing orchestration | React, TypeScript, Three.js, custom GLSL shaders |
 | Workers | Heavy algorithms off main thread | Web Workers (`routing_worker.ts`, `scout_optimizer_worker.ts`, others) |
 | Data Access | Lazy open + query prebuilt SQLite in-browser | `sql.js` (WASM) wrapped by `lib/sql.ts` |
-| Serverless | Shares & usage metrics | Netlify Functions using `@netlify/blobs` abstraction via `_store.js` |
+| Serverless | Shares & usage metrics APIs | Cloudflare Pages Worker (`/api/*`) using KV (EF_SHARES / EF_STATS) |
 | Instrumentation | Anonymous event batching | `src/utils/usage.ts` batching + server whitelist in `usage-event.js` |
 
-Provider portability: Persistence access is isolated; future Cloudflare KV/D1 migration only needs swapping internals of `_store.js`.
+Persistence: All share + usage data now lives in Cloudflare KV namespaces (EF_SHARES, EF_STATS). Abstraction remains in place for future D1 analytical expansion (schema draft present under `migrations/`).
 
 ## 4. Directory Map
 ```
@@ -69,7 +69,8 @@ root/
             modules/RouteRibbon.ts# Custom ribbon geometry + shaders
             utils/usage.ts        # Client event batching (sole origin of usage events)
             workers/              # Optimization / routing workers
-            netlify/functions/    # Serverless endpoints (share, usage, stats)
+            netlify/functions/    # Legacy Netlify functions (historical reference – not invoked post‑cutover)
+        migrations/             # D1 schema drafts (future analytical/indexer work)
         public/map_data.db      # Generated SQLite universe data (do not edit manually)
 ```
 
@@ -129,9 +130,10 @@ Station data: When `map_data_v2.db` contains `stations` table `{ system_id TEXT 
 | `npm run preview` | (If added) Preview dist output locally. |
 
 ## 10. Deployment Notes
-Current: Netlify (Functions + Blobs).  
-Future (planned): Cloudflare Workers + KV (helper abstraction already present – avoid direct provider APIs in new code).  
-Serverless functions are stateless and small (<150 LoC). Any state persistence uses `_store.js` which selects credential strategy or memory fallback locally.
+Current: Cloudflare Pages + Worker (primary) serving `/api/*` backed by KV (shares, usage stats). Legacy Netlify function code remains only for historical review and will be removed after final cleanup phase.  
+Rollback Strategy: Revert recent Worker commits & redeploy (no Netlify fallback paths exist in client).  
+Encoding Hardening: Worker defensively strips a UTF‑8 BOM before JSON parsing of daily stats snapshots (prevents history gaps if manual KV writes introduce BOM).  
+Future: Optional Cloudflare D1 usage for richer longitudinal analytics / indexing (schema draft in `migrations/001_init.sql`).
 
 Cache Busting: When DB schema changes, increment filename (e.g., `map_data_v2.db`) and document in decision log. Frontend lazily loads whichever name it expects; avoid breaking existing deployed bundles.
 

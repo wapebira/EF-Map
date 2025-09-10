@@ -1,0 +1,225 @@
+{
+  "0xc7f5fdc8526b76f54916701bc910876243ffff2a40b0bb8d59eea8151c52c005": {
+    "name": "HelloStore",
+    "inputs": [
+      {
+        "name": "storeVersion",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      }
+    ],
+    "anonymous": false
+  },
+  "0x7f8f36afe3fb61c459c1a54a60b8a477eab02cc58e49f547561a40906239cb82": {
+    "name": "HelloWorld",
+    "inputs": [
+      {
+        "name": "worldVersion",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      }
+    ],
+    "anonymous": false
+  },
+  "0x0e1f72f429eb97e64878619984a91e687ae91610348b9ff4216782cc96e49d07": {
+    "name": "Store_DeleteRecord",
+    "inputs": [
+      {
+        "name": "tableId",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "ResourceId"
+      },
+      {
+        "name": "keyTuple",
+        "type": "bytes32[]",
+        "indexed": false,
+        "internalType": "bytes32[]"
+      }
+    ],
+    "anonymous": false
+  },
+  "0x8dbb3a9672eebfd3773e72dd9c102393436816d832c7ba9e1e1ac8fcadcac7a9": {
+    "name": "Store_SetRecord",
+    "inputs": [
+      {
+        "name": "tableId",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "ResourceId"
+      },
+      {
+        "name": "keyTuple",
+        "type": "bytes32[]",
+        "indexed": false,
+        "internalType": "bytes32[]"
+      },
+      {
+        "name": "staticData",
+        "type": "bytes",
+        "indexed": false,
+        "internalType": "bytes"
+      },
+      {
+        "name": "encodedLengths",
+        "type": "bytes32",
+        "indexed": false,
+        "internalType": "EncodedLengths"
+      },
+      {
+        "name": "dynamicData",
+        "type": "bytes",
+        "indexed": false,
+        "internalType": "bytes"
+      }
+    ],
+    "anonymous": false
+  },
+  "0xfe158a7adba34e256807c8a149028d3162918713c3838afc643ce9f96716ebfd": {
+    "name": "Store_SpliceDynamicData",
+    "inputs": [
+      {
+        "name": "tableId",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "ResourceId"
+      },
+      {
+        "name": "keyTuple",
+        "type": "bytes32[]",
+        "indexed": false,
+        "internalType": "bytes32[]"
+      },
+      {
+        "name": "dynamicFieldIndex",
+        "type": "uint8",
+        "indexed": false,
+        "internalType": "uint8"
+      },
+      {
+        "name": "start",
+        "type": "uint48",
+        "indexed": false,
+        "internalType": "uint48"
+      },
+      {
+        "name": "deleteCount",
+        "type": "uint40",
+        "indexed": false,
+        "internalType": "uint40"
+      },
+      {
+        "name": "encodedLengths",
+        "type": "bytes32",
+        "indexed": false,
+        "internalType": "EncodedLengths"
+      },
+      {
+        "name": "data",
+        "type": "bytes",
+        "indexed": false,
+        "internalType": "bytes"
+      }
+    ],
+    "anonymous": false
+  },
+  "0x8c0b5119d4cec7b284c6b1b39252a03d1e2f2d7451a5895562524c113bb952be": {
+    "name": "Store_SpliceStaticData",
+    "inputs": [
+      {
+        "name": "tableId",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "ResourceId"
+      },
+      {
+        "name": "keyTuple",
+        "type": "bytes32[]",
+        "indexed": false,
+        "internalType": "bytes32[]"
+      },
+      {
+        "name": "start",
+        "type": "uint48",
+        "indexed": false,
+        "internalType": "uint48"
+      },
+      {
+        "name": "data",
+        "type": "bytes",
+        "indexed": false,
+        "internalType": "bytes"
+      }
+    ],
+    "anonymous": false
+  },
+  "0xc1fa7142cfb933d0855114a3bffde296944c30b727f297c14d0db4d553d3a5c7": {
+    "name": "TaskCompleted",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId",
+        "indexed": true
+      }
+    ],
+    "anonymous": false
+  },
+  "0x193c7ce7fc0ad7b229441c5c7b137cc07efb184268bd40f494f8f493c9f6721c": {
+    "name": "TaskCreated",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId",
+        "indexed": true
+      },
+      {
+        "type": "address",
+        "name": "creator",
+        "indexed": true
+      },
+      {
+        "type": "address",
+        "name": "assignee",
+        "indexed": true
+      },
+      {
+        "type": "string",
+        "name": "description"
+      },
+      {
+        "type": "uint256",
+        "name": "deadline"
+      },
+      {
+        "type": "uint256",
+        "name": "timestamp"
+      }
+    ],
+    "anonymous": false
+  },
+  "0xf78babe3e0bab780bcf4b21cf97ddb36e5f31691f4a141102e5bedcda51bac3f": {
+    "name": "TaskUpdated",
+    "inputs": [
+      {
+        "type": "uint256",
+        "name": "taskId",
+        "indexed": true
+      },
+      {
+        "type": "address",
+        "name": "newAssignee"
+      },
+      {
+        "type": "string",
+        "name": "newDescription"
+      },
+      {
+        "type": "uint256",
+        "name": "newDeadline"
+      }
+    ],
+    "anonymous": false
+  }
+}

@@ -2,15 +2,17 @@
   "name": "ef-map-root",
   "private": true,
   "scripts": {
-  "migrate:netlify-to-cf": "node tools/migrate_netlify_to_cf.js",
-  "compare:stats": "node tools/compare_stats.js"
+    "migrate:netlify-to-cf": "node tools/migrate_netlify_to_cf.js",
+    "compare:stats": "node tools/compare_stats.js"
   },
   "dependencies": {
     "qrcode": "^1.5.4",
-    "sql.js": "^1.13.0"
+  "sql.js": "^1.13.0",
+  "viem": "^2.21.15"
   },
   "devDependencies": {
     "@types/sql.js": "^1.4.9",
+    "js-sha3": "^0.9.3",
     "node-fetch": "^3.3.2"
   }
 }

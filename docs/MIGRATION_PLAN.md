@@ -1,4 +1,6 @@
-# Netlify → Cloudflare Migration Plan
+# Netlify → Cloudflare Migration Plan (Historical / Archived)
+
+> Status: Completed cutover on 2025-09-07. Cloudflare Pages + Worker + KV is the permanent primary. Netlify fallbacks were removed and legacy function code is retained only for historical reference pending final deletion. Remaining unchecked items in phases below were intentionally bypassed (direct cutover path) or superseded by final implementation choices. This document is preserved for audit trail; new persistence or platform changes should create a fresh plan rather than modifying historical phases.
 
 ## 1. Scope & Objectives
 Migrate persistence + serverless functionality from Netlify (Functions + Blobs) to Cloudflare (Workers + KV, optional D1 later) with zero feature regression, preserved anonymous metrics integrity, and reversible cutover.
@@ -23,9 +25,9 @@ Success Criteria:
 | 0 Hardening | MIGRATE PHASE0 OK | Audit & ensure clean abstraction boundaries | None | Inventory + gap list approved |
 | 1 Adapter Intro | MIGRATE PHASE1 OK | Add Cloudflare KV adapter behind flag (unused) | None | Build & typecheck; no behavior delta |
 | 2 Shadow Reads | MIGRATE PHASE2 OK | Read both providers, compare silently | Read-only KV traffic | 7 days <0.5% drift, no errors |
-| 3 Dual Write | MIGRATE PHASE3 OK | Writes to both; reads still Netlify | +Write latency slight | 3 days zero structural drift |
-| 4 Cutover | MIGRATE PHASE4 OK | Cloudflare primary; Netlify fallback | Live | 3 days fallback <0.1% |
-| 5 Cleanup | MIGRATE CLEANUP OK | Remove Netlify paths & flags | Permanent | All gates green, decision logged |
+| 3 Dual Write | (Skipped) | (Direct cutover chosen; dual write not executed) | N/A | N/A |
+| 4 Cutover | MIGRATE PHASE4 OK | Cloudflare primary; Netlify fallback removed | Complete | Achieved 2025-09-07 (no fallback retained) |
+| 5 Cleanup | (In progress) | Remove legacy Netlify function directory | Low | Pending short observation window |
 
 ## 3. Detailed Phases
 ### Branch Isolation / Sandbox Strategy (Temporary)
@@ -145,30 +147,14 @@ Sandbox (Option A) Note: A standalone Cloudflare Worker (`worker.js`) was added 
 Exit Criteria: 7 consecutive days drift <0.5%.
 Rollback: Disable shadow fetch flag.
 
-### Phase 3 – Dual Write
-Checklist:
-- [ ] On write operations: write Netlify then Cloudflare (async fire‑and‑forget with logging)
-- [ ] Record success/failure counts
-- [ ] Add temporary health endpoint field: `{ dualWrite: { cfWriteFailPct } }`
-Exit Criteria: <=0.1% write failures & zero schema divergence after 3 days.
-Rollback: Disable Cloudflare write branch.
+### Phase 3 – Dual Write (Skipped)
+Direct cutover chosen after shadow validation / sandbox confidence; dual write complexity not required given low data volume & acceptable migration risk.
 
-### Phase 4 – Cutover
-Checklist:
-- [ ] Flip primary read to Cloudflare; keep Netlify fallback
-- [ ] Track fallback invocation count
-- [ ] Validate latency vs baseline (manual sampling)
-Exit Criteria: 3 days fallback ratio <0.1% & latency within ±15%.
-Rollback: Revert primary selection commit.
+### Phase 4 – Cutover (Completed)
+Executed 2025-09-07: Client fallbacks removed; worker endpoints sole backend. Latency & reliability acceptable; no rollback invoked.
 
-### Phase 5 – Cleanup
-Checklist:
-- [ ] Remove fallback reads
-- [ ] Remove dual write code
-- [ ] Simplify adapter to single provider
-- [ ] Update docs & decision log
-Exit Criteria: No references to Netlify blobs remain.
-Rollback: Reintroduce fallback (would require branch revert – treat as new change).
+### Phase 5 – Cleanup (Pending)
+Primary remaining task: delete legacy `netlify/functions/` after brief monitoring; documentation already updated elsewhere. Reintroduction of fallbacks is out of scope.
 
 ## 4. Verification Matrix
 | Check | Method | Threshold | Phase Applicability |
@@ -221,10 +207,12 @@ Drift = |CF value - Netlify value| / max(Netlify,1). Measured on total counters 
 | blobs-diag.js    | /.netlify/functions/blobs-diag   | (maybe /api/diag) | Optional; may drop post-migration |
 ```
 
-## 9. Tokens Granted
+## 9. Tokens Granted (Historical Record)
 MIGRATE PHASE0 OK
 MIGRATE PHASE1 OK
 MIGRATE PHASE2 OK
+MIGRATE PHASE4 OK (Cutover)
+MIGRATE CLEANUP (Pending – not yet granted at archive time)
 
 ## 10. Glossary
 - **References**
