@@ -42,13 +42,26 @@ const IndexerPage: React.FC = () => {
 
   // Read-only dashboard: no trigger/reset exposed
 
+  // Fallback: parse attempted count from notes like "ok ins:8000"
+  const attemptedOf = (r:any): number => {
+    const direct = Number(r?.attempted_logs || 0);
+    if (direct > 0) return direct;
+    const notes: string = r?.notes || '';
+    const m = notes.match(/ok\s+ins:(\d+)/i);
+    if (m && m[1]) {
+      const n = Number(m[1]);
+      return isFinite(n) && n > 0 ? n : 0;
+    }
+    return 0;
+  };
+
   const renderStatus = (r:any)=>{
     if(!r) return '-';
     if(!r.run_finished_at){
       return <span style={chipStyle('#ffb347', '#111')}>Active</span>;
     }
     const added = Number(r.rows_added||0);
-    const attempted = Number(r.attempted_logs||0);
+  const attempted = attemptedOf(r);
     if(added===0 && attempted>0){
       return <span style={chipStyle('#888', '#fff')}>Duplicate</span>;
     }
@@ -161,11 +174,24 @@ const IndexerPage: React.FC = () => {
         </div>
       )}
   <h2 style={{margin:'0 0 8px 0', fontSize:22}}>Recent Runs</h2>
+  {/* Summary line for clarity: totals and classification over the loaded window */}
+  {runs?.runs && runs.runs.length>0 && (()=>{
+        const items = runs.runs as any[];
+        const total = items.length;
+        const insertedCount = items.filter(r=> Number(r?.rows_added||0) > 0).length;
+        const duplicateOnly = items.filter(r=> !!r?.run_finished_at && Number(r?.rows_added||0)===0 && attemptedOf(r)>0).length;
+        const sumInserted = items.reduce((s,r)=> s + (Number(r?.rows_added||0)||0), 0);
+        return (
+          <div style={{margin:'0 0 10px 0', fontSize:12, opacity:.75}}>
+            Showing {total} runs — Inserted: {insertedCount}, Duplicate-only: {duplicateOnly}, Total rows inserted: {sumInserted.toLocaleString()}
+          </div>
+        );
+      })()}
   <div style={{overflowX:'auto', maxHeight: '48vh', overflowY:'auto', border:'1px solid rgba(255,255,255,0.12)', borderRadius:8}}>
         <table style={{width:'100%', borderCollapse:'collapse', fontSize:13, lineHeight:1.35}}>
           <thead>
             <tr style={theadRowStyle}>
-      {['ID','Started','Finished','Rows (inserted)','Errors','Dur(ms)','Status'].map(h=> <th key={h} style={thStyle}>{h}</th>)}
+  {['ID','Started','Finished','Rows (inserted of attempted)','Attempted','Errors','Dur(ms)','Status'].map(h=> <th key={h} style={thStyle}>{h}</th>)}
             </tr>
           </thead>
           <tbody>
@@ -174,7 +200,8 @@ const IndexerPage: React.FC = () => {
                 <td style={tdStyle}>{r.id}</td>
                 <td style={tdStyle}>{fmt(r.run_started_at)}</td>
                 <td style={tdStyle}>{fmt(r.run_finished_at)}</td>
-                <td style={tdStyle}>{r.run_finished_at? (r.rows_added ?? 0) : (r.rows_so_far ?? 0)}</td>
+                <td style={tdStyle}>{r.run_finished_at? (()=>{ const added=Number(r.rows_added||0); const att=attemptedOf(r); if(att>0){ return `Inserted ${added.toLocaleString()} of ${att.toLocaleString()}${(added===0&&att>0)? ' (duplicate)':''}`; } return (r.rows_added ?? 0); })() : (r.rows_so_far ?? 0)}</td>
+                <td style={tdStyle}>{attemptedOf(r)}</td>
                 <td style={tdStyle}>{r.error_count}</td>
                 <td style={tdStyle}>{r.run_duration_ms ?? '-'}</td>
                 <td style={tdStyle}>{renderStatus(r)}</td>

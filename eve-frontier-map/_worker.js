@@ -635,27 +635,74 @@ async function handleIndexerIngest(req, env){
         }
         throw lastErr || new Error('rpc_failed_'+method);
       }
-      // Helper: finalize run safely (idempotent-ish). Persist metrics & inserted count best-effort.
-    async function finalizeRun(insertedVal, segReq, flushes, adaptiveBatch, note){
+      // Helper: finalize run safely (idempotent). Persist metrics & inserted count best-effort.
+      async function finalizeRun(insertedVal, segReq, flushes, adaptiveBatch, note){
         if(!runId) return;
         try {
           const durRes = await env.INDEX_DB.prepare("SELECT (julianday(CURRENT_TIMESTAMP)-julianday(run_started_at))*86400000 AS ms FROM indexer_run WHERE id=?").bind(runId).all();
           const ms = Math.max(0, Math.round(durRes.results?.[0]?.ms||0));
-          // Only overwrite notes if still the start note or a blank note.
-      let finalNote = note;
-      const extraMetrics = [];
-      if(typeof globalThis.__rpcFailures === 'number') extraMetrics.push('rpcFail:'+globalThis.__rpcFailures);
-      if(typeof globalThis.__segmentRetries === 'number') extraMetrics.push('segRetry:'+globalThis.__segmentRetries);
-      if(!finalNote) finalNote = 'store_all raw '+insertedVal;
-      if(extraMetrics.length) finalNote += ' '+extraMetrics.join(' ');
+          // Compose note with extra metrics once.
+          let finalNote = note;
+          const extraMetrics = [];
+          if(typeof globalThis.__rpcFailures === 'number') extraMetrics.push('rpcFail:'+globalThis.__rpcFailures);
+          if(typeof globalThis.__segmentRetries === 'number') extraMetrics.push('segRetry:'+globalThis.__segmentRetries);
+          if(!finalNote) finalNote = 'store_all raw '+insertedVal;
+          if(extraMetrics.length) finalNote += ' '+extraMetrics.join(' ');
+
+          // First, attempt to finalize if not already finished. Use COALESCE so null args don't overwrite existing values.
+          let changed = 0;
           try {
-            await env.INDEX_DB.prepare("UPDATE indexer_run SET run_finished_at=CURRENT_TIMESTAMP, run_duration_ms=?, rows_added=?, seg_requests_so_far=?, batch_flushes=?, adaptive_batch_current=?, attempted_logs=COALESCE(?,attempted_logs), notes=? WHERE id=? AND run_finished_at IS NULL")
-              .bind(ms, insertedVal||0, segReq||0, flushes||0, adaptiveBatch||0, (typeof attempted==='number'? attempted: null), finalNote, runId).run();
+            const r1 = await env.INDEX_DB.prepare(
+              "UPDATE indexer_run SET run_finished_at=CURRENT_TIMESTAMP, run_duration_ms=?, "+
+              "rows_added=COALESCE(?, rows_added), seg_requests_so_far=COALESCE(?, seg_requests_so_far), "+
+              "batch_flushes=COALESCE(?, batch_flushes), adaptive_batch_current=COALESCE(?, adaptive_batch_current), "+
+              "attempted_logs=COALESCE(?,attempted_logs), notes=? WHERE id=? AND run_finished_at IS NULL"
+            ).bind(
+              ms,
+              insertedVal, segReq, flushes, adaptiveBatch,
+              (typeof attempted==='number'? attempted: null),
+              finalNote,
+              runId
+            ).run();
+            changed = (r1 && r1.meta && typeof r1.meta.changes==='number') ? r1.meta.changes : 0;
           } catch(_e){
-            await env.INDEX_DB.prepare("UPDATE indexer_run SET run_finished_at=CURRENT_TIMESTAMP, run_duration_ms=?, rows_added=?, seg_requests_so_far=?, batch_flushes=?, adaptive_batch_current=?, notes=? WHERE id=? AND run_finished_at IS NULL")
-              .bind(ms, insertedVal||0, segReq||0, flushes||0, adaptiveBatch||0, finalNote, runId).run();
+            // Fallback for older schemas without attempted_logs
+            const r2 = await env.INDEX_DB.prepare(
+              "UPDATE indexer_run SET run_finished_at=CURRENT_TIMESTAMP, run_duration_ms=?, "+
+              "rows_added=COALESCE(?, rows_added), seg_requests_so_far=COALESCE(?, seg_requests_so_far), "+
+              "batch_flushes=COALESCE(?, batch_flushes), adaptive_batch_current=COALESCE(?, adaptive_batch_current), "+
+              "notes=? WHERE id=? AND run_finished_at IS NULL"
+            ).bind(ms, insertedVal, segReq, flushes, adaptiveBatch, finalNote, runId).run();
+            changed = (r2 && r2.meta && typeof r2.meta.changes==='number') ? r2.meta.changes : 0;
           }
-        } catch {/* ignore finalize errors */ }
+
+          // If already finished (no rows changed), persist metrics without touching finished_at/notes.
+          if(changed === 0){
+            try {
+              await env.INDEX_DB.prepare(
+                "UPDATE indexer_run SET "+
+                "run_duration_ms=COALESCE(run_duration_ms, ?), "+
+                "rows_added=COALESCE(?, rows_added), seg_requests_so_far=COALESCE(?, seg_requests_so_far), "+
+                "batch_flushes=COALESCE(?, batch_flushes), adaptive_batch_current=COALESCE(?, adaptive_batch_current), "+
+                "attempted_logs=COALESCE(?,attempted_logs) WHERE id=?"
+              ).bind(
+                ms,
+                insertedVal, segReq, flushes, adaptiveBatch,
+                (typeof attempted==='number'? attempted: null),
+                runId
+              ).run();
+            } catch(_e2){
+              // Fallback without attempted_logs column
+              await env.INDEX_DB.prepare(
+                "UPDATE indexer_run SET "+
+                "run_duration_ms=COALESCE(run_duration_ms, ?), "+
+                "rows_added=COALESCE(?, rows_added), seg_requests_so_far=COALESCE(?, seg_requests_so_far), "+
+                "batch_flushes=COALESCE(?, batch_flushes), adaptive_batch_current=COALESCE(?, adaptive_batch_current) "+
+                "WHERE id=?"
+              ).bind(ms, insertedVal, segReq, flushes, adaptiveBatch, runId).run();
+            }
+          }
+        } catch { /* ignore finalize errors */ }
       }
       let latestHex; try { latestHex = await rpc('eth_blockNumber', []); } catch(e){ return json({ error:'head_fetch_failed', message:String(e) },502); }
       const latest = BigInt(latestHex);

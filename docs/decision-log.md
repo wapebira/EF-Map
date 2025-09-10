@@ -1,3 +1,89 @@
+## 2025-09-10 – Finalize Idempotency + Duplicate Labeling (UI)
+- Goal: Ensure runs always persist rows_added and metrics even if the run was flagged finished earlier; clarify duplicate-only runs in the dashboard.
+- Files:
+  - `eve-frontier-map/_worker.js`: finalizeRun hardened to be idempotent. If a row is already finished, a fallback UPDATE persists `rows_added`, `attempted_logs`, seg/batch metrics, and `run_duration_ms` without duplicating notes.
+  - `eve-frontier-map/src/components/IndexerPage.tsx`: Added Attempted column; when a finished run has rows_added=0 but Attempted>0, Rows shows "0 (duplicate)". Attempted falls back to parsing notes (e.g., `ok ins:<n>`) when `attempted_logs` is 0/undefined.
+- Risk: Low (bounded finalize UPDATE; UI is read-only).
+- Verification:
+  - `/api/indexer-runs` shows historical run with positive inserts (e.g., id 1075 rows_added=2176 attempted_logs=8218) confirming persistence.
+  - Recent windows render as duplicate-only with Attempted≈8000 parsed from notes; status chip matches Duplicate.
+- Notes: Duplicate-only spans are expected; overall DB growth continues in insert-bearing windows. UI now surfaces this explicitly.
+- Follow-ups: Optional copy tweak ("0 (duplicate-only)" or "Inserted 0 of N"); observe next positive-insert run to reconfirm rows_added>0 visibility.
+
+## 2025-09-10 – Post‑Backfill Next‑Steps Playbook (Decode + Purge)
+- Goal: Capture the agreed plan to execute immediately after raw block ingestion reaches head, so we can reference and execute without re‑deriving details.
+- Steps (sequenced, minimal risk):
+  1) Enable decode/apply to latest‑state tables:
+     - Ensure migrations 011..015 applied (`/api/indexer-migrate`).
+     - Implement decode worker (or batch endpoint) that reads `raw_logs` in order and writes to `record_latest` using `apply_cursor`/`decoded_cursor` for progress.
+     - Success criteria: record counts in `record_latest` stabilize; sample replays match on-chain values for a handful of keys; head tailing keeps lag < 2 confirmation windows.
+  2) Size guardrails and metrics:
+     - Expose DB size and `record_latest` row counts in `/api/indexer-health` (already partially present: page_count/size); add simple alerts when size > 4.5 GB.
+     - Track decode throughput (rows/s, blocks/s) in run notes or a dedicated table.
+  3) Rolling purge of old raw logs (delete‑only):
+     - After decode is live and verified, delete raw `raw_logs` older than a moving cut line (e.g., head−N blocks or older than X days) to keep EF_INDEX ~3–4 GB.
+     - Keep a safety offset (e.g., ≥8k–12k blocks) and never delete newer than the latest fully applied block from `apply_cursor`.
+     - Add a dry‑run endpoint to report would‑delete counts before enabling live deletes.
+  4) Ongoing ops:
+     - Continue tailing decode; keep purge running periodically; monitor size metrics. Archive D1s not required long‑term per cost plan.
+- Guardrails:
+  - Don’t purge before decode/baseline is in place and verified; protect against deleting logs newer than `apply_cursor`.
+  - Keep confirmation depth gate (CONFIRM_DEPTH) for tailing; decode only finalized blocks.
+- Status: Deferred until backfill complete; documented for quick execution later.
+
+## 2025-09-10 – Increase First‑Pass Window (MAX_BLOCKS 8k → 10k)
+- Goal: Accelerate catch‑up by enlarging the primary ingestion window per run so the first pass does more work; second pass remains opportunistic.
+- Change: Bumped `INDEXER_CRON_MAX_BLOCKS` to 10000 in `eve-frontier-map/wrangler.jsonc` (Pages vars). Segment size and row cap unchanged (SEGMENT_BLOCKS=300, ROW_CAP=100000).
+- Monitoring Plan:
+  - Watch `/api/indexer-runs` notes for `segReq` staying well below internal soft cap (40) and absence of `rpc_timeout` / provider 5xx.
+  - Re‑run 10‑minute sampler to confirm sustained rows/min improves or at least lag shrinks faster (duplicates may mask raw rows/min).
+- Rollback Plan:
+  - If RPC caps or errors appear, revert MAX_BLOCKS to 8000 (or 7500) and re‑sample; no code rollback needed, just config.
+- Status: Applied (config edited); takes effect on next deployment.
+
+## 2025-09-10 – 10‑Minute Ingestion Throughput Sample
+- Goal: Measure sustained ingestion throughput and check for runtime errors under current settings.
+- Method: Ran `tools/ingest_sampler.js` for 20 intervals @ 30s (≈10 minutes), tee’d to `scratch/sampler_10min_*.log`.
+- Results:
+  - TotalSeconds: 616
+  - TotalDelta (combined raw_logs): 82,838 rows
+  - Overall: ~8,068 rows/min
+  - Per-interval rows/min (min/median/avg/max): 396 / 7,724 / 8,068 / 14,821
+  - Pattern: Alternating bursts and slower intervals consistent with duplicate windows vs insert bursts; no stall signatures.
+- Error Scan (post-sample):
+  - Recent runs (20): err_runs_in_recent=0, err_samples=[]
+  - Last run instantaneous rate shows 0 due to duration=0 snapshot (expected when checking mid/just-finished cycles).
+  - Active runs observed: 5 (steady pipeline activity).
+- Current Config (unchanged during sample):
+  - Pages: INDEXER_CRON_MAX_BLOCKS=8000, INDEXER_CRON_ROW_CAP=100000, INDEXER_CRON_SEGMENT_BLOCKS=300; second‑pass scheduled() enabled.
+  - Archiver: ARCHIVE_CUT_DYNAMIC=1, ARCHIVE_CUT_OFFSET_BLOCKS=30000, ARCHIVE_CUT_TO=0, ARCHIVE_MAX_PAGES=20, ARCHIVE_PAUSE_MS=50.
+- Interpretation: Healthy sustained rate (~8k rows/min) over ~10 minutes with no error markers in recent runs. Rolling archival remains active.
+- Recommendation:
+  1) Hold current params for continued observation (30–60 min). If backlog remains and no 1101/timeouts appear, consider a single small bump next: SEGMENT_BLOCKS 300 → 350 or MAX_BLOCKS 8000 → 10000 (one at a time), re‑sample 10 minutes.
+  2) If any 1101 / rpc_timeout resurfaces, revert that knob immediately (e.g., MAX_BLOCKS back to 7000–7500 or ROW_CAP 75k) and re‑sample.
+- Artifacts: `scratch/sampler_10min_20250910_130314.log` captured.
+
+## 2025-09-10 – Ingestion Throughput Sample (post-rolling archive + second-pass cron)
+- Goal: Measure sustained rows/min with current ingestion + archiver settings to validate no throttling and decide on next tuning step.
+- Method: Ran `tools/ingest_sampler.js` against production for 4 intervals @ 30s.
+- Results (summary):
+  - Base: https://ef-map.pages.dev
+  - Window: 97s total; combined raw_logs delta: 11,390 rows
+  - Overall: ~7,065 rows/min
+  - Per-interval rows/min: [4459, 12224, 4553] (min/median/avg/max = 4459/4553/7079/12224)
+  - Notes: Typical oscillation consistent with duplicate-heavy spans alternating with insert bursts. No evidence of subrequest cap stalls during the sample.
+- Current Config Snapshot (for traceability):
+  - Pages env: INDEXER_CRON_MAX_BLOCKS=8000, INDEXER_CRON_ROW_CAP=100000, INDEXER_CRON_SEGMENT_BLOCKS=300; second-pass scheduled() enabled (~30s follow-up when idle).
+  - Archiver Worker: ARCHIVE_CUT_DYNAMIC=1, ARCHIVE_CUT_OFFSET_BLOCKS=30000, ARCHIVE_CUT_TO=0, ARCHIVE_MAX_PAGES=20, ARCHIVE_PAUSE_MS=50.
+- Interpretation: Effective, steady throughput around ~7k rows/min over ~1.5 minutes with variation expected from mix of duplicates vs new inserts. Rolling archival remains active; no visible throttling or long stalls.
+- Next Steps (guarded):
+  1. Hold current settings for additional observation (~30–60 min). If backlog remains sizable and no 1101/subrequest errors are observed, consider a small bump to one of:
+     - SEGMENT_BLOCKS: 300 → 350
+     - MAX_BLOCKS: 8000 → 10000
+     Only change one knob at a time; verify segRequests stays below the soft cap and run durations remain sub-minute for second-pass effectiveness.
+  2. If any 1101-like caps or RPC flakiness resurface, back off MAX_BLOCKS to 7000–7500 or ROW_CAP to 75k and re-sample.
+- Gates: N/A (docs only). Runtime validated by sampler outputs captured during this session.
+
 ## 2025-09-10 – Switch Archiver to Rolling Window
 - Goal: Resume continuous archival so `ef_index` retains only a recent slice while older `raw_logs` move to `ef_index_archive_1` (A1) automatically.
 - Context: A1 stopped growing because `ARCHIVE_CUT_TO` was pinned at 7,450,000 and fully drained; dynamic cutoff (`head-30k`) was min()’d with the static floor, so no further rows qualified.
