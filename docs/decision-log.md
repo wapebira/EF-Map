@@ -1,3 +1,11 @@
+## 2025-09-10 – Switch Archiver to Rolling Window
+- Goal: Resume continuous archival so `ef_index` retains only a recent slice while older `raw_logs` move to `ef_index_archive_1` (A1) automatically.
+- Context: A1 stopped growing because `ARCHIVE_CUT_TO` was pinned at 7,450,000 and fully drained; dynamic cutoff (`head-30k`) was min()’d with the static floor, so no further rows qualified.
+- Change: Set `ARCHIVE_CUT_TO=0` (dynamic-only) in `wrangler.archiver.jsonc`, keeping `ARCHIVE_CUT_OFFSET_BLOCKS=30000`.
+- Deploy: Re-deployed `ef-map-archiver` Worker with cron (* * * * *). Manual tick moved 2,000 rows; A1 max_block advanced > 7,450,000.
+- Verify: Primary min_block increased to ~7,450,086; A1 `raw_logs` count increased (2691599) and max_block ~7,450,138.
+- Retention: Rolling window ≈ latest_head − 30,000 blocks stays on primary; older rows are archived to A1 until its cap.
+
 ## 2025-09-10 – Production Deploy (main) Verified
 - Goal: Promote accepted preview to production and verify indexer endpoints on prod and aliases.
 - Actions: Built frontend (Vite) and deployed to Pages Production (branch=main). Verified /api/indexer-health on ef-map.pages.dev, main.ef-map.pages.dev, and the new deployment ID URL all return 200 + application/json.

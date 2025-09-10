@@ -9,7 +9,7 @@
   { "binding": "INDEX_DB_A2", "database_name": "ef_index_archive_2", "database_id": "90eafa41-e455-43e0-8cad-85e26a42f80d" }
   ],
   "vars": {
-  "ARCHIVE_CUT_TO": "7450000",
+  "ARCHIVE_CUT_TO": "0",
   "ARCHIVE_CUT_DYNAMIC": "1",
   "ARCHIVE_CUT_OFFSET_BLOCKS": "30000",
   "ARCHIVE_PAGE_LIMIT": "1000",
