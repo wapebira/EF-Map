@@ -1508,6 +1508,23 @@ export async function scheduled(event, env, ctx){
     const internalReq = new Request('https://internal/api/indexer-ingest', { method:'POST', headers, body: JSON.stringify(payload) });
     // Fire and wait (ensure single run per cron invocation)
     await handleIndexerIngest(internalReq, env);
+
+    // Optional second pass ~30s later to emulate a 30s cadence without Cloudflare sub-minute cron.
+    // Safe due to overlap lock in handleIndexerTrigger/ingest; only runs if no active run is present.
+    const secondPassMs = parseInt(env.INDEXER_CRON_SECOND_PASS_MS||'30000',10);
+    if(secondPassMs > 0 && secondPassMs <= 60000){
+      ctx.waitUntil((async()=>{
+        try {
+          await new Promise(res=> setTimeout(res, secondPassMs));
+          // Skip if a run is active
+          try {
+            const active = await env.INDEX_DB.prepare("SELECT id FROM indexer_run WHERE run_finished_at IS NULL ORDER BY id DESC LIMIT 1").all();
+            if(active.results && active.results.length) return;
+          } catch { /* ignore */ }
+          await handleIndexerIngest(internalReq, env);
+        } catch(_e){ /* swallow */ }
+      })());
+    }
   } catch(e){
     // Best-effort logging; cron exits silently otherwise
     console.log('cron_ingest_error', String(e).slice(0,160));
