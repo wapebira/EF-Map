@@ -12,7 +12,7 @@
   "PAGES_BASE_URL": "https://cron-autonomous-ingest.ef-map.pages.dev",
     // Ingestion tuning mirrors Pages env; adjust centrally here as needed.
     "INDEXER_CRON_MAX_BLOCKS": "4000",
-    "INDEXER_CRON_SEGMENT_BLOCKS": "300",
+  "INDEXER_CRON_SEGMENT_BLOCKS": "400",
     "INDEXER_CRON_ROW_CAP": "50000"
   }
 }
