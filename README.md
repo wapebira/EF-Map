@@ -139,19 +139,19 @@ Station data: When `map_data_v2.db` contains `stations` table `{ system_id TEXT 
 | `npm run build` | Type check + production build. |
 | `npm run preview` | (If added) Preview dist output locally. |
 
-## 10. Indexer (optional)
-The map works fully client‑side. If you enable the optional Indexer, you’ll get a small dashboard and longitudinal aggregates:
+## 10. Indexer (Primordium – canonical)
+The map works fully client‑side. For chain indexing we now standardize on the Primordium pg-indexer (chain → Postgres) surfaced in Grafana. Previous local/Cloudflare D1 indexer efforts are deprecated; see `docs/DEPRECATIONS.md`.
 
-- Cloudflare D1 database for ingestion with automated archival rollover to keep the primary small.
-- Scheduled Workers orchestrate copy‑then‑delete archival in bounded batches.
-- Minimal UI surface under the Indexer page inside the app; safe to hide if unused.
+Notes:
+- Grafana is the canonical dashboard for chain status (head, lag, decoded tables, per-table counts).
+- Cloudflare Pages Worker remains primary for `/api/*` (shares + usage stats in KV). Any D1 indexer files in this repo are historical only.
+- Legacy local indexer scripts (under `tools/local-indexer/`) should not be used; they’re retained temporarily for reference.
 
-Operator docs: see `docs/MIGRATION_PLAN.md` (Cloudflare cutover notes) and `docs/decision-log.md` for implementation deltas. The 
-schema draft lives in `migrations/`.
+Operator docs: See `docs/decision-log.md` entries around 2025‑09‑14 and 2025‑09‑18 for the transition, plus `docs/DEPRECATIONS.md` for boundaries.
 
 ## 11. Deployment Notes
 Cloud platform: Cloudflare Pages + Worker (primary). `/api/*` is served by the Pages Worker, backed by KV (shares, usage stats).  
-Legacy Netlify logic is no longer invoked; remaining files are historical only and will be removed during final cleanup.
+Legacy Netlify logic is no longer invoked; remaining files are historical only and have been moved to `legacy/netlify/` pending final deletion.
 
 Preview & production deploys typically use Wrangler. Example (project already configured):
 

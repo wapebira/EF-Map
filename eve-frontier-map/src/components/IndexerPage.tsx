@@ -25,14 +25,24 @@ const IndexerPage: React.FC = () => {
   const [health, setHealth] = useState<Health|null>(null);
   const [runs, setRuns] = useState<RunsResp|null>(null);
   const [loading, setLoading] = useState(false);
+  // counts load is background-only; no UI spinner to keep header clean
+  const [dbLoading, setDbLoading] = useState(false);
+  const [dbLoaded, setDbLoaded] = useState(false);
   const isPreview = typeof window!=='undefined' && window.location.hostname.endsWith('.pages.dev');
   const qp = isPreview? '?openPreview=1':'';
 
   const load = async ()=>{
     setLoading(true);
     try {
-      const h = await fetch(`/api/indexer-health?details=1${isPreview?'&openPreview=1':''}`).then(r=> r.json());
-      setHealth(h);
+      // Load light health immediately
+      const base = await fetch(`/api/indexer-health${isPreview?'?openPreview=1':''}`).then(r=> r.json());
+      setHealth(base);
+      // Kick off counts fetch in background
+      try {
+        const hc = await fetch(`/api/indexer-health?counts=1${isPreview?'&openPreview=1':''}`).then(r=> r.json());
+        setHealth(prev => ({...(prev||{}), counts: hc.counts } as any));
+      } catch { /* ignore counts fetch */ }
+      // Runs list (cheap)
       const rj = await fetch(`/api/indexer-runs${qp}`).then(r=> r.json());
       setRuns(rj);
     } catch(e){ /* ignore */ }
@@ -83,15 +93,28 @@ const IndexerPage: React.FC = () => {
         <div style={{display:'flex', flexWrap:'wrap', gap:14, margin:'0 0 22px 0', fontSize:13, background:'rgba(255,255,255,0.05)', padding:'10px 14px', border:'1px solid rgba(255,255,255,0.12)', borderRadius:8}}>
           <div><strong>Status:</strong> {health.status}</div>
           <div><strong>Cursor:</strong> {health.cursor?.last_block_number ?? '-'}</div>
-          <div><strong>Raw Logs:</strong> {ms(Number(health.counts?.raw_logs||0))}</div>
-          <div><strong>Store Events:</strong> {ms(Number(health.counts?.store_events||0))}</div>
+          <div><strong>Raw Logs:</strong> {health.counts? ms(Number(health.counts?.raw_logs||0)) : '-'}</div>
+          <div><strong>Store Events:</strong> {health.counts? ms(Number(health.counts?.store_events||0)) : '-'}</div>
           <div><strong>Last Run:</strong> {health.lastRun? (health.lastRun.run_finished_at? `#${health.lastRun.id} finished` : `#${health.lastRun.id} active`) : '—'}</div>
           {health.ingestionLagMs!=null && <div><strong>Lag:</strong> {Math.round(health.ingestionLagMs/1000)}s</div>}
         </div>
       )}
-      <div style={{display:'flex', gap:12, flexWrap:'wrap', marginBottom:16}}>
-        <button onClick={load} disabled={loading} style={{padding:'8px 14px'}}>Refresh</button>
+      <div style={{display:'flex', gap:12, flexWrap:'wrap', marginBottom:16, alignItems:'center'}}>
+    <button onClick={load} disabled={loading} style={{padding:'8px 14px'}}>Refresh</button>
   {loading && <span style={{opacity:.7}}>Loading…</span>}
+  {!dbLoaded && (
+    <button onClick={async()=>{
+      setDbLoading(true);
+      try {
+        const hd = await fetch(`/api/indexer-health?db=1${isPreview?'&openPreview=1':''}`).then(r=> r.json());
+        setHealth(prev => ({...(prev||{}), db: hd.db, archiver: hd.archiver } as any));
+        setDbLoaded(true);
+      } finally { setDbLoading(false); }
+    }} disabled={dbLoading} style={{padding:'8px 14px'}}>
+      {dbLoading? 'Loading DB metrics…' : 'Load DB metrics'}
+    </button>
+  )}
+  {dbLoaded && <span style={{opacity:.7}}>DB metrics loaded</span>}
       </div>
       {!health && <div style={{opacity:.7}}>No health data yet.</div>}
       {health && (
@@ -134,37 +157,38 @@ const IndexerPage: React.FC = () => {
           </div>
           <div style={cardStyle}>
             <h3 style={cardTitle}>Raw Logs</h3>
-            <div>{ms(Number(health.counts?.raw_logs||0))}</div>
+            <div>{health.counts? ms(Number(health.counts?.raw_logs||0)) : '-'}</div>
           </div>
           <div style={cardStyle}>
             <h3 style={cardTitle}>Store Events</h3>
-            <div>{ms(Number(health.counts?.store_events||0))}</div>
+            <div>{health.counts? ms(Number(health.counts?.store_events||0)) : '-'}</div>
           </div>
         </div>
       )}
+  {/* Decode coverage removed during rollback */}
       {/* DB metrics & archiver health */}
-      {health?.db && (
+  {dbLoaded && health?.db && (
         <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(220px,1fr))', gap:14, margin:'0 0 22px 0'}}>
           <div style={cardStyle}>
             <h3 style={cardTitle}>Primary DB</h3>
             {hasSize(health.db.primary?.approx_size_bytes) && (
               <div>Size: {bytes(health.db.primary?.approx_size_bytes)}</div>
             )}
-            <div style={subtle}>raw_logs: {num(health.db.primary?.raw_logs?.count)}</div>
+    <div style={subtle}>raw_logs: {num((health.db.primary?.raw_logs?.count as any) ?? (health.db.primary?.raw_logs?.approx_count as any))}</div>
           </div>
           <div style={cardStyle}>
             <h3 style={cardTitle}>Archive A1</h3>
             {hasSize(health.db.a1?.approx_size_bytes) && (
               <div>Size: {bytes(health.db.a1?.approx_size_bytes)}</div>
             )}
-            <div style={subtle}>raw_logs: {num(health.db.a1?.raw_logs?.count)}{(hasSize(health.db.a1?.approx_size_bytes) && health.archiver?.a1FillPct_10g!=null)? ` (${health.archiver.a1FillPct_10g}% of 10GB)` : ''}</div>
+    <div style={subtle}>raw_logs: {num((health.db.a1?.raw_logs?.count as any) ?? (health.db.a1?.raw_logs?.approx_count as any))}{(hasSize(health.db.a1?.approx_size_bytes) && health.archiver?.a1FillPct_10g!=null)? ` (${health.archiver.a1FillPct_10g}% of 10GB)` : ''}</div>
           </div>
           <div style={cardStyle}>
             <h3 style={cardTitle}>Archive A2</h3>
             {hasSize(health.db.a2?.approx_size_bytes) && (
               <div>Size: {bytes(health.db.a2?.approx_size_bytes)}</div>
             )}
-            <div style={subtle}>raw_logs: {num(health.db.a2?.raw_logs?.count)}{(hasSize(health.db.a2?.approx_size_bytes) && health.archiver?.a2FillPct_10g!=null)? ` (${health.archiver.a2FillPct_10g}% of 10GB)` : ''}</div>
+    <div style={subtle}>raw_logs: {num((health.db.a2?.raw_logs?.count as any) ?? (health.db.a2?.raw_logs?.approx_count as any))}{(hasSize(health.db.a2?.approx_size_bytes) && health.archiver?.a2FillPct_10g!=null)? ` (${health.archiver.a2FillPct_10g}% of 10GB)` : ''}</div>
           </div>
           <div style={cardStyle}>
             <h3 style={cardTitle}>Archiver</h3>

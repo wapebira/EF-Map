@@ -9,13 +9,7 @@
     { "binding": "EF_SHARES", "id": "93333a061a734ceca8da9f055cf189d1" },
     { "binding": "EF_STATS", "id": "cccc1a708dd74aa8aabd91c8bfc33c3f" }
   ],
-  "d1_databases": [
-    {
-      "binding": "INDEX_DB",
-      "database_name": "ef_index",
-  "database_id": "cfc8fecb-9fe1-4ad0-98ed-525772d13ff0" // provisioned 2025-09-07
-    }
-  ],
+  // D1 databases intentionally unbound (databases deleted to control cost). Keep code guards.
   // For Pages, specify the build output dir so Wrangler can unify config if desired.
   "pages_build_output_dir": "eve-frontier-map/dist",
   // Paced cron ingestion tuning (used by root worker scheduled() when deployed as standalone Worker with cron triggers)

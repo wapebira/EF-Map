@@ -94,7 +94,7 @@ Procedure:
 For each source we will document: format sample, freshness cadence, consistency guarantees, failure modes, pagination, max batch size, usage limits.
 
 ## 4. Entities & Draft Data Model
-Planned Core Tables / Collections (first pass; refined with initial samples). See `d1_schema_draft.sql` for concrete DDL.
+Planned Core Tables / Collections (first pass; refined with initial samples). See `docs/archive/d1/d1_schema_draft.sql` for concrete DDL.
 ### smart_gates
 | field | type | notes |
 |-------|------|-------|

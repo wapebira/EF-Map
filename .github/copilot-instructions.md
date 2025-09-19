@@ -8,7 +8,7 @@ Purpose: This repo hosts (1) map data processing scripts (Python) for EVE Fronti
 3. You approve or adjust scope (optionally grant token if High risk or migration phase).
 4. Assistant patches code, runs typecheck/build, reports gates & follow-ups.
 5. Non-trivial decisions appended to `docs/decision-log.md` (≤10 lines each).
-6. Multi-day / migration tasks update `docs/MIGRATION_PLAN.md` & `migration_status.json` before further code.
+6. Multi-day / migration tasks update `docs/archive/migration/MIGRATION_PLAN.md` & `docs/archive/migration/migration_status.json` before further code.
 
 If stuck: ask for "safer alternative" or "explain tradeoffs". Avoid giving line-by-line code; just describe desired outcome.
 
@@ -24,7 +24,7 @@ If stuck: ask for "safer alternative" or "explain tradeoffs". Avoid giving line-
 
 Reference index: see `docs/README.md` for links to broader specs (`PROJECT_REQUIREMENTS.md`, cinematic spec, operational playbooks).
 
-Cloud Platform: Primary platform is Cloudflare (Pages + Worker + KV). Netlify is deprecated and scheduled for removal (cleanup phase). Do not add new Netlify code; any persistence change must target the existing Cloudflare Worker & KV abstraction. See `docs/MIGRATION_PLAN.md` for residual cleanup tasks.
+Cloud Platform: Primary platform is Cloudflare (Pages + Worker + KV). Netlify is deprecated and scheduled for removal (cleanup phase). Do not add new Netlify code; any persistence change must target the existing Cloudflare Worker & KV abstraction. See `docs/archive/migration/MIGRATION_PLAN.md` for residual cleanup tasks.
 
 ## Key Folders / Files
 - `eve-frontier-map/src/App.tsx`: top-level state & feature toggles (cinematic, panels, routing integration, event bridges to `usage.ts`).
@@ -120,7 +120,7 @@ Migration phases up to cutover have completed. Active state: Cloudflare is prima
 - `MIGRATE CLEANUP OK` – (Pending) Purge legacy Netlify files & doc sections.
 Legacy `MIGRATE STORAGE OK` treated as superseded; use phased tokens instead.
 
-Token Granting: Operator explicitly states token phrase. Assistant must echo acceptance and update `MIGRATION_PLAN.md` & `migration_status.json` before code edits.
+Token Granting: Operator explicitly states token phrase. Assistant must echo acceptance and update `docs/archive/migration/MIGRATION_PLAN.md` & `docs/archive/migration/migration_status.json` before code edits.
 
 Natural Language Triggers: You do NOT need to say exact token phrases. The assistant will interpret plain English like:
 - "Let's start the migration" → treat as request for Phase 0 token.
@@ -139,13 +139,13 @@ Advancement Requirements (summary):
 - Phase4 exit: fallback <0.1% & latency p95 within ±15%
 ### Multi-Day Task Handling
 If a task spans sessions (> ~2 hours or multiple approvals) create/update a dedicated section in either:
-- `docs/MIGRATION_PLAN.md` (for migration-related) OR
+- `docs/archive/migration/MIGRATION_PLAN.md` (for migration-related) OR
 - A new small doc (feature-specific) linked from decision log.
 Assistant must resume by reading last 20 lines of relevant doc + newest decision log entry.
 
 ### Resumption Protocol
 On new session for an ongoing multi-day effort assistant does:
-1. Read `docs/migration_status.json` (if migration) and tail of `MIGRATION_PLAN.md`.
+1. Read `docs/archive/migration/migration_status.json` (if migration) and tail of `docs/archive/migration/MIGRATION_PLAN.md`.
 2. Summarize current phase, remaining checklist items.
 3. Propose next micro-step (≤30 min scope) for approval.
 
@@ -171,7 +171,7 @@ Maintain in plan doc: `Risk | Impact | Mitigation | Trigger | Status`. Update st
 | Change Type | Doc |
 |-------------|-----|
 | Code decision (non-trivial) | decision-log.md |
-| Migration phase progress | MIGRATION_PLAN.md + migration_status.json |
+| Migration phase progress | docs/archive/migration/MIGRATION_PLAN.md + docs/archive/migration/migration_status.json |
 | Global workflow rule change | This file |
 | Tiny copy tweak / style | No doc update |
 
@@ -230,6 +230,16 @@ Secrets Handling: Do not paste full API tokens into repository. Assistant will c
 - Keep serverless functions < ~150 lines, no external state besides blobs, return 4xx on validation errors early.
 
 (End) – Provide feedback if additional sections (e.g., tests, optimizer internals) should be documented.
+
+### Editor Extensions Available (VS Code)
+- The following extensions are installed and available to you during this project:
+  - Docker (ms-azuretools.vscode-docker)
+  - Dev Containers (ms-vscode-remote.remote-containers)
+  - REST Client (humao.rest-client)
+  - PostgreSQL (ckolkman.vscode-postgres)
+  - SQLite (alexcvzz.vscode-sqlite)
+  - Grafana Utils (yesoreyeram.grafana) and Grafana (grafana.grafana-vscode)
+- Guidance: Proactively suggest using these when they improve ergonomics (e.g., browse Postgres via extension UI; author Grafana panels with JSON helpers; test HTTP endpoints with REST Client) and mention any setup assumptions if needed. Do not instruct manual installs unless the user requests more tools.
 
 ## Cloudflare Platform & CLI Preference
 The project is now fully operated on Cloudflare (Pages + Workers + KV). Operational preference: perform all feasible platform actions via CLI / API (Wrangler) instead of the Cloudflare dashboard UI.

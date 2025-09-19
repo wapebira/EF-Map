@@ -1,0 +1,367 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "links": [],
+  "panels": [
+    {
+      "type": "row",
+      "title": "World API (dlt)",
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 76}
+    },
+    {
+      "type": "table",
+      "title": "World API raw tables (counts)",
+  "gridPos": {"h": 8, "w": 12, "x": 0, "y": 77},
+      "options": {"showHeader": true},
+      "targets": [
+        {
+          "datasource": {"type": "postgres", "uid": "EF Postgres"},
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "select 'raw_solarsystems' as table, count(*)::bigint as rows from world_api_dlt.raw_solarsystems union all select 'raw_solarsystems_details', count(*) from world_api_dlt.raw_solarsystems_details union all select 'raw_types', count(*) from world_api_dlt.raw_types union all select 'raw_types_details', count(*) from world_api_dlt.raw_types_details union all select 'raw_tribes', count(*) from world_api_dlt.raw_tribes union all select 'raw_tribes_details', count(*) from world_api_dlt.raw_tribes_details union all select 'raw_smartcharacters', count(*) from world_api_dlt.raw_smartcharacters union all select 'raw_smartcharacters_details', count(*) from world_api_dlt.raw_smartcharacters_details union all select 'raw_smartassemblies', count(*) from world_api_dlt.raw_smartassemblies union all select 'raw_smartassemblies_details', count(*) from world_api_dlt.raw_smartassemblies_details union all select 'raw_killmails', count(*) from world_api_dlt.raw_killmails union all select 'raw_killmails_details', count(*) from world_api_dlt.raw_killmails_details union all select 'raw_fuels', count(*) from world_api_dlt.raw_fuels union all select 'raw_config', count(*) from world_api_dlt.raw_config union all select 'raw_health', count(*) from world_api_dlt.raw_health",
+          "refId": "A"
+        }
+      ],
+      "description": "Row counts for dlt-ingested World API raw tables in schema world_api_dlt."
+    },
+    {
+      "type": "stat",
+      "title": "Total World API rows",
+  "gridPos": {"h": 6, "w": 6, "x": 12, "y": 77},
+      "options": {"colorMode": "value", "graphMode": "none", "justifyMode": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}},
+      "targets": [
+        {
+          "datasource": {"type": "postgres", "uid": "EF Postgres"},
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "with c as (select count(*)::bigint as n from world_api_dlt.raw_solarsystems union all select count(*) from world_api_dlt.raw_solarsystems_details union all select count(*) from world_api_dlt.raw_types union all select count(*) from world_api_dlt.raw_types_details union all select count(*) from world_api_dlt.raw_tribes union all select count(*) from world_api_dlt.raw_tribes_details union all select count(*) from world_api_dlt.raw_smartcharacters union all select count(*) from world_api_dlt.raw_smartcharacters_details union all select count(*) from world_api_dlt.raw_smartassemblies union all select count(*) from world_api_dlt.raw_smartassemblies_details union all select count(*) from world_api_dlt.raw_killmails union all select count(*) from world_api_dlt.raw_killmails_details union all select count(*) from world_api_dlt.raw_fuels union all select count(*) from world_api_dlt.raw_config union all select count(*) from world_api_dlt.raw_health) select sum(n) as total from c",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Smartcharacters (details fetched)",
+  "gridPos": {"h": 6, "w": 6, "x": 18, "y": 77},
+      "options": {"colorMode": "value", "graphMode": "none", "justifyMode": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}},
+      "targets": [
+        {
+          "datasource": {"type": "postgres", "uid": "EF Postgres"},
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "select count(*)::bigint as details from world_api_dlt.raw_smartcharacters_details",
+          "refId": "A"
+        }
+      ],
+      "description": "Number of smartcharacter detail records loaded this dataset. Controlled by WORLD_API_MAX_DETAIL."
+    },
+    {
+      "type": "stat",
+  "title": "Total mud tables",
+  "gridPos": {"h": 6, "w": 4, "x": 0, "y": 0},
+      "options": {"colorMode": "value", "graphMode": "none", "justifyMode": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}},
+      "targets": [
+        {
+          "datasource": {"type": "postgres", "uid": "EF Postgres"},
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "select count(*) as tables from information_schema.tables where table_schema='mud' and table_type='BASE TABLE'",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "title": "All decoded tables (details)",
+      "gridPos": {"h": 12, "w": 24, "x": 0, "y": 64},
+      "options": {"showHeader": true},
+      "targets": [
+        {
+          "datasource": {"type": "postgres", "uid": "EF Postgres"},
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "select encode(table_id,'hex') as table_id_hex, label, namespace, name, rows, first_block, latest_block, distinct_addresses, last_update_block from meta.table_details order by rows desc",
+          "refId": "A"
+        }
+      ],
+      "description": "Derived from meta.table_details; scroll to explore all logical tables with friendly labels and stats."
+    },
+    {
+      "type": "stat",
+      "title": "Distinct table_ids (logical)",
+      "gridPos": {"h": 6, "w": 6, "x": 20, "y": 6},
+      "options": {"colorMode": "value", "graphMode": "none", "justifyMode": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}},
+      "targets": [
+        {
+          "datasource": {"type": "postgres", "uid": "EF Postgres"},
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "select count(distinct table_id)::bigint as logical_tables from mud.records",
+          "refId": "A"
+        }
+      ],
+      "description": "Count of unique logical tables encoded within mud.records (not DB base tables)."
+    },
+    {
+      "type": "stat",
+  "title": "Chain head",
+  "gridPos": {"h": 6, "w": 6, "x": 4, "y": 0},
+      "options": {"colorMode": "value", "graphMode": "none", "justifyMode": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}},
+      "targets": [
+        {
+          "datasource": {"type": "postgres", "uid": "EF Postgres"},
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "select block_number::bigint as chain_head from meta.chain_head where chain_id = 695569 order by ts desc limit 1",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "table",
+  "title": "Top mud tables by size (rows)",
+  "gridPos": {"h": 9, "w": 12, "x": 0, "y": 6},
+      "options": {"showHeader": true},
+      "targets": [
+        {
+          "datasource": {"type": "postgres", "uid": "EF Postgres"},
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "select relname as table, reltuples::bigint as approx_rows from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='mud' and relkind='r' order by reltuples desc limit 20",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+  "title": "Lag (blocks)",
+  "gridPos": {"h": 6, "w": 4, "x": 20, "y": 0},
+      "options": {"colorMode": "value", "graphMode": "none", "justifyMode": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}},
+      "targets": [
+        {
+          "datasource": {"type": "postgres", "uid": "EF Postgres"},
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "with ch as (select block_number::bigint as head from meta.chain_head where chain_id=695569 order by ts desc limit 1), pr as (select max(block_number)::bigint as proc from meta.processed_head where chain_id=695569) select (ch.head - pr.proc) as lag from ch, pr",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+  "title": "Latest processed block",
+  "gridPos": {"h": 6, "w": 6, "x": 10, "y": 0},
+      "options": {"colorMode": "value", "graphMode": "none", "justifyMode": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}},
+      "targets": [
+        {
+          "datasource": {"type": "postgres", "uid": "EF Postgres"},
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "select max(block_number)::bigint as latest_block from mud.records",
+          "refId": "A"
+        }
+      ],
+      "description": "Derived from mud.records.block_number"
+    },
+    {
+      "type": "timeseries",
+  "title": "Chain head (per minute)",
+  "gridPos": {"h": 9, "w": 12, "x": 0, "y": 25},
+      "fieldConfig": {"defaults": {"unit": "none"}, "overrides": []},
+      "options": {"tooltip": {"mode": "single"}},
+      "targets": [
+        {
+          "datasource": {"type": "postgres", "uid": "EF Postgres"},
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "select $__timeGroup(ts, ''1m'') as time, max(block_number)::bigint as value from meta.chain_head where chain_id=695569 and $__timeFilter(ts) group by 1 order by 1",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+  "title": "Processed head (per minute)",
+  "gridPos": {"h": 9, "w": 12, "x": 12, "y": 25},
+      "fieldConfig": {"defaults": {"unit": "none"}, "overrides": []},
+      "options": {"tooltip": {"mode": "single"}},
+      "targets": [
+        {
+          "datasource": {"type": "postgres", "uid": "EF Postgres"},
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "select $__timeGroup(ts, ''1m'') as time, max(block_number)::bigint as value from meta.processed_head where chain_id=695569 and $__timeFilter(ts) group by 1 order by 1",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+  "title": "Chain blocks/min (delta)",
+  "gridPos": {"h": 9, "w": 12, "x": 0, "y": 34},
+      "fieldConfig": {"defaults": {"unit": "blocks"}, "overrides": []},
+      "options": {"tooltip": {"mode": "single"}},
+      "targets": [
+        {
+          "datasource": {"type": "postgres", "uid": "EF Postgres"},
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "with s as (select $__timeGroup(ts, ''1m'') as bucket, max(block_number)::bigint as head from meta.chain_head where chain_id=695569 and $__timeFilter(ts) group by 1 order by 1) select bucket as time, (head - lag(head) over (order by bucket)) as value from s",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+  "title": "Processed blocks/min (delta)",
+  "gridPos": {"h": 9, "w": 12, "x": 12, "y": 34},
+      "fieldConfig": {"defaults": {"unit": "blocks"}, "overrides": []},
+      "options": {"tooltip": {"mode": "single"}},
+      "targets": [
+        {
+          "datasource": {"type": "postgres", "uid": "EF Postgres"},
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "with s as (select $__timeGroup(ts, ''1m'') as bucket, max(block_number)::bigint as head from meta.processed_head where chain_id=695569 and $__timeFilter(ts) group by 1 order by 1) select bucket as time, (head - lag(head) over (order by bucket)) as value from s",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "table",
+  "title": "Mud base tables",
+  "gridPos": {"h": 10, "w": 12, "x": 12, "y": 15},
+      "options": {"showHeader": true},
+      "targets": [
+        {
+          "datasource": {"type": "postgres", "uid": "EF Postgres"},
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "select table_name from information_schema.tables where table_schema='mud' and table_type='BASE TABLE' order by table_name",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Labeled logical tables",
+      "gridPos": {"h": 6, "w": 6, "x": 20, "y": 12},
+      "options": {"colorMode": "value", "graphMode": "none", "justifyMode": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}},
+      "targets": [
+        {
+          "datasource": {"type": "postgres", "uid": "EF Postgres"},
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "select count(*)::bigint as labeled from meta.table_registry",
+          "refId": "A"
+        }
+      ],
+      "description": "How many logical tables (table_ids) currently have a friendly label in meta.table_registry."
+    },
+    {
+      "type": "table",
+  "title": "Top table_ids by rows (mud.records)",
+  "gridPos": {"h": 12, "w": 24, "x": 0, "y": 52},
+      "options": {"showHeader": true},
+      "targets": [
+        {
+          "datasource": {"type": "postgres", "uid": "EF Postgres"},
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "select coalesce(n.label, encode(m.table_id,'hex')) as table_label, count(*) as rows, max(m.block_number)::bigint as latest_block from mud.records m left join meta.table_names n on n.table_id = m.table_id group by 1 order by rows desc limit 50",
+          "refId": "A"
+        }
+      ],
+      "description": "This schema stores decoded data in a generic records table keyed by table_id; friendly names require a registry table or mapping."
+    },
+    {
+      "type": "stat",
+  "title": "Total records",
+  "gridPos": {"h": 6, "w": 4, "x": 16, "y": 0},
+      "options": {"colorMode": "value", "graphMode": "none", "justifyMode": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}},
+      "targets": [
+        {
+          "datasource": {"type": "postgres", "uid": "EF Postgres"},
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "select count(*)::bigint as rows from mud.records",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "table",
+  "title": "Recent blocks (rows per block)",
+  "gridPos": {"h": 9, "w": 12, "x": 12, "y": 6},
+      "options": {"showHeader": true},
+      "targets": [
+        {
+          "datasource": {"type": "postgres", "uid": "EF Postgres"},
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "select block_number::bigint as block, count(*) as rows from mud.records group by block_number order by block_number desc limit 50",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "table",
+  "title": "Rows per 1000-block bucket",
+  "gridPos": {"h": 10, "w": 12, "x": 0, "y": 15},
+      "options": {"showHeader": true},
+      "targets": [
+        {
+          "datasource": {"type": "postgres", "uid": "EF Postgres"},
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "select (block_number::bigint/1000)*1000 as block_bucket, count(*) as rows from mud.records group by 1 order by 1 desc limit 20",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+  "title": "Chain blocks/hour (delta)",
+  "gridPos": {"h": 9, "w": 12, "x": 0, "y": 43},
+      "fieldConfig": {"defaults": {"unit": "blocks"}, "overrides": []},
+      "options": {"tooltip": {"mode": "single"}},
+      "targets": [
+        {
+          "datasource": {"type": "postgres", "uid": "EF Postgres"},
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "with s as (select $__timeGroup(ts, ''1h'') as bucket, max(block_number)::bigint as head from meta.chain_head where chain_id=695569 and $__timeFilter(ts) group by 1 order by 1) select bucket as time, (head - lag(head) over (order by bucket)) as value from s",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+  "title": "Processed blocks/hour (delta)",
+  "gridPos": {"h": 9, "w": 12, "x": 12, "y": 43},
+      "fieldConfig": {"defaults": {"unit": "blocks"}, "overrides": []},
+      "options": {"tooltip": {"mode": "single"}},
+      "targets": [
+        {
+          "datasource": {"type": "postgres", "uid": "EF Postgres"},
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "with s as (select $__timeGroup(ts, ''1h'') as bucket, max(block_number)::bigint as head from meta.processed_head where chain_id=695569 and $__timeFilter(ts) group by 1 order by 1) select bucket as time, (head - lag(head) over (order by bucket)) as value from s",
+          "refId": "A"
+        }
+      ]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["ef-map", "indexer"],
+  "templating": {"list": []},
+  "time": {"from": "now-24h", "to": "now"},
+  "timezone": "browser",
+  "title": "EF Indexer Overview",
+  "version": 1
+}

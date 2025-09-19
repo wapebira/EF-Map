@@ -23,6 +23,9 @@ tmp_*
 *.log
 *.bak
 
+# Ad-hoc corruption markers created by external tools
+True.corrupt.*
+
 # Ad-hoc JSON/TXT snapshots
 *.json.tmp
 tmp_*.json
@@ -31,3 +34,24 @@ eve-frontier-map/tmp_*.json
 
 # Accidental nested copy
 eve-frontier-map/eve-frontier-map/
+
+# Local indexer artifacts
+data/
+!data/.gitkeep
+eve-frontier-map/public/data/index-latest/*.json
+
+# Python virtual environments & caches (prevent massive untracked file sets)
+**/.venv*/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+
+# dlt runtime artifacts (generated load packages & exported schemas)
+**/.dlt/*/load_packages/**
+**/.dlt/schemas/export/**
+
+# Local DuckDB files created by smoke tests
+**/*.duckdb

@@ -1,0 +1,150 @@
+{
+  "__requires": [
+    { "id": "grafana", "name": "Grafana", "type": "grafana", "version": "10.4.3" },
+    { "id": "postgres", "name": "PostgreSQL", "type": "datasource", "version": "1" },
+    { "id": "stat", "name": "Stat", "type": "panel", "version": "1" },
+    { "id": "timeseries", "name": "Time series", "type": "panel", "version": "1" },
+    { "id": "table", "name": "Table", "type": "panel", "version": "1" }
+  ],
+  "schemaVersion": 38,
+  "title": "EF-Map Overview",
+  "uid": "ef-map-overview",
+  "version": 1,
+  "tags": ["ef-map", "chain", "world_api"],
+  "timezone": "",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "type": "row",
+      "title": "Chain Indexer",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 10,
+      "panels": []
+    },
+    {
+      "type": "stat",
+      "title": "Chain head (max block)",
+      "id": 11,
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 1 },
+      "datasource": { "type": "postgres", "uid": "ef-postgres" },
+      "options": { "reduceOptions": { "calcs": ["last"], "fields": "value" } },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT now() AS \"time\", MAX(block_number)::bigint AS value FROM meta.chain_head;"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Processed head (max block)",
+      "id": 12,
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 1 },
+      "datasource": { "type": "postgres", "uid": "ef-postgres" },
+      "options": { "reduceOptions": { "calcs": ["last"], "fields": "value" } },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT now() AS \"time\", MAX(block_number)::bigint AS value FROM meta.processed_head;"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Indexer lag (blocks)",
+      "id": 13,
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 1 },
+      "datasource": { "type": "postgres", "uid": "ef-postgres" },
+      "options": { "reduceOptions": { "calcs": ["last"], "fields": "value" } },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT now() AS \"time\", ( (SELECT MAX(block_number) FROM meta.chain_head) - (SELECT MAX(block_number) FROM meta.processed_head) )::bigint AS value;"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Chain head over time",
+      "id": 14,
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 7 },
+      "datasource": { "type": "postgres", "uid": "ef-postgres" },
+      "fieldConfig": { "defaults": { "unit": "none" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT ts AS \"time\", block_number::bigint AS \"Chain head\" FROM meta.chain_head WHERE ts > now() - interval '6 hours' ORDER BY ts;"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Processed head over time",
+      "id": 15,
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 7 },
+      "datasource": { "type": "postgres", "uid": "ef-postgres" },
+      "fieldConfig": { "defaults": { "unit": "none" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT ts AS \"time\", block_number::bigint AS \"Processed head\" FROM meta.processed_head WHERE ts > now() - interval '6 hours' ORDER BY ts;"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Processed blocks per minute",
+      "id": 16,
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 15 },
+      "datasource": { "type": "postgres", "uid": "ef-postgres" },
+      "fieldConfig": { "defaults": { "unit": "blocks" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT date_trunc('minute', ts) AS \"time\", (MAX(block_number) - MIN(block_number))::bigint AS \"Blocks/min\" FROM meta.processed_head WHERE ts > now() - interval '6 hours' GROUP BY 1 ORDER BY 1;"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "World API Counts",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 23 },
+      "id": 20,
+      "panels": []
+    },
+    {
+      "type": "table",
+      "title": "World API raw tables (counts)",
+      "id": 21,
+      "gridPos": { "h": 10, "w": 14, "x": 0, "y": 24 },
+      "datasource": { "type": "postgres", "uid": "ef-postgres" },
+      "options": { "showHeader": true },
+      "targets": [
+        { "refId": "A", "format": "table", "rawQuery": true, "rawSql": "SELECT * FROM world_api_metrics.table_counts ORDER BY table_name;" }
+      ]
+    },
+    { "type": "stat", "title": "Total World API rows", "id": 22, "gridPos": { "h": 5, "w": 10, "x": 14, "y": 24 }, "datasource": { "type": "postgres", "uid": "ef-postgres" }, "options": { "reduceOptions": { "calcs": ["last"], "fields": "value" } }, "targets": [ { "refId": "A", "format": "time_series", "rawQuery": true, "rawSql": "SELECT now() AS \"time\", SUM(rows)::bigint AS value FROM world_api_metrics.table_counts;" } ] },
+    { "type": "stat", "title": "Solarsystems (dlt)", "id": 23, "gridPos": { "h": 5, "w": 5, "x": 14, "y": 29 }, "datasource": { "type": "postgres", "uid": "ef-postgres" }, "options": { "reduceOptions": { "calcs": ["last"], "fields": "value" } }, "targets": [ { "refId": "A", "format": "time_series", "rawQuery": true, "rawSql": "SELECT now() AS \"time\", COUNT(*)::bigint AS value FROM world_api_dlt.raw_solarsystems;" } ] },
+    { "type": "stat", "title": "Types (dlt)", "id": 24, "gridPos": { "h": 5, "w": 5, "x": 19, "y": 29 }, "datasource": { "type": "postgres", "uid": "ef-postgres" }, "options": { "reduceOptions": { "calcs": ["last"], "fields": "value" } }, "targets": [ { "refId": "A", "format": "time_series", "rawQuery": true, "rawSql": "SELECT now() AS \"time\", COUNT(*)::bigint AS value FROM world_api_dlt.raw_types;" } ] },
+    { "type": "stat", "title": "Tribes (dlt)", "id": 25, "gridPos": { "h": 5, "w": 5, "x": 14, "y": 34 }, "datasource": { "type": "postgres", "uid": "ef-postgres" }, "options": { "reduceOptions": { "calcs": ["last"], "fields": "value" } }, "targets": [ { "refId": "A", "format": "time_series", "rawQuery": true, "rawSql": "SELECT now() AS \"time\", COUNT(*)::bigint AS value FROM world_api_dlt.raw_tribes;" } ] },
+    { "type": "stat", "title": "Smartcharacters (dlt)", "id": 26, "gridPos": { "h": 5, "w": 5, "x": 19, "y": 34 }, "datasource": { "type": "postgres", "uid": "ef-postgres" }, "options": { "reduceOptions": { "calcs": ["last"], "fields": "value" } }, "targets": [ { "refId": "A", "format": "time_series", "rawQuery": true, "rawSql": "SELECT now() AS \"time\", COUNT(*)::bigint AS value FROM world_api_dlt.raw_smartcharacters;" } ] },
+    { "type": "stat", "title": "Smartcharacters (details)", "id": 27, "gridPos": { "h": 5, "w": 10, "x": 14, "y": 39 }, "datasource": { "type": "postgres", "uid": "ef-postgres" }, "options": { "reduceOptions": { "calcs": ["last"], "fields": "value" } }, "targets": [ { "refId": "A", "format": "time_series", "rawQuery": true, "rawSql": "SELECT now() AS \"time\", COUNT(*)::bigint AS value FROM world_api_dlt.raw_smartcharacters_details;" } ] },
+    { "type": "stat", "title": "Smartassembly links (details)", "id": 28, "gridPos": { "h": 5, "w": 10, "x": 14, "y": 44 }, "datasource": { "type": "postgres", "uid": "ef-postgres" }, "options": { "reduceOptions": { "calcs": ["last"], "fields": "value" } }, "targets": [ { "refId": "A", "format": "time_series", "rawQuery": true, "rawSql": "SELECT now() AS \"time\", COUNT(*)::bigint AS value FROM world_api_dlt.raw_smartcharacters_details__smart_assemblies;" } ] }
+  ],
+  "templating": { "list": [] },
+  "timepicker": {}
+}

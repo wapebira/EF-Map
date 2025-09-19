@@ -19,8 +19,22 @@ Central index for project markdown content. Source files preserved in root for n
 ## Frontend App
 - `eve-frontier-map/README.md`: Frontend quick start & deployment pointer (post‑migration minimal docs). See root `README.md` for full architecture.
 
-## Migration (Historical)
-- `MIGRATION_PLAN.md`: Netlify → Cloudflare migration (archived; cutover completed 2025-09-07). Kept for audit; new platform changes should create fresh plans.
+## Active vs Archived
+Active docs live in this folder. Completed or obsolete docs are moved under `docs/archive/`.
+
+Archived (reference only):
+- `archive/migration/MIGRATION_PLAN.md` and `archive/migration/migration_status.json` – Netlify → Cloudflare migration (completed 2025-09-07)
+- `archive/local-indexer/*` – Local SQLite indexer plans/scripts (deprecated in favor of Primordium pg-indexer)
+- `docs/archive/d1/d1_schema_draft.sql` – Early D1 schema draft (superseded by KV + optional D1 later)
+- `archive/reports/indexer-vs-worldapi-audit-2025-09-18.md` – Point-in-time analysis
+
+Active docs here:
+- `DEPRECATIONS.md` – What’s deprecated and why (Primordium/Grafana as canonical)
+- `dynamic_structures_plan.md` / `dynamic_structures_field_mapping.md`
+- `operations-secrets.md` (operational guidance; no secrets committed)
+- `post-ingestion-playbook.md` (operational playbook, current)
+- `primodium-indexer.md` (current canonical chain ingestion)
+- `UNIVERSE_DATA_PIPELINE.md`, `WORLD_ROTATION_PLAYBOOK.md`
 
 ## AI Usage Guidance
 If using an AI assistant ("Vibe coding" workflow – user provides intent, AI designs & implements):

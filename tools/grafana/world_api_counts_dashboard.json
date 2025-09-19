@@ -1,0 +1,159 @@
+{
+  "__inputs": [
+    {
+      "name": "DS_POSTGRES",
+      "label": "Postgres",
+      "description": "Select the Postgres data source wired to your local Primodium DB",
+      "type": "datasource",
+      "pluginId": "postgres",
+      "pluginName": "PostgreSQL"
+    }
+    ],
+  "__requires": [
+    { "type": "grafana", "id": "grafana", "name": "Grafana", "version": "10.4.3" },
+    { "type": "panel", "id": "table", "name": "Table", "version": "1" },
+    { "type": "datasource", "id": "postgres", "name": "PostgreSQL", "version": "1" }
+  ],
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "iteration": 1,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "type": "row",
+      "title": "World API (dlt)",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 100,
+      "collapsed": false,
+      "panels": []
+    },
+    {
+  "datasource": { "type": "postgres", "uid": "ef-postgres" },
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "auto", "displayMode": "auto" } },
+        "overrides": []
+      },
+      "gridPos": { "h": 12, "w": 14, "x": 0, "y": 1 },
+      "id": 1,
+      "options": { "showHeader": true },
+      "pluginVersion": "10.4.3",
+      "targets": [
+        {
+          "format": "table",
+          "refId": "A",
+          "rawQuery": true,
+          "rawSql": "SELECT * FROM world_api_metrics.table_counts ORDER BY table_name;"
+        }
+      ],
+      "title": "World API raw tables (counts)",
+      "type": "table"
+    },
+    {
+  "datasource": { "type": "postgres", "uid": "ef-postgres" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" } }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 10, "x": 14, "y": 1 },
+      "id": 2,
+      "options": { "reduceOptions": { "calcs": ["last"], "fields": "value" }, "orientation": "auto" },
+      "targets": [
+        {
+          "format": "time_series",
+          "refId": "A",
+          "rawQuery": true,
+          "rawSql": "SELECT now() AS \"time\", SUM(rows)::bigint AS value FROM world_api_metrics.table_counts;"
+        }
+      ],
+      "title": "Total World API rows",
+      "type": "stat"
+    },
+    {
+  "datasource": { "type": "postgres", "uid": "ef-postgres" },
+      "gridPos": { "h": 6, "w": 5, "x": 14, "y": 7 },
+      "id": 3,
+      "options": { "reduceOptions": { "calcs": ["last"], "fields": "value" }, "orientation": "auto" },
+      "targets": [
+        { "format": "time_series", "refId": "A", "rawQuery": true,
+          "rawSql": "SELECT now() AS \"time\", COUNT(*)::bigint AS value FROM world_api_dlt.raw_solarsystems;" }
+      ],
+      "title": "Solarsystems (dlt)",
+      "type": "stat"
+    },
+    {
+  "datasource": { "type": "postgres", "uid": "ef-postgres" },
+      "gridPos": { "h": 6, "w": 5, "x": 19, "y": 7 },
+      "id": 4,
+      "options": { "reduceOptions": { "calcs": ["last"], "fields": "value" }, "orientation": "auto" },
+      "targets": [
+        { "format": "time_series", "refId": "A", "rawQuery": true,
+          "rawSql": "SELECT now() AS \"time\", COUNT(*)::bigint AS value FROM world_api_dlt.raw_types;" }
+      ],
+      "title": "Types (dlt)",
+      "type": "stat"
+    },
+    {
+  "datasource": { "type": "postgres", "uid": "ef-postgres" },
+      "gridPos": { "h": 6, "w": 5, "x": 14, "y": 13 },
+      "id": 5,
+      "options": { "reduceOptions": { "calcs": ["last"], "fields": "value" }, "orientation": "auto" },
+      "targets": [
+        { "format": "time_series", "refId": "A", "rawQuery": true,
+          "rawSql": "SELECT now() AS \"time\", COUNT(*)::bigint AS value FROM world_api_dlt.raw_tribes;" }
+      ],
+      "title": "Tribes (dlt)",
+      "type": "stat"
+    },
+    {
+  "datasource": { "type": "postgres", "uid": "ef-postgres" },
+      "gridPos": { "h": 6, "w": 5, "x": 19, "y": 13 },
+      "id": 6,
+      "options": { "reduceOptions": { "calcs": ["last"], "fields": "value" }, "orientation": "auto" },
+      "targets": [
+        { "format": "time_series", "refId": "A", "rawQuery": true,
+          "rawSql": "SELECT now() AS \"time\", COUNT(*)::bigint AS value FROM world_api_dlt.raw_smartcharacters;" }
+      ],
+      "title": "Smartcharacters (dlt)",
+      "type": "stat"
+    },
+    {
+  "datasource": { "type": "postgres", "uid": "ef-postgres" },
+      "gridPos": { "h": 6, "w": 10, "x": 14, "y": 19 },
+      "id": 7,
+      "options": { "reduceOptions": { "calcs": ["last"], "fields": "value" }, "orientation": "auto" },
+      "targets": [
+        { "format": "time_series", "refId": "A", "rawQuery": true,
+          "rawSql": "SELECT now() AS \"time\", COUNT(*)::bigint AS value FROM world_api_dlt.raw_smartcharacters_details;" }
+      ],
+      "title": "Smartcharacters (details fetched)",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "postgres", "uid": "${DS_POSTGRES}" },
+      "gridPos": { "h": 6, "w": 10, "x": 14, "y": 25 },
+      "id": 8,
+      "options": { "reduceOptions": { "calcs": ["last"], "fields": "value" }, "orientation": "auto" },
+      "targets": [
+        { "format": "time_series", "refId": "A", "rawQuery": true,
+          "rawSql": "SELECT now() AS \"time\", COUNT(*)::bigint AS value FROM world_api_dlt.raw_smartcharacters_details__smart_assemblies;" }
+      ],
+      "title": "Smartassembly links (details)",
+      "type": "stat"
+    }
+  ],
+  "refresh": "",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["world_api", "counts"],
+  "templating": { "list": [] },
+  "time": { "from": "now-24h", "to": "now" },
+  "timepicker": {},
+  "timezone": "",
+  "title": "World API Counts",
+  "uid": "world-api-counts",
+  "version": 1,
+  "weekStart": ""
+}

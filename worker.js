@@ -548,6 +548,50 @@ function upgradeSnapshot(s){
   }
 }
 
+// World API counts storage helpers (kept in EF_STATS KV)
+async function handleWorldApiStats(env, url){
+  try {
+    const key = 'worldapi/current.json';
+    const raw = await env.EF_STATS.get(key);
+    let current = raw ? JSON.parse(raw) : null;
+    // Optional: if not present, try to read scratch/world_api/meta.json from ASSETS (Pages deploy)
+    if(!current){
+      try {
+        const origin = url.origin || new URL('https://dummy.local/').origin; // url is URL instance
+        const metaResp = await env.ASSETS.fetch(origin + '/scratch/world_api/meta.json');
+        if(metaResp.ok){ current = await metaResp.json(); }
+      } catch { /* ignore */ }
+    }
+    if(!current) return json({ status:'empty' });
+    const totalRows = Object.values(current.counts||{}).reduce((a,b)=> a + (Number(b)||0), 0);
+    return json({ status:'ok', updatedAt: current.updatedAt||current.timestamp||null, base: current.base||null, counts: current.counts||{}, totalRows });
+  } catch(e){
+    return json({ status:'error', message:String(e) },500);
+  }
+}
+
+async function handleWorldApiUpdate(req, env){
+  if(req.method !== 'POST') return json({ error:'Method Not Allowed' },405);
+  // Admin token optional in preview, required otherwise (mirror pattern used elsewhere)
+  const token = req.headers.get('X-Indexer-Admin');
+  const expected = (env.INDEXER_ADMIN_TOKEN||'').trim();
+  const host = req.headers.get('host')||''; const isPreviewHost = host.endsWith('.pages.dev');
+  const u = new URL(req.url); const bypass = isPreviewHost && u.searchParams.get('openPreview')==='1' && (!expected || token?.trim()!==expected);
+  if(expected && token?.trim()!==expected && !bypass) return json({ error:'Unauthorized' },401);
+  let body={}; try { if(req.headers.get('content-type')?.includes('application/json')) body = await req.json(); } catch { return json({ error:'Invalid JSON' },400); }
+  // Expected shape: { counts: { table: number }, base?: string, updatedAt?: iso }
+  const counts = body && typeof body==='object' ? body.counts : null;
+  if(!counts || typeof counts!=='object') return json({ error:'Missing counts' },400);
+  const payload = { base: body.base||null, counts, updatedAt: body.updatedAt || new Date().toISOString(), version: 1 };
+  try {
+    await env.EF_STATS.put('worldapi/current.json', JSON.stringify(payload));
+    // Also store a daily snapshot for simple history
+    const day = new Date().toISOString().slice(0,10);
+    await env.EF_STATS.put('worldapi/daily/'+day+'.json', JSON.stringify(payload));
+  } catch(e){ return json({ error:'store_failed', message:String(e) },500); }
+  return json({ status:'stored' });
+}
+
 async function loadSnapshot(kv, key){
   const raw = await kv.get(key);
   if(!raw){
@@ -700,6 +744,8 @@ export default {
   if(p === '/api/get-share') return handleGetShare(url, env);
   if(p === '/api/usage-event') return handleUsageEvent(req, env);
   if(p === '/api/stats') return handleStats(url, env);
+  if(p === '/api/worldapi-stats') return handleWorldApiStats(env, url);
+  if(p === '/api/worldapi-update') return handleWorldApiUpdate(req, env);
   if(p === '/api/indexer-health') return handleIndexerHealth(env, url);
   if(p === '/api/indexer-migrate') return handleIndexerMigrate(req, env);
   if(p === '/api/indexer-bootstrap') return handleIndexerBootstrap(req, env);
@@ -775,22 +821,6 @@ export default {
       await env.INDEX_DB.prepare("INSERT OR REPLACE INTO topic_map (abi_hash, json) VALUES (?, ?)").bind(abiHash, JSON.stringify(parsed)).run();
       return json({ status:'stored', abiHash });
     } catch(e){ return json({ error:'topic_map_store_failed', message:String(e) },500); }
-  }
-  if(p === '/api/indexer-decode-batch') {
-    if(req.method !== 'POST') return json({ error:'Method Not Allowed' },405);
-    if(!env.INDEX_DB) return json({ error:'INDEX_DB binding missing' },500);
-    // Auth parity with ingest
-    const token = req.headers.get('X-Indexer-Admin');
-    const expected = (env.INDEXER_ADMIN_TOKEN||'').trim();
-    const host = req.headers.get('host')||''; const isPreviewHost = host.endsWith('.pages.dev');
-    const urlObj = new URL(req.url); const bypass = isPreviewHost && urlObj.searchParams.get('openPreview')==='1' && (!expected || token?.trim()!==expected);
-    if(expected && token?.trim()!==expected && !bypass) return json({ error:'Unauthorized' },401);
-    // Skeleton: just report counts until decoder implemented
-    try {
-      const cur = await env.INDEX_DB.prepare("SELECT last_block, last_log_index FROM decoded_cursor WHERE id=1").all();
-      const cursor = cur.results?.[0] || { last_block:0, last_log_index:0 };
-      return json({ status:'noop', decoded:0, cursor });
-    } catch(e){ return json({ error:'decode_batch_failed', message:String(e) },500); }
   }
   if(p === '/api/indexer-wipe') {
     if(req.method !== 'POST') return json({ error:'Method Not Allowed' },405);

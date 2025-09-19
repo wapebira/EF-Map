@@ -4,16 +4,15 @@
 	"name": "ef-indexer-cron",
 	"main": "cron_entry.js",
 	"compatibility_date": "2025-09-07",
-	"triggers": { "crons": ["*/1 * * * *"] },
+	// Cron disabled; standalone cron worker not in use while D1 absent.
+	"triggers": { "crons": [] },
 	"kv_namespaces": [
 		{ "binding": "EF_SHARES", "id": "93333a061a734ceca8da9f055cf189d1" },
 		{ "binding": "EF_STATS", "id": "cccc1a708dd74aa8aabd91c8bfc33c3f" }
 	],
-	"d1_databases": [
-		{ "binding": "INDEX_DB", "database_name": "ef_index", "database_id": "cfc8fecb-9fe1-4ad0-98ed-525772d13ff0" }
-	],
+	// D1 unbound intentionally (databases deleted). Leave vars for reference only.
 	"vars": {
-		"INDEXER_CRON_ENABLED": "1",
+		"INDEXER_CRON_ENABLED": "0",
 		"INDEXER_CRON_MODE": "store_all",
 		"INDEXER_CRON_MAXBLOCKS": "1200", // rollback from 1800 aiming ~2x baseline (600)
 		"INDEXER_CRON_SEGMENT": "120",   // rollback from 150 (baseline 80)

@@ -1,0 +1,12 @@
+[
+  { "namespace": "tbevefrontier", "name": "Entity" },
+  { "namespace": "tbevefrontier", "name": "OwnershipByObjec" },
+  { "namespace": "tbevefrontier", "name": "Role" },
+  { "namespace": "tbevefrontier", "name": "Characters" },
+  { "namespace": "tbevefrontier", "name": "CharactersByAcco" },
+  { "namespace": "tbevefrontier", "name": "NetworkNodeByAss" },
+  { "namespace": "tbevefrontier", "name": "NetworkNodeEnerg" },
+  { "namespace": "tbevefrontier", "name": "SmartGateConfig" },
+  { "namespace": "tbevefrontier", "name": "AccessConfig" },
+  { "namespace": "tbevefrontier", "name": "Inventory" }
+]

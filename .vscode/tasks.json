@@ -1,0 +1,15 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Start metrics server",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"tools/local-indexer/metrics_server.js"
+			],
+			"isBackground": true,
+			"group": "none"
+		}
+	]
+}

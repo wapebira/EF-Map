@@ -1,0 +1,16 @@
+[runtime]
+log_level="INFO"
+
+[sources.worldapi]
+# Base URL for the API
+base_url = "https://world-api-stillness.live.tech.evefrontier.com"  # World API base URL
+
+[destination.postgres]
+# Use env vars via dlt to configure Postgres destination
+# These map to the connection string: postgresql://user:password@host:port/database
+database = "${POSTGRES_DB}"
+username = "${POSTGRES_USER}"
+password = "${POSTGRES_PASSWORD}"
+host = "${POSTGRES_HOST}"
+port = "${POSTGRES_PORT}"
+

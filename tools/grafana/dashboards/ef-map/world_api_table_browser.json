@@ -1,0 +1,109 @@
+{
+  "__requires": [
+    { "id": "grafana", "name": "Grafana", "type": "grafana", "version": "10.4.3" },
+    { "id": "postgres", "name": "PostgreSQL", "type": "datasource", "version": "1" },
+    { "id": "table", "name": "Table", "type": "panel", "version": "1" },
+    { "id": "stat", "name": "Stat", "type": "panel", "version": "1" }
+  ],
+  "schemaVersion": 38,
+  "title": "World API Table Browser",
+  "uid": "world-api-browser",
+  "version": 1,
+  "tags": ["ef-map", "world_api", "browser"],
+  "timezone": "",
+  "time": { "from": "now-24h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "type": "query",
+        "name": "schema",
+        "label": "Schema",
+        "hide": 0,
+        "datasource": { "type": "postgres", "uid": "ef-postgres" },
+        "refresh": 1,
+        "definition": "SELECT nspname FROM pg_namespace WHERE nspname='world_api_dlt' OR nspname ~ '^0x' ORDER BY 1;",
+        "query": "SELECT nspname FROM pg_namespace WHERE nspname='world_api_dlt' OR nspname ~ '^0x' ORDER BY 1;",
+        "includeAll": false,
+        "multi": false,
+        "current": { "selected": true, "text": "world_api_dlt", "value": "world_api_dlt" }
+      },
+      {
+        "type": "query",
+        "name": "table",
+        "label": "Table",
+        "hide": 0,
+        "datasource": { "type": "postgres", "uid": "ef-postgres" },
+        "refresh": 1,
+        "definition": "SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='${schema}' AND c.relkind='r' ORDER BY 1;",
+        "query": "SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='${schema}' AND c.relkind='r' ORDER BY 1;",
+        "includeAll": false,
+        "multi": false
+      },
+      {
+        "type": "textbox",
+        "name": "limit",
+        "label": "Limit",
+        "query": "100",
+        "current": { "selected": true, "text": "100", "value": "100" }
+      },
+      {
+        "type": "textbox",
+        "name": "offset",
+        "label": "Offset",
+        "query": "0",
+        "current": { "selected": true, "text": "0", "value": "0" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Total rows in selection",
+      "id": 1,
+      "gridPos": { "h": 5, "w": 8, "x": 0, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "ef-postgres" },
+      "options": { "reduceOptions": { "calcs": ["last"], "fields": "value" } },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT now() AS \"time\", COUNT(*)::bigint AS value FROM ${schema}.${table};"
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "title": "Columns (${schema}.${table})",
+      "id": 2,
+      "gridPos": { "h": 10, "w": 16, "x": 8, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "ef-postgres" },
+      "options": { "showHeader": true },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_schema='${schema}' AND table_name='${table}' ORDER BY ordinal_position;"
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "title": "Rows (${schema}.${table}) LIMIT ${limit} OFFSET ${offset}",
+      "id": 3,
+      "gridPos": { "h": 20, "w": 24, "x": 0, "y": 10 },
+      "datasource": { "type": "postgres", "uid": "ef-postgres" },
+      "options": { "showHeader": true },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT * FROM ${schema}.${table} LIMIT ${limit} OFFSET ${offset};"
+        }
+      ]
+    }
+  ],
+  "timepicker": {}
+}

@@ -1,3 +1,815 @@
+## 2025-09-19 – Docs link fix after archive move
+- Goal: Update internal references to archived docs so links remain valid for LLM navigation and contributors.
+- Files: `docs/decision-log.md` (this file), `docs/support/cloudflare_billing_request.md`.
+- Changes: Pointed migration plan/status to `docs/archive/migration/*`, local indexer plan to `docs/archive/local-indexer/LOCAL_INDEXER_PLAN.md`, and D1 draft schema to `docs/archive/d1/d1_schema_draft.sql`.
+- Risk: Low (docs only). No runtime impact.
+- Gates: N/A; manual link checks via grep. Follow-up: run a quick repo-wide link scan later.
+
+## 2025-09-18 – Reduce World API scope to essentials
+## 2025-09-19 – World API cron verification + compose cleanup
+- Goal: Verify killmails and tribe-members pipelines wrote to Postgres and clean up docker-compose warning.
+- Verification:
+  - DB counts (psql inside container): world_api_dlt.killmails=729, world_api_dlt.tribe_member=10,284.
+  - Heartbeat: latest finished_at UTC ~ 2025-09-19 12:09:13Z in world_api_dlt.ingest_heartbeat.
+  - Grafana health: HTTP 200 from http://127.0.0.1:3000/api/health.
+- Change: Removed obsolete `version: '3.9'` key from `tools/worldapi-cron/docker-compose.yml` to silence Compose V2 warning.
+- Risk: low (config tidy; no runtime behavior change).
+- Follow-ups: Monitor Grafana World API panels for freshness; consider reducing killmails backfill env now that initial replay completed.
+
+- Goal: Drop World API endpoints that duplicate Primordium chain indexer data; keep only endpoints needed for names/labels and unique feeds.
+- Files: tools/worldapi-cron/docker-compose.yml (disable services)
+- Keep: killmails, types (daily), tribes + tribes_details (low cadence), smartcharacters (list only)
+- Drop: smartassemblies (flat/details), solarsystems (list/details), smartcharacters details, config/health (not used in monitoring)
+- Rationale: Chain indexer is source of truth for ownership, assembly types, and locations; World API provides names (characters/tribes) and killmails/types catalog.
+- Impact: Less load, faster cron, and DB space reclaimed by dropping unused world_api_dlt tables.
+- Follow-ups: Remove disabled containers; drop unneeded tables; update Grafana dashboard to show freshness and counts for the four kept tables only.
+## 2025-09-18 – Deprecate legacy indexers (local + D1)
+- Goal: Clarify that Primordium pg-indexer is canonical for chain ingestion; mark prior local SQLite indexer and Cloudflare D1 indexer attempts as deprecated.
+- Files: `README.md` (Indexer section), `docs/DEPRECATIONS.md` (new), `tools/local-indexer/README.*` (banners), `.env.example` (comment).
+- Diff: ~40 LoC net; no runtime code modifications.
+- Risk: Low (docs only). No impact on Primordium or worldapi cron.
+- Follow-ups: After a short grace period, remove `tools/local-indexer/**/*` and dormant D1 indexer files once confirmed unused.
+## 2025-09-18 – Cleanup guardrails (Primordium-safe)
+- Goal: Reclaim disk space without impacting the working Primordium indexer (chain ingress → Postgres).
+- Scope: Exclude all Primordium indexer containers and their Postgres data volume; do not drop schemas used by that pipeline.
+- Boundaries (exclusions):
+  - DO NOT prune the Postgres container/volume used by Primordium (container name pattern: `pg-indexer-reader-postgres-*`; volume mounted at `/var/lib/postgresql/data`).
+  - DO NOT drop DBs/schemas on that Postgres instance unless explicitly approved.
+- Cleanup targets (allowed):
+  - Large local SQLite artifacts from the legacy/local indexer: `data/local-indexer.db`, `data/local-indexer-decoded.db`, and snapshot copies under `data/local-snapshots/**/local-indexer.db` (after confirming they are not actively used).
+  - Docker build cache and dangling images (safe to prune; no effect on running containers).
+  - Absolutely avoid `docker volume prune`; only remove unused volumes after explicit verification they are not bound to Primordium services.
+- Rationale: Primordium writes to Postgres (Docker volume), while the large `.db` files are from the separate local SQLite indexer tooling. Keeping these boundaries avoids interrupting live ingestion.
+
+### 2025-09-18 – Cleanup execution (results)
+- Deleted legacy local SQLite files: `data/local-indexer.db`, `data/local-indexer-decoded.db`, and snapshot copies under `data/local-snapshots/**/local-indexer.db`.
+- Reclaimed from files: ~81.12 GB (3 files).
+- Ran `docker system prune --volumes=false` to reclaim build cache and dangling images; reclaimed: ~14.34 GB.
+- No Docker volumes were pruned. Primordium Postgres container/volume untouched.
+
+## 2025-09-17 – Fix gating allowlist pruning
+- Goal: Ensure FORCE_ALLOW_RESOURCES runs the intended resources and their required parents; avoid empty selections leading to 0 load packages.
+- Files: tools/worldapi-pipeline/worldapi/worldapi_pipeline/worldapi/__init__.py
+- Diff: ~20 LoC (removed config-time filtering; switched to runtime-only allow/deny with parent expansion)
+- Risk: low (selection logic only; no endpoint/schema change)
+- Gates: typecheck N/A | build N/A | smoke: to be validated via cron logs and world_api_dlt._dlt_loads entries
+- Follow-ups: Monitor tribes/solarsystems/types/ssa_flat jobs; adjust cadences if needed.
+
+## 2025-09-17 – Smartassemblies flat tail-only scanner
+- Goal: Keep `smartassembly_flat` fresh without full-table replace scans of 130k+ rows; unblock `smartassembly` details batch that relies on fresh IDs.
+- Files: tools/worldapi-pipeline/worldapi/worldapi_pipeline/worldapi/__init__.py, tools/worldapi-cron/docker-compose.yml
+- Diff: +~110 LoC (new resource `get_v_2_smartassemblies_flat_tail` with merge on id) + compose env switch to call it; added `SSA_PAGE_SIZE` and `SSA_MAX_PAGES` envs.
+- Risk: medium (new extractor). No schema change; preserves existing flat rows and updates recent ones.
+- Gates: typecheck N/A | build N/A | smoke: DB freshness should show advancing `_dlt_load_id` for `smartassembly_flat` every few minutes; `smartassembly` details batch should continue to fill gaps.
+- Follow-ups: If upstream ordering changes, add order detection similar to killmails; optionally rotate occasional deep-page refresh.
+
+## 2025-09-17 – Grafana World API panel fixes (details → canonical)
+- Goal: Resolve missing counts/ages on EF-Map Overview where three stat tiles referenced non-existent `*_details` tables and align normalized list.
+- Files: `tools/grafana/dashboards/ef-map/ef_map_overview_dashboard.json`
+- Diff: retargeted Smartassemblies/Solarsystems/Tribes tiles to canonical DLT tables (`smartassembly`, `solarsystem`, `tribe`), retitled to “(canonical)”; excluded `smartassembly_flat` from the normalized list; version bumped to 2.
+- Risk: low (dashboard JSON only).
+- Gates: provision reload should reflect counts; last-loads panel already shows consistent ages across raw + canonical tables.
+
+## 2025-09-16 – Killmails tailer ordering check and bounded verification
+- Goal: Verify fast-cron runs killmails and confirm API ordering to avoid pagination mistakes; keep diagnostics bounded to not block VS Code.
+- Files: `tools/worldapi-pipeline/worldapi/worldapi_pipeline/worldapi/__init__.py` (killmails: detect ordering, support backward scans)
+- Diff: ~120 LoC touched (logic only; no schema changes)
+- Risk: medium (resource logic); mitigated by bounded one-off run and no production env changes.
+- Gates: typecheck N/A | build N/A | smoke: API probe OK (status 200), totals=632; container run of killmails-only succeeded (no overlap); DB rows stable at 632.
+- Findings: API newest appear at end (ids_last ~3028,3027) while offset=0 returns small ids; added detection to scan correctly. No new killmails during window, so counts unchanged.
+- Follow-ups: After initial backfill completes, set `KILLMAILS_FORCE_RESET=0` in fast compose; monitor growth via `tools/check_killmails_db.js`. Consider adding a minimal stats panel or Grafana alert on stagnation.
+
+## 2025-09-16 – World API schema bridge (killmails)
+- Goal: Grafana panels referencing `world_api.killmails` were empty while data landed in `world_api_dlt.killmails`.
+- Files/Systems: Postgres (views under schemas `world_api` and `world_api_dlt`).
+- Change: Created compatibility view `world_api.killmails` selecting from `world_api_dlt.killmails`.
+- Diff: SQL view only (non-destructive); no app changes.
+- Risk: low – read-only view over existing table.
+- Gates: verified via SQL – row count 10; min/max time 2025-08-20 16:46:07Z / 18:20:25Z.
+- Follow-ups: (1) Either migrate Grafana queries to `world_api_dlt.*` or add views for other resources as needed (e.g., smartcharacters). (2) Investigate why killmails backfill didn’t run (allowlist/cadence/state) and seed more rows.
+
+## 2025-09-16 – Active DLT target tables (authoritative)
+- Context: To avoid confusion with legacy/non-DLT tables, confirm the authoritative schema used by the new two-job DLT ingestion.
+- Authoritative schema for ingestion: `world_api_dlt` (these are the tables actively written by the cron jobs)
+  - Examples observed in DB:
+    - `world_api_dlt.killmails`
+    - `world_api_dlt.raw_smartcharacters`
+    - `world_api_dlt.raw_smartcharacters_details`
+    - `world_api_dlt.raw_smartcharacters_details__smart_assemblies`
+- Legacy / not written by current jobs: `world_api.smartcharacters`, `world_api.smartcharacters_details` (currently empty)
+- Temporary bridge: `world_api.killmails` view → selects from `world_api_dlt.killmails` (for panel continuity). Preferred long-term: panels query `world_api_dlt.*` directly.
+
+
+## 2025-09-15 – World API cron config fix + first verified inserts
+## 2025-09-16 – Killmails one-time backfill toggle
+- Goal: Hydrate historical killmails once, then revert to safe tail-only mode without splitting code paths or separate scripts.
+- Files: tools/worldapi-pipeline/worldapi/worldapi_pipeline/worldapi/__init__.py, tools/worldapi-cron/docker-compose.yml
+- Diff: +~80 LoC (resource function) + 2 env entries in compose.
+- Behavior: When `KILLMAILS_BACKFILL=1` (and `killmails_backfill_done` not set in dlt state), the killmails resource scans from newest page backward up to `KILLMAILS_BACKFILL_MAX_PAGES` (default 1000), yields all rows, updates `killmails_last_seen_id`, and sets `killmails_backfill_done=1`. Subsequent runs use the existing tail-only logic keyed by `killmails_last_seen_id`.
+- Ops: Exposed optional envs in fast job compose for discoverability (default off). To run backfill once: set `KILLMAILS_BACKFILL=1` (optionally raise `KILLMAILS_BACKFILL_MAX_PAGES`), restart fast cron, observe inserts, then leave it at 0 (state flag prevents repeat even if left on).
+- Risk: low (read-only API; bounded pages). DB write disposition unchanged (merge on id).
+- Gates: typecheck N/A | build N/A | smoke: after enabling, `world_api_dlt.killmails` row count should jump from ~10 to historical (~hundreds), then future ticks insert only new ids; container logs show `[killmails] backfill done` once.
+## 2025-09-15 – World API per-resource cadence gating
+- Goal: Keep fast-moving data fresh (killmails, smartassemblies) while avoiding unnecessary runs for mostly-static resources by adding per-resource cadences inside the dlt source.
+- Files: tools/worldapi-pipeline/worldapi/worldapi_pipeline/worldapi/__init__.py
+- Diff: Introduced env-driven interval/offset gating for each resource (minutes). Parents gate children (e.g., details run only when the parent list is due). Added a small debug print to list resources selected for the current tick.
+- Defaults:
+  - killmails 2m; smartassemblies_flat 2m; smartassemblies_details 10m; smartcharacters 15m; smartcharacters_details 15m; tribes 180m; tribes_details 180m; solarsystems 1440m; solarsystems_details 1440m; types 1440m; health 60m; config 60m.
+- Overrides (env): {NAME}_INTERVAL_MIN and {NAME}_OFFSET_MIN, e.g., SMARTASSEMBLIES_FLAT_INTERVAL_MIN=1.
+- Risk: low/med (execution path changes but destination schemas unchanged). Cron remains */2m; overlapped runs still prevented via flock.
+- Gates: After container restart, logs should show a subset of resources each tick and Grafana ages should begin to improve for fast groups without regressing overall run time.
+
+## 2025-09-15 – Grafana World API panels: reposition + timeseries
+- Goal: Ensure the new per-table "last loads" table appears under the "World API Counts" section in EF-Map Overview and add a simple loads/hour trend for recent activity.
+- Files: tools/grafana/dashboards/ef-map/ef_map_overview_dashboard.json
+- Diff: Repositioned panel (id 38) to grid y=64 (h=8) so it sits directly beneath counts; added a new timeseries panel (id 40) "World API DLT loads/hour (6h)" querying `world_api_dlt._dlt_loads`; nudged the Decoded tables panel down (y=78) to avoid overlap.
+- Risk: low (Grafana JSON only; datasource unchanged `ef-postgres`).
+- Gates: typecheck N/A | build N/A | smoke: after Grafana reload, the "last loads" table is visible under World API Counts, the loads/hour chart renders with recent bars, and no overlapping panels.
+- Follow-ups: Consider adding an "Oldest table age (min)" stat if desired; color thresholds can highlight stale (>15m) tables in the last loads table via field overrides in a later tweak.
+
+- Goal: Stabilize World API dlt cron by providing base_url and aligning cwd; verify DB writes landed.
+- Files: tools/worldapi-cron/docker-compose.yml, tools/worldapi-cron/run_pipeline.sh
+- Diff: Added BASE_URL env; cd into pipeline dir; refined flock exit code handling (<30 LoC).
+- Risk: low
+- Gates: Postgres connectivity ✅ | Cron executes dlt GETs ✅ | Inserts ✅ (verified via quick counts)
+- Evidence (world_api_dlt): solarsystem=24502, smartcharacter=9774, smartassembly_flat=125558, killmails=10, smartassembly=0 (to review)
+- Follow-ups: Add Grafana freshness tiles; confirm smartassembly vs flat population; observe tail-only killmails over next runs.
+
+## 2025-09-15 – Plan: Dynamic Smart Gate Links + Robust World API ingestion
+- Goal: Serve near–real-time Smart Gate links on efipenmap.com and keep World API tables fresh with a robust, containerized scheduler. No code changes in this entry; this records the agreed direction and sequencing.
+- API/Frontend:
+  - Add Cloudflare Worker endpoint `/api/smart-gate-links` backed by KV (snapshot key `smart_gate_links_v1`).
+  - Snapshot contains edges derived from chain links (schema `0x…`.evefrontier__smart_gate_link) joined to World API `world_api_dlt.smartassembly` to resolve system IDs; fields: `{ aSystemId, bSystemId, srcGateId, dstGateId, srcState, dstState, lastBlock, generatedAt }`.
+  - Frontend fetches JSON (30–60s cache) and overlays edges; routing treats them as additional adjacency. Phase 2: by-address filtering using a precomputed address→allowedGateIds KV map.
+- Ingestion (Robustness now):
+  - Run the World API dlt pipeline in Docker on a fixed cadence using a cron runner (e.g., supercronic): service `worldapi-cron` calls the Python entrypoint to populate `world_api_dlt` (smartassemblies, smartcharacters, tribes, types, solarsystems, killmails tail, details as configured).
+  - Publish a compact edges snapshot to KV each run (or every N runs). Include freshness metadata (max `__last_updated_block_number`, snapshot `generatedAt`). Keep last-good snapshot on failures.
+  - Observability: Grafana tiles for `world_api_dlt` freshness (latest load time/row counts) and snapshot age/edge count.
+- Sequencing (micro-milestones):
+  1) Stabilize World API ingestion cadence via Dockerized cron (2–5 min smart assemblies; tail-only killmails unchanged). Verify rows advance and no overlaps.
+  2) Add snapshot builder (Postgres→JSON) and push to KV; verify counts and staleness.
+  3) Expose `/api/smart-gate-links` in Worker reading KV; add cache headers; smoke via curl.
+  4) Frontend overlay toggle + routing edge integration; cost model decision.
+  5) Repo hygiene PR: move legacy experiments to `legacy/` with `ARCHIVE.md`; avoid Netlify reintroduction.
+  6) Phase 2: per-address filtering via `etc__gate_access` (precompute map to KV) + wallet auth.
+- Risks & Mitigations:
+  - World API lag → increase cadence; add retries/backoff; keep last-good KV snapshot.
+  - DB join gaps (links without smartassembly rows) → skip those edges; highlight missing coverage in Grafana.
+  - Multiple chain schemas → union only those with rows; de-duplicate reverse links.
+- Gates (to verify when implemented):
+  - Ingestion cadence visible (Grafana freshness < 5 min), counts increasing ✅/❌
+  - KV snapshot updated within SLA (≤60–120s) ✅/❌
+  - Worker endpoint returns JSON 200 with ETag and correct schema ✅/❌
+  - Frontend overlay renders edges; routing respects toggle ✅/❌
+
+## 2025-09-15 – Tail-only killmails + Smartassemblies details
+- Goal: Finalize tail-only killmails cursoring and re-enable smartassemblies details with DECIMAL coordinates; keep flat table for stability.
+- Files: `tools/worldapi-pipeline/worldapi/worldapi_pipeline/worldapi/__init__.py` (killmails resource, smartassemblies details), runners (`run_killmails_only.py`, `smoke_test.py`).
+- Diff: ~+180/-30 LoC across source; no new deps.
+- Behavior: Killmails use state key `killmails_last_seen_id` scanning newest→oldest with `KILLMAILS_PAGE_SIZE` (default 10) and `KILLMAILS_MAX_OLD_PAGES` (default 60) cap on first run. Smartassemblies details fetched by-id from flat list; `location.x/y/z` cast to Decimal and declared as DECIMAL(38,0).
+- Stability: `smartassembly_flat` retained as replace; `smartassemblies_details` merges by `id`. Big-int coercion preserves overly large ints as strings.
+- Ops note: A deprecation warning from `pkg_resources` (via setuptools<81) is benign; optional workaround: pin `setuptools<81` in local venv if noise is distracting.
+- Gates: Typecheck N/A; build N/A; smoke: external runs recommended (one killmails-only, one full). Prior killmails run succeeded at 10/page; further verification pending.
+
+## 2025-09-15 – Grafana reprovision (duplicate UIDs) + API check
+- Goal: Fix file-provisioned dashboards not updating due to duplicate UIDs and overlapping providers; verify health via HTTP API.
+- Actions:
+  - Disabled overlapping provider; cleaned grafana.db inside container: deleted stale rows for old EF dashboards and cleared `dashboard_provisioning` mappings; restarted Grafana so files re-provision cleanly from `tools/grafana/dashboards/ef-map`.
+  - Resulting dashboards re-provisioned with new IDs (7, 8) and correct UIDs (`ef-map-overview`, `world-api-counts`) under EF-Map folder. No duplicate UID warnings on startup.
+  - Local verification from Windows shell: `/api/health` returns 200 JSON; search endpoints require auth and responded 401 as expected when unauthenticated.
+- Files: On-disk JSON unchanged from previous commit (`ef_map_overview_dashboard.json`, `world_api_counts_dashboard.json`); provider `ef-map.yaml` remains the source of truth.
+- Gates: typecheck N/A | build N/A | smoke: Grafana healthy ✅ (HTTP 200); dashboard search unauthenticated 401 expected.
+- Follow-ups: If needed, use authenticated API to enumerate dashboards; otherwise confirm visually in UI that "World API tables (counts)" table and stat tiles render with data from `world_api_metrics.table_counts`.
+## 2025-09-14 – Dynamic World API counts + disable killmails
+## 2025-09-15 – World API endpoints policy + coords plan
+- Goal: Align dlt source with API realities (killmails limit=10, necessary by-id endpoints only), add `/config`, and define a single coordinate typing strategy across solarsystems and smartassemblies.
+- Changes (to apply next):
+  - Killmails: set list `limit=10` (was 100) and remove by-id calls (`/v2/killmails/{id}`) as redundant with the list payload.
+  - Add `/config` as write_disposition `replace` (daily cadence).
+  - Limits/cadence: solarsystems `limit=100` daily; types `limit=100` daily; tribes `limit=100` fast; smartcharacters `limit=10` fast; smartassemblies `limit=10` fast.
+  - Keep by-id endpoints only where details add fields beyond the list: keep `/v2/tribes/{id}`, `/v2/smartcharacters/{address}`, `/v2/smartassemblies/{id}`, `/v2/solarsystems/{id}`; remove `/v2/types/{id}` and `/v2/killmails/{id}`.
+  - Pagination strategy for offset lists that append at the end (tribes, smartcharacters, smartassemblies): tail-only incremental using `metadata.total` to fetch new pages since last run; add a rotating refresh pass over historical pages/IDs to capture updates (e.g., tribe membership changes).
+- Coordinates plan:
+  - Observation: Both solarsystems and smartassemblies expose `location` objects with integer `x/y/z`. Solarsystems coordinates are already cast to `DECIMAL(38,0)` via a transform; smartassemblies were temporarily ingested in a flat table that dropped nested fields.
+  - Decision: Unify on `DECIMAL(38,0)` for all `location.x/y/z` fields across resources. Re-enable smartassemblies details in a dedicated table with a transform that casts nested `location` coords to `Decimal` during extraction, mirroring solarsystems. This avoids BIGINT overflow and keeps consistent typing across runs.
+  - We will keep the existing `smartassembly_flat` table for stability during the transition, and introduce `smartassemblies_details` with explicit decimal columns (or nested path mapping) for coordinates.
+- Risk: low/medium (killmails paging fix reduces errors; enabling full smartassemblies needs careful schema typing to avoid drift).
+- Gates (after patch): typecheck N/A | build N/A | smoke: killmails pages succeed at 10/page; counts appear in Grafana; smartassemblies details load without schema conflicts.
+- Follow-ups: Parameterize per-endpoint cadence; add a small state store for tail offsets; document any new tables/columns.
+
+## 2025-09-15 – dlt source resource list fix + external run quoting
+- Goal: Fix `AttributeError: 'dict' object has no attribute 'name'` when building `worldapi_source()` after adding the custom tail-only killmails resource; ensure detached PowerShell runs set env vars correctly.
+- Root cause: `rest_api_source(source_config)` returned a dict-like container in this dlt version; code attempted to filter by `r.name` assuming DltResource objects. Also an earlier external run used `=200` bare in PowerShell, which is not valid syntax.
+- Changes:
+  - `tools/worldapi-pipeline/worldapi/worldapi_pipeline/worldapi/__init__.py`: Coerce `rest_api_source(...)` to a flat list regardless of its concrete type (dict, iterable, or `.resources` attr) and remove the now unnecessary `.name`-based filter. Return the combined list with the custom `get_v_2_killmails` resource.
+  - Relaunched two detached PowerShell windows with safe quoting and proper env assignment: `$env:MAX_RECORDS=200; .\.venv\Scripts\python.exe .\run_killmails_only.py` and a second for `smoke_test.py`.
+- Risk: low (construction-time only; no API shape change). Killmails tail-only remains active.
+- Gates: local smoke re-launched (external windows). Expect health/config tables to load, then killmails tail-only to proceed; smartassemblies details to be exercised in smoke run.
+- Follow-ups: If any runner still expects a Source-like object, prefer using `.with_resources` on the returned Source; with this fix `worldapi_source()` continues to return a Source (dlt wraps the list).
+
+- Goal: Ensure Grafana automatically shows new dlt-ingested World API raw tables without manual dashboard edits; avoid pipeline failures from 400 on killmails.
+- Files: tools/grafana/dashboards/ef-map/world_api_counts_dashboard.json, tools/grafana/dashboards/ef-map/ef_map_overview_dashboard.json, tools/worldapi-pipeline/worldapi/worldapi_pipeline/worldapi/__init__.py
+- Diff: swap hard-coded UNIONs for pg_class-driven queries (raw_% filter); left per-table stats for core sets; disable killmails resource pending API params.
+- Risk: low (dashboard queries only) / medium (source tweak – killmails disabled)
+- Gates: typecheck N/A | build N/A | smoke ✅ (Grafana restart; tables now listed dynamically)
+- Follow-ups: Re-enable killmails with required filters; consider adding fuel/types/tribes/solarsystems details stat cards once populated.
+
+## 2025-09-14 – Enable killmails ingestion (dlt)
+- Goal: Add World API killmails coverage (list + by-id) to the dlt pipeline without breaking existing resources.
+- Files: tools/worldapi-pipeline/worldapi/worldapi_pipeline/worldapi/__init__.py
+- Diff: +2 resources (get_v_2_killmails, get_v_2_killmails_by_id) using page-based pagination (page+limit, limit=100) and by-id resolver; bigint coercion enabled.
+- Risk: low/medium (new API surfaces); prior 400 came from offset pagination — switched to page pagination consistent with other fast fetcher.
+- Gates: typecheck N/A | build N/A | smoke pending next run; Grafana raw table list will auto-include new raw_% tables after first load.
+- Follow-ups: If API requires time/system filters for killmails in some windows, add optional query params (from env) and document in pipeline README.
+
+## 2025-09-14 – World API Grafana dlt-only counts + background loop
+- Goal: Replace stale World API count panels (legacy view) with live counts from dlt tables only and make ingestion run in the background.
+- Changes:
+  - Dashboards updated: `tools/grafana/dashboards/ef-map/world_api_counts_dashboard.json` and `ef_map_overview_dashboard.json` now compute counts directly from `world_api_dlt.raw_%` tables (solarsystems, types, tribes, smartcharacters, smartcharacters_details, smartcharacters_details__smart_assemblies, smartassemblies_flat) and sum them for the Total stat. Datasource remains `ef-postgres`. Chain indexer panels untouched.
+  - Background ingestion: Added `tools/win/run_worldapi_dlt_loop.ps1` to run the dlt pipeline on an interval with logging (`tmp_worldapi_run_*.log`), plus `tools/win/schedule_worldapi_dlt.ps1` to register/unregister a Windows Scheduled Task (At logon) launching the loop. Stop via creating `tmp_worldapi_loop.stop` or deleting the task.
+- Rationale: Avoid stale view dependency, reflect current dlt pipeline output immediately, and decouple long-running Python from the interactive chat so the assistant stays responsive.
+- Gates: typecheck N/A | build N/A | smoke: dashboards load; table panels show current dlt counts; loop script runs one-shot; scheduling optional.
+- Follow-ups: Optionally move counts to a Postgres view (`world_api_metrics.table_counts`) scoped to `world_api_dlt` only; later reintroduce full smartassemblies with id as text and consistent location typing.
+
+## 2025-09-14 – dlt OpenAPI ingestion: first successful load
+- Goal: Prove the new dlt-based World API ingestion works end-to-end locally and land initial rows for wiring Grafana counts to Postgres (schema `world_api_dlt`).
+- Files/Config touched: `tools/worldapi-pipeline/worldapi/worldapi_pipeline/` (existing dlt-generated pipeline), `.dlt/config.toml` and `.dlt/secrets.toml` in that folder; no code changes needed.
+- Run notes:
+  - Created a fresh venv with Python 3.12 for the pipeline, installed `dlt>=0.5.4` with postgres extras, and ran `worldapi_pipeline.py` (which uses `worldapi_source().add_limit(5)`).
+  - Connection: Postgres on localhost; dlt reported using `postgresql://user@localhost:5432/postgres` (password redacted), indicating credentials from `.dlt/secrets.toml` were in effect.
+  - Result: Pipeline extracted 1 `health` item and 500 `solarsystem` items and loaded them into dataset `world_api_dlt` (tables `health`, `solarsystem`). Load package finished LOADED with no failed jobs.
+- Verification:
+  - dlt logs show successful extract/normalize/load with row counts (health=1, solarsystem=500).
+  - Post-ingest counts can be checked via SQL: `SELECT COUNT(*) FROM world_api_dlt.health;` and `SELECT COUNT(*) FROM world_api_dlt.solarsystem;`.
+- Gates: typecheck N/A | build N/A | smoke ✅ (API reachable, rows landed; Grafana datasource already provisioned as `ef-postgres`).
+- Follow-ups:
+  1) Update legacy World API count panels in Grafana to query `world_api_dlt.*` (or import `tools/grafana/world_api_counts_dashboard.json` / `ef_map_overview_dashboard.json` and ensure datasource UID `ef-postgres`).
+  2) Expand coverage beyond `health` and `solarsystem` by enabling more resources and paging as needed.
+
+## 2025-09-14 – Stopped relaunching World API python.exe
+- Goal: Identify and stop recurring python.exe with network usage and memory growth.
+
+## 2025-09-17 – Heartbeats & unique cron locks
+- Goal: Make per-job freshness observable (scan vs. write) and avoid any cross-service lock contention.
+- Files: tools/worldapi-pipeline/worldapi/worldapi_pipeline/heartbeat.py; tools/worldapi-pipeline/worldapi/worldapi_pipeline/worldapi_pipeline.py; tools/worldapi-cron/run_pipeline.sh
+- Diff: +~120 LoC (new heartbeat helper) + ~20 LoC wiring + 1-line lock path change
+- Risk: low
+- Gates: typecheck N/A | build N/A | smoke ✅ (heartbeat write is best-effort; failures are logged and non-fatal)
+- Notes: Heartbeat writes to <DATASET_NAME>.ingest_heartbeat each run with pipeline name, selected resources, timestamps, and status. Cron lock is now /tmp/worldapi_${PIPELINE_NAME}.lock to prevent overlap between different services.
+- Findings: Scheduled Task "EF World API dlt Fast" was enabled and launching `tools/win/run_world_api_dlt_fast.ps1`, which invoked `tools/world_api_dlt/pipeline.py`.
+- Actions:
+  - Added `tools/win/diagnose_python_processes.ps1` to enumerate processes and auto-start vectors; captured JSON snapshots.
+  - Disabled the task via PowerShell/schtasks and killed the active process (PID 8560) in kill mode.
+  - Verified quiet state: no python.exe remaining; Startup folders and Run keys clean; no services referencing python.
+- Risk: Low. Local ops only; no changes to production/Cloudflare code.
+- Gates: typecheck N/A | build N/A | smoke: local system idle (✅).
+- Follow-ups: If relaunch recurs, delete the task or remove `run_world_api_dlt_fast.ps1`. Proceed to dlt/OpenAPI ingestion work and Grafana panel refresh.
+
+## 2025-09-14 – Adopt VS Code 1.104 chat features (AGENTS.md)
+
+- Added `AGENTS.md` at repo root with high-signal context, rules, and links so agent mode has persistent instructions across chats.
+- Created prompt files under `.vscode/prompts/`:
+  - `plan.prompt.md` – minimal-diff planning/runbook
+  - `ops-cleanup.prompt.md` – stop legacy jobs + document
+- Updated workspace settings in `.vscode/settings.json`:
+  - `chat.useAgentsMdFile: true` so AGENTS.md is auto-ingested
+  - `chat.promptFilesRecommendations` to surface the two prompts in Chat welcome
+  - Left terminal/edits auto-approve disabled by default for safety (schema for per-file deny list will be revisited later)
+- Rationale: Keep agent aware of our operational rules (Cloudflare-first, minimal diffs, logging) and make common workflows one slash away.
+
+## 2025-09-14 – Legacy World API jobs stopped (task removed)
+
+- Action: Removed the Windows scheduled task `EF-WorldAPI-FastFetch` that was launching the old memory-heavy World API runner.
+- Commands (executed via PowerShell): `schtasks /Delete /TN "EF-WorldAPI-FastFetch" /F` → SUCCESS.
+- Verification:
+  - No remaining scheduled tasks matching `*WorldAPI*` were found via `schtasks /Query` filtering.
+  - Process check shows only a single `python.exe` (VS Code/terminal interpreter), not the `tools/world_api_dlt/pipeline.py` runner previously observed. Earlier rogue processes were terminated in the prior step using `tools/win/pause_world_api.ps1`.
+- Impact: The legacy World API processes should no longer respawn. Proceed with the dlt-based ingestion plan; Grafana’s stale World API panels will be rewired to the new source.
+
+## 2025-09-14 – Canonical dashboard = Grafana (Primordium); local metrics server deprecated
+
+- Context: We are no longer using the bespoke local metrics server on port 8733. The canonical operational dashboard is Grafana on http://localhost:3000 under the “EF-Map” folder (including “EF-Map Overview”).
+- Chain indexer: Using the Primordium pg-indexer as the authoritative chain pipeline. Grafana panels cover chain head, processed head, lag, decoded tables, blocks/min, and a friendly per-table row count list. Current backlog: ~566k blocks behind, expected to catch up.
+- World API: Existing Grafana cards reference the old memory-heavy Python snapshotters and are stale. We’re standardizing on a memory-bounded dlt/OpenAPI pipeline. Action: remove/disable legacy World API panels and replace with panels driven by the new pipeline outputs (preferred: Postgres schema `world_api_*`; alternative: JSON snapshots if needed).
+- Cloudflare site (efmap.com): Healthy; shares & stats working. We are not modifying the production Pages/Worker at this time; focus is on indexing (chain via Primordium; World API via dlt) and Grafana visibility.
+- Next steps (Grafana):
+  1) Wire World API panels to the new source (counts, freshness timestamps, per-endpoint totals; optional rotation/detail coverage metrics).
+  2) Remove or hide legacy World API panels tied to the old scripts to avoid confusion.
+  3) Keep the chain dashboard as-is; monitor catch-up until backlog resolves.
+
+## 2025-09-14 – Pivot World API ingestion to dlt OpenAPI generator
+
+- Goal: Replace ad-hoc Python fast fetchers with a single, memory-bounded ingestion generated from the World API OpenAPI spec.
+- Context: Multiple Python processes (fast JSON snapshot approach) consumed 6–8 GB RAM each under load; Task Manager showed 12–14 concurrent processes at times, pushing the system to 100% memory and causing VS Code instability.
+- Decision:
+  - Pause/disable previous World API scheduled task(s) and terminate running `pipeline.py` processes. Chain indexer (Primordium → Postgres) remains untouched and continues to run.
+  - Adopt dlt OpenAPI generator (`dlt-init-openapi`) using spec: `https://world-api-stillness.live.tech.evefrontier.com/docs/doc.json`.
+  - Destination: Postgres (schema `world_api`) with merge/upsert keys (id/address per entity). Keep optional JSON snapshots only if needed for operator visibility.
+- Why: dlt pipelines stream pages and batch writes → stable RAM; single orchestrated process; built-in pagination/auth; easy to tune batch size and cadence.
+- Near-term plan:
+  1) Scaffold pipeline in an isolated folder; start with DuckDB or Postgres test run with low limits.
+  2) Configure Postgres destination + PKs, write_disposition=merge; add incremental where available.
+  3) Add Postgres views to join chain-decoded tables with `world_api.*`.
+  4) Replace previous scheduler with a single dlt job (conservative cadence and throttling).
+- Cleanup: Retain existing `scratch/world_api/` JSON for now (operational reference); archive legacy fetch scripts under `tools/world_api_dlt/` (do not delete yet). Revisit after dlt pipeline is stable.
+- Gates: chain indexer unaffected ✅; world API fast jobs paused ✅; dlt not yet scaffolded (pending).
+
+## 2025-09-14 – dlt worldapi → Postgres sample load (auth fix)
+- Goal: Complete a small end-to-end dlt run of World API (health + solarsystems) into the local Primodium Postgres to validate destination wiring.
+- Files: `tools/worldapi-pipeline/worldapi/worldapi_pipeline/.dlt/secrets.toml` (credentials), `tools/worldapi-pipeline/worldapi/worldapi_pipeline/worldapi_pipeline.py` (runner)
+- Diff: ~5 LoC (secrets only)
+- Change: Updated destination credentials to match the running container env (user/password on DB `postgres`).
+- Result: Pipeline loaded 1 health row and 500 solarsystem rows into schema `world_api_dlt` (merge disposition) on `postgresql://user@localhost:5432/postgres`.
+- Verification: Queried via `docker exec … psql`: counts returned `world_api_dlt.solarsystem=500`, `world_api_dlt.health=1`.
+- Risk: low (local-only).
+
+## 2025-09-14 – Restore local indexer ingestion
+- Goal: Fix Grafana blocks/minute drop by stabilizing Primodium pg-indexer stack locally.
+- Files: tools/win/start_pg_indexer_stack.ps1, tools/win/start_local_stack.ps1
+- Diff: ~8 LoC (quote-safe reader command), ~12 LoC (forward RPC/chain/world/startBlock)
+- Risk: low (local automation only)
+- Gates: typecheck N/A | build N/A | smoke ✅ (containers Up; writer logs show upserts)
+- Notes: Override now sets `command: sh -lc "pnpm build; pnpm start"` for `postgres-query-read` and injects env into writer/reader. Coordinator forwards defaults for Pyrope. Verified writer connected to https RPC and resumed inserts; Grafana expected to reflect non-zero blocks/min.
+## 2025-09-14 – Auto-start tasks fix + Primodium indexer relaunched
+- Goal: Get the Primodium pg-indexer running again now and make it start automatically on user logon.
+- Files:
+  - tools/win/register_startup_tasks.ps1 (fixed) – define proper PowerShell action arguments for both tasks; removed undefined variables `$startupActionArgs`/`$logonActionArgs`.
+- Diff: ~+10/-6 LOC.
+- Actions:
+  - Manually launched the logon bootstraper: `start_docker_and_stack_at_logon.ps1` → Docker Desktop started, engine ready, pg-indexer stack built and up (postgres, writer, reader), head poller started, Grafana already running.
+  - Registered scheduled tasks under `\EF-Map\`:
+    - EF-Stack-AtLogon (current user, Interactive, Highest) → Status: Ready.
+    - EF-Stack-Startup (SYSTEM, At startup) → creation attempted via elevation + schtasks fallback (verification requires admin; not critical since Docker engine initializes at logon).
+- Rationale: Startup as SYSTEM often precedes Docker Desktop engine availability on Windows; the AtLogon task launches Docker Desktop and then the stack, which is the reliable path.
+- Gates: typecheck N/A | build N/A | smoke: docker containers up ✅ (postgres, reader, writer, head poller, grafana); `docker info` ServerVersion=28.4.0 ✅; scheduled task AtLogon=Ready ✅.
+- Follow-ups:
+  1) Optional: verify `\EF-Map\EF-Stack-Startup` from an elevated shell (`schtasks /Query /TN \EF-Map\EF-Stack-Startup /FO LIST`).
+  2) Test auto-start: Sign out/in (or reboot) and confirm Docker Desktop launches and the stack comes up automatically; Grafana shows head advancing.
+  3) If desired, disable the SYSTEM startup task (keep only AtLogon) to reduce noise, since pre-login engine is unavailable.
+
+## 2025-09-14 – Overnight World API fast fetch task + chain health
+- Goal: Keep World API snapshots fresh overnight and confirm the chain indexer is healthy.
+- Actions:
+  - Created Windows Scheduled Task `EF-WorldAPI-FastFetch` to run `tools/win/run_world_api_dlt_fast.ps1` every 5 minutes (detached). Triggered a run and verified task status (LastTaskResult=0).
+  - Verified head poller logs are advancing (chainHead and processed increasing steadily); indexer containers up.
+  - Network probe to World API OK (GET /v2/solarsystems?limit=1 returns JSON with metadata.total).
+- Current state: `scratch/world_api/meta.json` not present yet; recent `fast_run_*` logs are empty, suggesting the Python process exited early without output.
+- Follow-ups (morning):
+  1) Run the pipeline synchronously to surface errors (no redirection) and confirm write to `scratch/world_api`.
+  2) Check Python path used by Scheduled Task and working directory; ensure permissions on `scratch/world_api`.
+  3) If needed, increase verbosity in `tools/win/run_world_api_dlt_fast.ps1` or write stderr to a non-empty log.
+- Risk: low (local-only); Scheduled Task can be removed later via `tools/win/schedule_world_api_dlt.ps1 -Remove` or Task Scheduler.
+
+## 2025-09-14 – Restore Grafana dashboard + safer provisioning
+- Goal: Recover the prior chain indexer dashboard that disappeared and avoid future deletions when provisioning dashboards. Also add a combined overview dashboard.
+- Files:
+  - tools/grafana/dump_dashboards.py (new) – helper to dump dashboards from grafana.db
+  - tools/grafana/ef_map_overview_dashboard.json (new) – combined Chain + World API panels
+  - tools/grafana/provisioning/dashboards/ef-map.yaml (updated) – set disableDeletion: true
+- Diff: ~150 LoC added, small YAML change
+- Risk: low (Grafana-only, local)
+- Gates: typecheck N/A | build N/A | smoke: dashboards visible via API/UI ✅
+- Notes: Copied overview JSON into /var/lib/grafana/dashboards/ef-map and restarted Grafana. API now lists: EF Indexer Overview (restored), World API Counts, and EF-Map Overview under the EF-Map folder.
+
+## 2025-09-14 – World API endpoint inventory + cadence placeholders
+- Goal: Capture a durable list of all public World API endpoints (from docs/doc.json) we may query, explicitly excluding auth/Bearer-only or user-scoped paths ("/me"), and record initial cadence intentions for Grafana/dashboard wiring. Prevents future context loss.
+- Source: https://world-api-stillness.live.tech.evefrontier.com/docs/doc.json (v0.1.38)
+- Exclusions: any path containing "/me/" and any endpoint requiring Bearer auth (none of the listed below do, except the excluded /me ones). Mutation endpoints kept for completeness but marked "not polled".
+- Inventory (grouped by tag; method • path – summary) with initial cadence suggestions (TBD = to be finalized with operator):
+
+Meta
+- GET • /health – health endpoint. Cadence: on-demand/diagnostic only (no polling).
+- GET • /config – retrieve config to connect to services. Cadence: daily at 03:00 or on app boot.
+- GET • /abis/config – world contract ABIs + config. Cadence: weekly or on version change (manual trigger). 
+- POST • /v2/pod/verify – verify a POD. Not polled (on-demand tool only).
+
+Chain
+- GET • /v2/killmails – paginated killmails saved to chain (limit<=100, offset). Cadence: fast (5–15 min) once enabled.
+- GET • /v2/killmails/{id} – single killmail (format=json|pod). Not polled (on-demand).
+- GET • /v2/smartassemblies – paginated assemblies (limit<=100, offset, optional type). Cadence: fast (5–15 min).
+- GET • /v2/smartassemblies/{id} – single assembly (format=json|pod). Not polled.
+- GET • /v2/smartcharacters – paginated smart characters (limit<=100, offset). Cadence: medium (15–60 min) or skip initially.
+- GET • /v2/smartcharacters/{address} – single character (format=json|pod). Not polled.
+- POST • /metatransaction – submit meta TX (bringOnline/offline, setEntityMetadata). Not polled (mutation; out of scope).
+
+Game
+- GET • /v2/solarsystems – paginated solar systems (limit<=1000, offset). Cadence: fast (5–15 min).
+- GET • /v2/solarsystems/{id} – single solar system (format=json|pod). Not polled.
+- GET • /v2/tribes – paginated tribes (limit<=1000, offset). Cadence: fast (5–15 min).
+- GET • /v2/tribes/{id} – single tribe (format=json|pod). Not polled.
+- GET • /v2/types – paginated item/game types (limit<=1000, offset). Cadence: slow/daily (03:00) or weekly.
+- GET • /v2/types/{id} – single game type (format=json|pod). Not polled.
+- GET • /v2/fuels – available fuels for smart assemblies. Cadence: slow/daily (03:00) or weekly.
+
+Explicitly excluded (user-scoped):
+- GET • /v2/smartcharacters/me/jumps – requires Bearer; out of scope.
+- GET • /v2/smartcharacters/me/jumps/{id} – requires Bearer; out of scope.
+
+- Notes:
+  - All listed collection endpoints are paginated. Use limit+offset per docs; respect documented maximums (killmails/smart* max 100; game types/solarsystems/tribes max 1000). Use metadata.total to plan page counts.
+  - Single-resource endpoints are not part of scheduled polling; they’re available for ad-hoc drilldowns.
+  - We will not set up OAuth/Bearer now; any user-auth endpoints remain disabled until auth is approved.
+- Grafana/dashboard counters:
+  - We’ll publish a single JSON snapshot with per-endpoint row counts and updatedAt via the existing worker endpoint `/api/worldapi-stats`.
+  - Our fetcher will page through the selected collection endpoints and post `{ counts: { solarsystems, tribes, smartassemblies, smartcharacters, killmails, types, fuels }, totalRows, updatedAt }` to `/api/worldapi-update`.
+  - Grafana (JSON API datasource) and the local dashboard will read these counts to populate a table and trend lines.
+- Next: finalize cadences (fast/medium/slow) per endpoint with operator, then extend the fetcher to cover the chosen set and update the worker whitelist accordingly.
+
+## 2025-09-14 – World API rotation-based detail polling (solarsystems, tribes)
+- Goal: Include single-resource endpoints in fast cadence without scanning all IDs each run; prepare for 24k+ solarsystems scale.
+- Files: `tools/world_api_dlt/pipeline.py` (extended), `tools/win/run_world_api_dlt_fast.ps1` (new envs)
+- Diff: ~+180 LoC (Python) + small PS param/env additions.
+- Behavior:
+  - Collections remain TTL-cached: fetch full `/v2/solarsystems` and `/v2/tribes` lists and persist `ids_*.json` when stale (TTL default 1440 min).
+  - Detail rotation per run: poll a slice of IDs and call `/v2/solarsystems/{id}` and `/v2/tribes/{id}`. Rotation cursor persisted in `rotate_state.json` so coverage advances each run; throttle between detail requests optional.
+  - Outputs in `scratch/world_api/`: `ids_solarsystems.json`, `ids_tribes.json`, `detail/last_*.json`, `meta.json`.
+  - `meta.counts` now includes inventory totals and per-run detail polled/ok/err counters; posted to `/api/worldapi-update` unchanged schema (counts map).
+- Tunables (env; PowerShell wrapper passes): `WORLD_API_LIST_TTL_MIN`, `WORLD_API_ROTATE_SOLARSYSTEMS`, `WORLD_API_ROTATE_TRIBES`, `WORLD_API_DETAIL_THROTTLE_MS`.
+- Risk: Low (local files + KV counts post). No API write load other than existing KV stats update. Rotation ensures O(batch) detail calls/run.
+- Verification: Ran fast runner locally (Windows) -> created ids/rotate files; `meta.json` shows counts and detail stats; worker accepted counts via `worldapi-update`.
+- Follow-ups:
+  - Add types and fuels (daily) and smartcharacters/killmails (fast/medium) collection coverage.
+  - Add `/v2/types/{id}` daily rotation (batch small) and `/v2/smartcharacters/{address}` fast (requires address inventory strategy).
+  - Grafana: read new keys (`*_detail_*`) to visualize per-run coverage and error ratios.
+
+## 2025-09-13 – Primodium indexer pilot on Windows (WSL2 + Docker)
+- Goal: Stand up a segregated Postgres-backed MUD indexer (Primodium pg-indexer) alongside our existing local indexer, fully automated on Windows.
+- Files: `tools/win/enable_wsl2_features.ps1`, `tools/win/start_docker_desktop.ps1`, `tools/win/wait_for_docker_ready.ps1`, `tools/win/start_pg_indexer_stack.ps1`, `tools/pg-adapter/*` (compose + adapter), minor update to `start_adapter.ps1` (Windows env passing).
+- Diff: ~+250 LoC across helper scripts and adapter; no changes to core app.
+- Actions: Enabled WSL2 (Ubuntu), launched Docker Desktop, built and started Primodium stack (postgres, writer, reader). Wired a minimal pg-adapter exposing `/health` and `/api/summary` to the new Postgres.
+- Verification: Docker engine healthy (ServerVersion 28.4.0). Containers running; adapter health 200; summary shows Postgres 16 and currently 0 public tables (writer pending schema).
+- Risk: medium (infrastructure-only; isolated from app). No app runtime change.
+- Follow-ups: Parameterize RPC_HTTP_URL, chainId/world/startBlock; confirm values before indexing. Add parity endpoints once schema stabilizes.
+
+## 2025-09-13 – Introduce PG Adapter (segregated)
+- Goal: Pilot a Postgres-backed adapter using a third-party MUD index (Primodium) while keeping our custom local-indexer intact and reversible.
+- Files: `tools/pg-adapter/*` (server.js, docker-compose.yml, start/stop scripts), root `package.json` scripts.
+- Diff: ~180 LoC added, no changes to existing local-indexer files.
+- Risk: low (isolated folder; easy rollback by not using scripts or deleting folder).
+- Gates: typecheck N/A, build N/A, smoke: adapter /health responds; DB optional.
+- Follow-ups: implement mirrored endpoints (/api/mud, /api/mud-typed, etc.) once schema from Primodium indexer is confirmed; optional ETL for API data into separate schema.
+
+## 2025-09-13 – Streaming indexer plan (near-RT, multi-world)
+- Goal: Operate 12+ months on same chain, rotating world IDs; keep ingest+decode near head (head−depth), auto-adopt new MUD tables, expose stable dashboard metrics.
+- Approach: Single streaming pipeline with on-chain head subscription (WS, poll fallback) → bounded queue → decode → idempotent DB writes (block, logIndex) with reorg-safe finalization (confirm at depth N). Dynamic table discovery via SetRecord/TableRegistered; on-the-fly schema install; unknown types stored as JSON until decoder arrives.
+- Storage: SQLite WAL, per-world partitioning (worldId column) + hot indexes; append-only raw logs optional for audit; periodic VACUUM/backup.
+- Metrics: Unified lag (ingest/decode), throughput, backpressure, reorg counters, per-world status, RPC health; atomic status files; single-instance guard.
+- Phases: (1) Dual-stage→streaming switch (decode in hot path, keep raw logs) (2) Dynamic table registry + auto-DDL (3) Reorg-safe finalize + head-depth tuning + dashboard parity.
+- Risk: Medium–High (live pipeline + auto-DDL). Rollback: disable streaming decode (fall back to batch), freeze new-table auto-DDL with allowlist.
+- Success: p95 lag ≤ 2 blocks at head−depth N, new table visible ≤ 30s, zero duplicate rows on reorgs, dashboard stable over restarts.
+
+## 2025-09-12 – Out-of-band ingest control server
+- Goal: Make the Start Ingest button work even when the metrics server restart is flaky; decouple control from metrics.
+- Files: tools/local-indexer/control_server.js (new), start_control.ps1 (new), dashboard.js (fallback to control), start_ingest.ps1 (used by control).
+- Diff: ~220 LoC added total.
+- Risk: low (isolated helper, no schema or worker impact).
+- Gates: typecheck N/A | build N/A | smoke: control server /health OK, POST /start launched ingester; stdout shows segments and completion to latest safe head.
+
+## 2025-09-14 – World API fast fetch (non-blocking) + scope clarify
+- Goal: Add a fast-cadence fetch for World API resources without blocking VS Code agent sessions; clarify scope (no Primodium coupling).
+- Files: `tools/world_api_dlt/pipeline.py` (new fetcher using stdlib), `tools/world_api_dlt/README.md` (docs), `tools/win/run_world_api_dlt_fast.ps1` (non-blocking runner), `tools/win/run_world_api_dlt_full.ps1` (limits-only variant), `tools/win/schedule_world_api_dlt.ps1` (optional Windows Task Scheduler helper).
+- Behavior: Background Python process fetches `/v2/solarsystems` and `/v2/tribes`, writes JSON snapshots and `meta.json` under `scratch/world_api/`. Runner exits immediately, leaving logs for inspection.
+- Scope Note: Prior mention of “Primodium V2 ID” was misleading; this fast fetch targets the World API v2 endpoints only. Primodium indexer pilot remains separate.
+- Verification: Launched fast runner → background PID created, logs initialized; awaiting network completion to populate snapshot files.
+- Follow-ups: (1) Confirm desired cadence (default suggestion: fast=5 min; full=60 min); (2) If counts should appear in `/api/indexer-health`, add D1 tables + import endpoint or KV-based read path.
+- Follow-ups: Optionally have metrics /api/proc read from control_server when available; improve proc.running to reflect “idle at tip” vs “down”.
+
+## 2025-09-12 – Metrics liveness + control, ETA seconds
+- Goal: Improve operator confidence in dashboard accuracy; show ingest liveness, enable safe restart, restore ETA seconds, fix gauge ellipse.
+- Files: tools/local-indexer/metrics_server.js, tools/local-indexer/dashboard.js
+- Diff: ~120 LoC (server + UI)
+- Changes:
+  - UI: ETA formatter now shows h:m:s; gauge kept perfectly round (aspectRatio + flex fix); world/chain shown without squishing; new health score derived from rpc/status freshness, errors, and ingest activity; new “Ingest Process” card with liveness text and Start button.
+  - Server: Added /api/proc (running, updatedAgoSec, lag, allowControl) and /api/control/start-ingest (guarded by ALLOW_CONTROL=1) to spawn ingest_raw.js detached.
+  - Throughput chart already seeds zeros on empty series to avoid blank graph.
+- Risk: Low (isolated metrics server + dashboard). Control endpoint disabled by default and requires explicit ALLOW_CONTROL.
+- Gates: typecheck N/A | build N/A | smoke: API /summary,/series/* OK previously; added endpoints wired.
+- Follow-ups: Optional: seed tput ring from recent history at startup to avoid brief zeros after restart; add a “Stop ingest” control and reason codes for down state.
+
+## 2025-09-12 – Dashboard ETA fix + backlog card cleanup
+- Goal: Make catch-up ETA reflect effective progress (ingest minus chain) and remove duplicate "Typed decoding backlog" card.
+- Files: tools/local-indexer/metrics_server.js (/api/summary fields), tools/local-indexer/dashboard.js (ETA copy, header freshness, single backlog card)
+- Diff: ~40 LoC
+- Risk: low (read-only server math + UI-only text/DOM tweaks)
+- Gates: smoke ✅ via http://127.0.0.1:8733 – summary now includes effectiveBlocksPerMin and statusFreshSec; dashboard shows "Waiting for faster ingest…" when effective bpm <= 0; only one backlog card present.
+- Follow-ups: Consider sourcing chainBlocksPerMin from status_server history for environments without RPC; optionally show "as of" timestamps next to heads.
+
+## 2025-09-12 – ECS TTL caching + UI smoothing
+- Goal: Reduce dashboard flicker and transient blanks in the unified ECS view without impacting ingestion.
+- Files: tools/local-indexer/metrics_server.js, tools/local-indexer/dashboard.js
+- Diff: ~60 LoC added/changed (server TTL guard + client-side stable key and less frequent polling)
+- Risk: low (read-only, short-lived cache; UI-only behavior)
+- Gates: typecheck n/a | build n/a | smoke ✅ (locally verified endpoints respond; UI stops blanking between polls)
+- Follow-ups: Consider TTL for /api/mud-table-stats; optional per-row diffing if list grows large.
+
+## 2025-09-12 – ECS snapshot unified list fallback
+- Goal: ECS card showed totals but no rows after unifying to /api/mud-ecs; add safe UI fallback and verify backend endpoint on 8733.
+- Files: tools/local-indexer/dashboard.js; operational restart via start_metrics.ps1.
+- Diff: +15 LoC approx (fallback message paths; minor UI robustness). No schema or server API changes.
+- Risk: low
+- Gates: typecheck n/a | build n/a | smoke: /api/mud-ecs returns items ✅, dashboard serves updated JS ✅
+- Follow-ups: None. If endpoint locks under load, consider a 1–2s in-memory cache for /api/mud-ecs (server already supports it).
+
+## 2025-09-12 – Typed fuel/energy + dashboard stability
+- Goal: Project Fuel and NetworkNodeEnerg into typed tables; reduce dashboard flakiness while DB is busy.
+- Files: tools/local-indexer/materialize_typed_values_generic.js, materialize_typed_fuel.js, materialize_typed_node_energy.js, materialize_typed_deployable_state.js, metrics_server.js
+- Diff: ~350 LoC added/edited
+- Risk: medium (new materializers + read-only server caching)
+- Gates: typecheck n/a | build n/a | smoke: API /api/mud-typed returns, node-energy rows present
+- Follow-ups:
+  - Add one-liner runners to backfill fuel/energy/state; wire quick stats into ECS card if desired.
+  - Keep port 8733 canonical via start_metrics.ps1; added short caches (15s) and busy_timeout to avoid flicker.
+
+## 2025-09-12 – MUD Wave‑1 typed presence
+## 2025-09-12 – Local metrics dashboard unreachable (recovery)
+- Trigger: Browser showed “site can’t be reached” and `dashboard.js` stuck pending. Multiple stray Node processes and port confusion likely after earlier test runs.
+- Action: Followed recovery playbook documented in 2025‑09‑12 “Metrics server launcher fix (8733)”. Steps executed:
+  1) Freed port 8733 (kill any listener). 2) Started canonical server: `tools/local-indexer/start_metrics.ps1 -Port 8733` (pid recorded). 3) Verified endpoints.
+- Verification (local):
+  - GET http://127.0.0.1:8733/api/health → 200
+  - GET http://127.0.0.1:8733/ → length 443 (HTML)
+  - GET http://127.0.0.1:8733/dashboard.js → length 26256 (JS)
+- Notes: Static path normalization and relative asset URLs were previously fixed; this incident was process/port state. Use the launcher on 8733 for consistency.
+
+- Goal: Normalize Wave‑1 tables into typed presence tables with 1:1 key tuple rows using latest pointers.
+- Files: tools/local-indexer/materialize_typed_presence.js; package.json scripts.
+- Diff: +1 new script (~150 LoC), package.json scripts added.
+- Risk: low (read-only on erc_mud_latest; writes new local tables only).
+- Gates: typecheck N/A | build N/A | smoke ✅ (scripts executed successfully)
+- Results:
+  - Entity and Ownership adjusted to dedupe by distinct IDs and select latest row.
+  - Presence counts (processed=outCount):
+    - mud_role: 90,197
+    - mud_characters: 345
+    - mud_characters_by_acco: 13,804
+    - mud_node_by_ass: 35,896
+    - mud_node_energy: 3,858
+    - mud_smart_gate_config: 127
+    - mud_access_config: 79
+    - mud_inventory: 82,382
+- Follow-ups: Consider exposing typed coverage on the dashboard; refine Ownership owner decoding once value schema confirmed.
+
+## 2025-09-12 – MUD values snapshot (Wave 1 start)
+- Goal: Persist raw value segments (static/encodedLengths/dynamic) for latest keys of selected MUD tables to enable typed decoding without re-reading history.
+- Files: tools/local-indexer/materialize_mud_values.js (+package script), data/local-indexer-decoded.db (erc_mud_values)
+- Diff: +1 file (~180 LoC), package.json +1 script
+- Risk: low (new table; read-only sources)
+- Gates: ran Entity and Ownership backfills: counts match erc_mud_latest (90,158 each) ✅
+- Follow-ups: define typed decode for Entity & Ownership; add small API to surface counts + last block on dashboard.
+
+## 2025-09-12 – MUD Wave 1 selection + latest snapshot
+- Goal: Normalize a first wave of MUD tables into a stable snapshot and enable fast lookups before full typed decoding.
+- Files: tools/local-indexer/mud_tables_wave1.json (selection), tools/local-indexer/materialize_mud_latest.js (latest-pointer snapshot)
+- Diff: +2 files (~220 LoC)
+- Risk: low (read-only to decoded db; creates new tables)
+- Gates: typecheck n/a | build n/a | smoke: metrics server serving Mud tables list ✅
+- Follow-ups: implement typed schemas per table (Entity, Ownership first), add ECS snapshot API/card, evaluate heavy tables (Fuel, DeployableState, InventoryItem) for Wave 2.
+
+## 2025-09-12 – Metrics server launcher fix (8733)
+- Goal: Make the local metrics dashboard reliably reachable on http://127.0.0.1:8733.
+- Files: tools/local-indexer/start_metrics.ps1, tools/local-indexer/metrics_server.js
+- Diff: ~35 LoC updated (argument list, path resolution, pid file, port cleanup); server already binds to 127.0.0.1.
+- Risk: low
+- Gates: typecheck n/a | build n/a | smoke: server started (pid recorded) and reachable at / (dashboard) and /api/health (JSON).
+- Follow-ups: none; consider adding a stop script symmetry if needed.
+
+Recovery playbook (Windows, PowerShell):
+1) Kill stray Node listeners: `Get-Process -Name node -ErrorAction SilentlyContinue | Stop-Process -Force`.
+2) Start canonical server on 8733: `& tools/local-indexer/start_metrics.ps1 -Port 8733`.
+3) Verify health: open http://127.0.0.1:8733/api/health (expect JSON with status ok).
+4) Load UI: http://127.0.0.1:8733/ (dashboard). If you only see "ok", you were hitting a test server—repeat step 1 then step 2.
+
+## 2025-09-12 – MUD table stats derivation + dashboard card
+- Goal: After SetRecord materialization finished, surface which MUD tables dominate to guide next decode steps.
+- Files: tools/local-indexer/derive_mud_tables.js; tools/local-indexer/metrics_server.js (/api/mud-table-stats); tools/local-indexer/dashboard.js (MUD tables card); package.json script local:mud:derive-tables.
+- Diff: ~190 LoC added total.
+- Risk: low (read-only aggregation + new UI card).
+- Gates: typecheck n/a, build n/a, smoke: metrics server on 8733 ✅; /api/mud ✅; /api/mud-table-stats ✅ after derivation.
+- Follow-ups: If we pick target tables to normalize, add per-table materializers and indices; wire cards only for long-running jobs.
+## 2025-09-12 – ERC-20 stats in local dashboard
+## 2025-09-12 – Local indexer dashboard cards: first‑try checklist
+- Goal: Avoid rework when adding new cards to the local indexer dashboard by documenting a minimal, repeatable checklist and common pitfalls.
+- Scope: `tools/local-indexer/metrics_server.js` (new `/api/*`), `tools/local-indexer/dashboard.js` (UI card + renderer), optional dataset script, and PowerShell run/verify helpers.
+- Checklist (do these in order):
+  1) API first: implement `/api/<name>` in `metrics_server.js` returning stable JSON shape; guard file/db reads, return `{ status:'ok' }` even when empty. Add CORS/cache headers consistent with others.
+  2) Top‑level renderer: in `dashboard.js`, define `render<Name>()` at top level (not nested) so the interval can call it. Keep null‑safe parsing; handle total=0 with 0% UI.
+  3) Build() wiring: add the card DOM in `build()` and capture refs on `nodes` (e.g., `nodes.mudWrap`). Do not construct elements conditionally inside the renderer.
+  4) Interval registration: add `setInterval(render<Name>, 3000)` near existing timers, and call `render<Name>()` once at init.
+  5) Cache‑bust locally: hard refresh (Ctrl+F5) or bump a trivial query string in `dashboard.html` script src if the browser served a cached `dashboard.js`.
+  6) Pick one port: start metrics on a single port for the session (e.g., 8733) to avoid hitting an old server with stale assets. Stop prior Node processes if switching.
+  7) Verify API then UI: curl/PowerShell the new `/api/<name>` first; then open the page and watch for updates every ~3s; check console for errors.
+- PowerShell tips (verified patterns):
+  - Start on a port for this shell only: `& { $env:PORT='8733'; node tools/local-indexer/metrics_server.js }`
+  - Quick API probe: `(Invoke-RestMethod -Uri 'http://127.0.0.1:8733/api/<name>' -TimeoutSec 5) | ConvertTo-Json -Compress`
+  - Check the served JS contains your function: `((Invoke-WebRequest -UseBasicParsing 'http://127.0.0.1:8733/dashboard.js').Content -like '*render<Name>*')`
+- Pitfalls observed + fixes:
+  - Function not defined: renderer defined inside `build()` → move to top level and export via closure vars only through `nodes`.
+  - Undefined locals in renderers: avoid stray variables (e.g., `row`); compute from response explicitly.
+  - Stale assets: multiple servers on different ports; you’re hitting the old one → pick one port, restart it, hard refresh.
+  - Env var quoting on Windows: prefer `$env:PORT='8733'; node ...` form; avoid chained `set PORT=...&&` unless using `cmd /c` explicitly.
+- Gates: API returns 200 with JSON; dashboard shows card immediately; no console errors for 60s; progress bar/pct update at 3s cadence.
+- Follow-ups: Consider extracting a tiny helper to create card shells to cut repetition; add a one‑liner `npm run local:indexer` that starts metrics on the canonical port.
+
+- Goal: Surface ERC-20 activity from the decoded dataset without impacting ingestion; add a simple API and UI card.
+- Files: tools/local-indexer/metrics_server.js (/api/erc20-stats), tools/local-indexer/dashboard.js (ERC-20 card), tools/local-indexer/derive_erc20.js (views helper)
+- Diff: ~120 LoC total
+- Risk: low (read-only queries; UI-only additions). Added 5m cache for heavy totals.
+- Gates: typecheck n/a; build n/a; smoke: endpoint returns JSON locally (manual curl/PowerShell), dashboard shows totals and top tokens
+- Follow-ups: consider computed column/index on topic0 lowercased; add per-token recent rates; wire approvals detail view.
+## 2025-09-12 – Local decode runner + dashboard wiring
+- Goal: Run a read-only background decode and surface live progress/ETA on the consolidated indexer dashboard (port 8733).
+- Files: tools/local-indexer/{decode_apply.js, start_decode.ps1, stop_decode.ps1, metrics_server.js, dashboard.js}.
+- Diff: small – default FULL run in start script, clear stop flag pre-launch, `/api/decode` endpoint in metrics server, new Decode card in dashboard.
+- Risk: low (local-only; SQLite read-only; no Cloudflare changes).
+- Gates: smoke ✅ via http://127.0.0.1:8733 – Decode card shows state=decode_running with increasing done/rps; history points recorded.
+- Ops: Start detached with start_decode.ps1 (no args → full). Stop via stop_decode.ps1 (cooperative flag). If progress oscillates, multiple decoders may be writing the same status JSON—safe but noisy; run stop_decode.ps1 once or terminate stray PID (see data/local-indexer-decode.pid when present).
+- Notes: Status JSON at data/local-indexer-status.json (s.decode), history at data/local-indexer-decode-history.json, control at data/local-indexer-control.json.
+
+## 2025-09-12 – Local snapshot + inventory tooling
+- Goal: Safely snapshot the local ingest DB, summarize raw logs, and export minimal artifacts to unblock decode planning without touching production.
+- Files: tools/local-indexer/snapshot_db.js, inventory.js, discover_layout.js, prepare_decode_schema.js; export_snapshots.js updated; package.json scripts.
+- Diff: +4 scripts (~280 LoC), 1 script updated to support better-sqlite3, package.json scripts added.
+- Risk: low (local-only utilities; no worker changes). DB writes only occur if/when prepare_decode_schema is run against a snapshot.
+- Gates: typecheck N/A | build N/A | smoke: inventory and export ran OK (meta.json, inventory.json, discovered_topics.json written).
+- Notes: topic mapping currently reports 0 matches vs topic_map.json; next step is to extend the map with event topics or derive from ABI.
+
+## 2025-09-11 – Local Indexer Dashboard Plan
+## 2025-09-12 – Local Decode & Analysis Plan (Doc)
+- Goal: Document end-to-end plan to analyze raw logs, extract registry/field layouts, implement decoders, apply to latest-state, and export frontend artifacts without pausing ingestion.
+- Doc: See `docs/archive/local-indexer/LOCAL_INDEXER_PLAN.md` → section "Decode & Analysis Plan (Raw → Registry → Latest State)" for objectives, inputs/outputs, phases, edge cases, and success criteria.
+- Scope: Local snapshot-based workflow; read-only against live ingest DB; outputs `record_latest` + `gates.json` for the app.
+- Risk: Low (docs only). Execution will be staged; no Cloudflare changes required.
+
+## 2025-09-12 – Delivery architecture for semi-live world data (Doc)
+- Goal: Agree on how decoded chain data + World API JSON reach the web app with low cost and safe ops.
+- Doc: See `docs/post-ingestion-playbook.md` → §7 "Delivery architecture: semi‑live data to the app" (modes: Static snapshots → Static+KV overlay → Local dev → optional hosted DB later).
+- Recommendation: Start with Static snapshots (baseline), then add KV overlay for small diffs; keep local-dev source for near-live testing.
+- Risk: Low (docs only). Overlay introduces minimal KV write volume; feature-gated client.
+
+## 2025-09-12 – World API indexing plan (Doc)
+- Goal: Document how we’ll ingest and store World API JSON as enrichment alongside decoded chain state.
+- Doc: `docs/archive/local-indexer/LOCAL_INDEXER_PLAN.md` → section "World API indexing plan (enrichment)" (schema, cadence, merge rules).
+- Decision: Default to the same SQLite DB (`world_api_*` tables) for simplicity; revisit separation if volume grows.
+- Risk: Low (docs only). No code yet; tools to be added after decode inventory.
+- Goal: Document end-to-end plan to analyze raw logs, extract registry/field layouts, implement decoders, apply to latest-state, and export frontend artifacts without pausing ingestion.
+- Doc: See `docs/archive/local-indexer/LOCAL_INDEXER_PLAN.md` → section "Decode & Analysis Plan (Raw → Registry → Latest State)" for objectives, inputs/outputs, phases, edge cases, and success criteria.
+- Scope: Local snapshot-based workflow; read-only against live ingest DB; outputs `record_latest` + `gates.json` for the app.
+- Risk: Low (docs only). Execution will be staged; no Cloudflare changes required.
+
+## 2025-09-11 – Remove D1 bindings after DB deletions (config hygiene)
+- Goal: Align repo configs with operator’s manual deletion of three D1 databases (INDEX_DB, INDEX_DB_A1, INDEX_DB_A2) to avoid deploy-time binding errors while keeping runtime guards.
+- Files: `wrangler.jsonc` (root), `eve-frontier-map/wrangler.jsonc` (Pages), `wrangler.archiver.jsonc`, `wrangler.indexer.jsonc`, `indexer-cron.wrangler.jsonc`.
+- Diff: Removed all `d1_databases` bindings; disabled cron schedule and set `INDEXER_CRON_ENABLED=0` in cron config; added comments noting intentional unbinding. No code changes.
+- Behavior: Pages/Workers continue to serve KV-backed endpoints (shares, stats). Indexer/archiver routes now consistently return clear "binding missing" JSON when called. Preview/production deploys won’t fail due to nonexistent D1 IDs.
+- Risk: Low (config-only). Restoring D1 later requires re-creating databases and re-adding bindings in these files.
+- Gates: typecheck N/A | build N/A | deploy: should succeed (no D1 required). Manual smoke: `/api/stats` OK; `/api/indexer-health` reports disabled/missing binding as expected.
+
+- Goal: Ship a live, read-only dashboard for the local indexer during ongoing ingestion without risking disruption.
+- Approach: Add a separate metrics server (`tools/local-indexer/metrics_server.js`) exposing `/api/health`, `/api/summary`, `/api/series/*` from the SQLite DB opened in read-only mode with WAL-friendly settings and short caching. Build a small standalone React app polling these endpoints at ~1 Hz to render KPI cards, charts, shard table, alerts, and queues mirroring the provided example.
+- Guardrails: Zero code changes to ingestion; separate process; readonly DB; `busy_timeout` with stale snapshot fallback; optional features behind table-detection checks.
+- Gates: Type safety N/A for scripts; manual smoke during ingest; no DB write handles; ingestion logs show no stalls. Visual parity within reason.
+- Follow-ups: After ingest, consider embedding dashboard into `eve-frontier-map` under an `/indexer` route and wiring usage metrics.
+## 2025-09-11 – Dashboard progress + logs hardening
+- Goal: Make status obvious at-a-glance and ensure logs show up reliably.
+- Files: `tools/local-indexer/status_server.js` (HTML/CSS/JS + API)
+- Diff: Added sync progress bar (cursor vs safeHead), banner heuristic (RUNNING when cursor < safeHead), and `/api/logs` fallback to alternate log paths. Minor UI polish.
+- Risk: low
+- Gates: typecheck N/A | build N/A | smoke: server restarted, health OK via page load; UI renders; polling + SSE continue.
+- Follow-ups: Consider tiny supervisor if intermittent refusals continue; possibly rename history section label for clarity.
+
+## 2025-09-11 – Local indexer UI freeze fix
+- Goal: Dashboard must auto-refresh (no manual reloads), show recent activity and logs.
+- Issue: Browser threw `SyntaxError: Invalid or unexpected token` at index line ~180. Root cause was a raw "\n" inserted by the server-side template inside a JS string literal (`.join('\n')` became an actual newline in the served HTML). Also saw mojibake for sparkline and labels due to missing UTF-8 header.
+- Fixes:
+  - Escaped newline in template JS: use `join('\\n')` so the HTML delivers a two-character sequence, not a literal newline.
+  - Serve HTML with `Content-Type: text/html; charset=utf-8`.
+- Files: `tools/local-indexer/status_server.js`.
+- Diff: tiny (2 string escapes, 1 header tweak).
+- Risk: low (template-only).
+- Gates: typecheck N/A | build N/A | smoke: status page loads, no console error, LIVE pill updates, recent/log panes populate.
+- Follow-ups: If caching reappears, consider adding `no-store` + `must-revalidate` to all API responses and surface heartbeat on UI for diagnostics.
+
+## 2025-09-11 – Local indexer controls & PID
+- Goal: Allow dashboard to pause/resume/stop the ingestor and expose PID for management.
+- Files: tools/local-indexer/ingest_raw.js, tools/local-indexer/status_server.js
+- Diff: ~80 LoC
+- Risk: low (isolated to local tools)
+- Gates: typecheck N/A | build N/A | smoke ✅ (status shows paused/ingest; control file honored)
+- Follow-ups: bounded parallel segments (throughput), decode pipeline & app exports.
+
+## 2025-09-11 – Local indexer dashboard live updates & resilient start
+- Goal: Remove manual refresh requirement and ensure the ingestor continues running independent of VS Code sessions.
+- Files: tools/local-indexer/status_server.js, tools/local-indexer/start_status.ps1, tools/local-indexer/restart_ingest.ps1
+- Changes:
+  - Added Server-Sent Events endpoint (`/api/stream`) and client listener; dashboard auto-updates on status/history file changes with a 15s heartbeat. Polling remains as fallback.
+  - Start Ingest now prefers a direct detached Node spawn with stdout/stderr redirected to `scratch/ingest.*.log` and PID tracked in `data/local-indexer-ingest.pid`; falls back to PowerShell script if spawn fails.
+  - Added `restart_ingest.ps1` helper; improved status start script to resolve Node path reliably.
+- Result: Dashboard updates in real time without manual refresh; Start/Kill buttons work; ingestor persists across VS Code restarts (detached process).
+- Risk: low (local-only tooling). SSE gracefully degrades to 2s polling if EventSource unsupported.
+- Smoke: Ran server and toggled Pause/Resume—pill switched to LIVE within <2s; rows delta and spark updated; Kill stopped process and cleared PID on next tick.
+
+## 2025-09-11 – Local ingestor: adaptive segmentation
+- Goal: Avoid RPC “backend response too large” by splitting failing segments recursively; optionally narrow by topic0 at RPC.
+- Files: tools/local-indexer/ingest_raw.js
+- Diff: ~40 LoC
+- Risk: low
+- Notes: New fetchLogsAdaptive() bisects ranges on 500/413 or “too large”; passes TOPIC0_ALLOWLIST as topics[0] OR-list when set.
+
+## 2025-09-11 – Local indexer scaffold
+- Goal: Avoid Cloudflare D1/KV costs by running raw log ingestion locally and exporting static snapshots for the map.
+- Files: tools/local-indexer/{schema.sql, ingest_raw.js, export_snapshots.js}, package.json scripts, .env.example, .gitignore (+ data/.gitkeep).
+- Diff: ~300 LoC added.
+- Risk: low (pure local tooling; no prod impact). 
+- How to run: set RPC_URL in .env (and WORLD_ADDRESS/CHAIN_ID if needed), then `npm run local:ingest` (fast WAL SQLite), `npm run local:export` writes `eve-frontier-map/public/data/index-latest/meta.json`.
+- Notes: Ingest batches via better-sqlite3 transactions; large window with safe segments; idempotent inserts by unique (block_number,log_index). Further work: decoded state export and wiring UI to consume.
+## 2025-09-11 – Force dark theme globally
+## 2025-09-11 – Pause DB/KV activity (production deploy)
+- Goal: Immediately halt D1 and KV writes/reads from the Pages Worker to control cost while planning a local indexing path.
+- Change: Enabled paused mode via env (`PAUSE_DB=1`, `INDEXER_CRON_ENABLED=0`) in `eve-frontier-map/wrangler.jsonc`; rebuilt and deployed Pages production. Worker endpoints short‑circuit with `{ status: 'paused' }` and avoid touching D1/KV.
+- Files: `eve-frontier-map/wrangler.jsonc` (vars already set), Pages deploy only.
+- Deploy: `wrangler pages deploy dist --project-name ef-map --branch main` → deployment `https://494cf965.ef-map.pages.dev`.
+- Verification:
+  - GET `https://ef-map.pages.dev/api/indexer-health?details=1` → `{"status":"paused"}`
+  - GET `https://ef-map.pages.dev/api/indexer-env` → `{"status":"paused"}`
+  - Scheduled cron is disabled; no `/api/indexer-runs` changes expected.
+- Gates: typecheck ✅ build ✅ deploy ✅ smoke ✅
+- Follow-ups: Draft local ingest/decode plan (SQLite/DuckDB) and a low-cost publish path; consider minimal head-only live mode later with strict caps.
+
+- Goal: Fix contrast issues by enforcing dark mode regardless of system theme; ensure routing labels and Indexer page stay white-on-dark.
+- Files: `eve-frontier-map/src/index.css` (set `color-scheme: dark`; removed `@media (prefers-color-scheme: light)` overrides).
+- Diff: ~-15/+2 lines.
+- Risk: low (CSS only; no JS behavior change).
+- Gates: typecheck ✅ build ✅ preview ✅
+- Preview: https://force-dark-ux.ef-map.pages.dev
+- Verification: CSS asset contains `color-scheme: dark`; no light-mode media query; homepage 200 OK; note: API endpoints on preview return HTML (expected on Pages without full runtime bindings for some routes).
+
+## 2025-09-11 – Ingestion stall mitigation (auto-advance on zero inserts)
+- Goal: Prevent apparent stalls when segment scans produce zero inserts (e.g., all logs filtered by table allowlist).
+- Files: `eve-frontier-map/_worker.js` (advance cursor to `toBlock` when `segRequests>0 && inserted===0`; add run note `advance_noinserts`).
+- Diff: ~+20 lines.
+- Risk: low (cursor progression only when we know we scanned a range and wrote nothing).
+- Gates: typecheck ✅ build ✅ preview ✅ prod deploy ✅
+- Preview: https://ingest-advance-cursor-noinse.ef-map.pages.dev
+- Production: deployed via Wrangler to `main` (Pages). CSS dark-only verified; worker live.
+
+## 2025-09-11 – Indexer cursor realignment + trigger
+- Goal: Clear a stall where runs showed 0 seg_requests/attempted due to cursor ahead of finalized head (cursor=8021082 vs chain ~7288348). Auto-advance path doesn’t apply when no RPCs fire; realign cursor to DEPLOY_BLOCK-1 and restart.
+- Actions: POST /api/indexer-reset?openPreview=1 → cursor set to 7288347; existing active run finalized. Then POST /api/indexer-trigger?openPreview=1 to start store_all.
+- Outcome: Run 1430 inserted 2,555 rows in 11s; cursor advanced to 7,298,348; notes include batches/segReq metrics. Subsequent runs can proceed normally.
+- Risk: low (idempotent reset; data untouched). Rationale: avoids reprocessing windows and unblocks ingestion immediately.
+## 2025-09-10 – Light health endpoint + manual ingest restart
+- Goal: Fix slow indexer health/dashboard and restart ingestion after decode rollback.
+- Files: `eve-frontier-map/_worker.js`, `src/components/IndexerPage.tsx`, `src/components/Indexer/IndexerStatusBadge.tsx`.
+- Diff: Gate heavy health parts behind flags (counts/db/probe), UI loads light first and DB metrics on-demand. Triggered `/api/indexer-trigger` on production to resume ingest.
+- Risk: low (read-only API shape adds optional fields; ingestion trigger is existing path).
+- Gates: typecheck ✅ build ✅ preview smoke ✅ prod trigger ✅
+- Notes: Preview at `fix-health-light.ef-map.pages.dev`. Prod active run observed; watchdog will finalize if no progress in ~2m; manual trigger re-issued as needed.
+## 2025-09-10 – Rollback decode preview surfaces
+- Goal: Remove decode endpoints and UI added during preview to restore pre-decode build and reduce potential contention with ingestion.
+- Files: `eve-frontier-map/_worker.js`, `eve-frontier-map/src/components/IndexerPage.tsx`.
+- Diff: ~-300 LoC (remove two API routes; strip decode UI and fields); migrations left intact to avoid destructive drops.
+- Risk: low
+- Gates: typecheck ✅ build (pending preview deploy) smoke (pending)
+- Follow-ups: If future decode is desired, reintroduce behind a feature flag and isolate work in a separate worker.
+## 2025-09-10 – Start decode in preview
+- Goal: Begin decode/materialization before backfill completes with minimal risk and clear freshness labeling.
+- Files: `eve-frontier-map/_worker.js` (decode endpoint, health cursor), `eve-frontier-map/wrangler.jsonc` (bindings pre-existing)
+- Diff: +~160 LoC (endpoint + small migration + health fields)
+- Risk: medium (adds write path; batched/idempotent; preview-only)
+- Gates: typecheck ✅ build ✅ preview deploy ✅ decode endpoint ✅ health shows decoded cursor ✅
+- Notes: Batch size <=150 rows; params <=100; allowlist enforced; idempotent INSERT OR IGNORE; record_latest upsert; unique index on store_events(block,log,table).
+## 2025-09-10 – Cron Worker Deployed with SEGMENT_BLOCKS=400
+- Goal: Align scheduled ingestion with the Pages env tuning so cron-driven runs benefit from the larger segment window while staying within safe limits.
+- Deploy:
+  - Worker: `ef-indexer-cron` (schedule: `*/5 * * * *`).
+  - Vars (from deploy output): `INDEXER_CRON_MAX_BLOCKS=4000`, `INDEXER_CRON_SEGMENT_BLOCKS=400`, `INDEXER_CRON_ROW_CAP=50000`, `PAGES_BASE_URL` set to production.
+  - URL: https://ef-indexer-cron.michael-davis-home.workers.dev
+  - Version ID: 80ad74c0-ba2e-4953-8926-adedda456f40
+- Verification:
+  - `/api/indexer-health` returned 200 with sane cursor/lag.
+  - `/api/indexer-runs?limit=5` shows recent `src:cron` runs with notes like `ok ins:8000 seg:3 batches:122 subreq:3` (no error markers), indicating the new settings are active.
+- Risk: Medium (throughput knob). Existing subrequest soft cap, safe INSERT batching, and idempotent finalize mitigate.
+- Rollback Plan: If 1101/subrequest or provider RPC errors surface, reduce `INDEXER_CRON_SEGMENT_BLOCKS` to 350 and redeploy the cron worker; keep MAX_BLOCKS/ROW_CAP unchanged for isolation.
+
+## 2025-09-10 – Rollback SEGMENT_BLOCKS to 350 (stability)
+- Trigger: A run started ~7 minutes prior did not complete under SEGMENT_BLOCKS=400; health showed increasing ingestionLagMs without a new finished run.
+- Change: Set `INDEXER_CRON_SEGMENT_BLOCKS=350` in both `cron-wrangler.jsonc` and `eve-frontier-map/wrangler.jsonc` and redeployed cron Worker and Pages.
+- Verify: Cron Worker deploy output reflects `INDEXER_CRON_SEGMENT_BLOCKS ("350")`; production Pages responded 200 on `/api/indexer-env`. Awaiting next cron tick to confirm new finished run; prior pattern at 400 showed runs completing every ~36s with `ok ins:8000 seg:3` when healthy.
+- Risk: Lower throughput vs 400 but improves headroom against subrequest/timeouts. Keep MAX_BLOCKS and ROW_CAP unchanged to isolate the effect.
+- Next: Monitor `/api/indexer-runs` for the next 2–3 cycles; if runs resume completing, hold 350 as ceiling. If stalls persist, consider 325.
+
+## 2025-09-10 – Stall at 350 → Lower to 325 + Watchdog fix
+- Trigger: Run 1296 (started 17:16:00) remained active >4 min with no heartbeat; overlap lock prevented new runs from starting.
+- Root cause: Watchdog only treated runs with a recorded `last_progress_at` as no-progress. When the field is null, it waited for the longer stale threshold (25m).
+- Changes:
+  1) Watchdog tweak: if `last_progress_at` is null and age > NO_PROGRESS_MS (default 120s), treat as no-progress and finalize.
+  2) Cron config: `INDEXER_CRON_SEGMENT_BLOCKS` lowered 350 → 325; `PAGES_BASE_URL` switched to production `https://ef-map.pages.dev` (was a preview alias).
+  3) Pages env aligned to SEGMENT_BLOCKS=325; redeployed.
+- Verification:
+  - 1294: previously auto-finalized (stall_restarts:1) after watchdog change.
+  - 1296: finalized at 17:24:23 (stall_restarts:1) after manual trigger; new run 1297 completed in 39s with `ok_duplicate` under segment 325.
+- Status: Healthy duplicate windows resuming; monitor next cron cycles. If stalls recur, consider 300.
+
 ## 2025-09-10 – Finalize Idempotency + Duplicate Labeling (UI)
 - Goal: Ensure runs always persist rows_added and metrics even if the run was flagged finished earlier; clarify duplicate-only runs in the dashboard.
 - Files:
@@ -126,6 +938,20 @@
 - Validation: Manual tick returned 200 with page deletions; preview archive endpoint dry-run/live tested OK; Worker deployed at `https://ef-map-archiver.<acct>.workers.dev`.
 - Risk: Subrequest limit; tuned page sizes and pages-per-tick to avoid 429. If hit, lower PAGE_LIMIT or MAX_PAGES.
 - Follow-ups: Monitor ingestion vs archival rate; if needed, raise PAGE_LIMIT/MAX_PAGES, or add `INDEX_DB_A2` and route oldest ranges.
+
+## 2025-09-10 – Enable A2 overflow archive
+- Goal: Begin writing overflow archive pages to secondary D1 (`ef_index_archive_2`) so A1 does not exceed ~10 GB.
+- Files: `wrangler.archiver.jsonc`, `eve-frontier-map/wrangler.jsonc`.
+- Change:
+  - Lowered `ARCHIVE_A1_MAX_ROWS` to 9.1M to trigger spill to A2.
+  - Added `INDEX_DB_A2` binding to Pages config so `/api/indexer-health` reports A2 metrics.
+- Deploys:
+  - Deployed Worker `ef-map-archiver` (version `16db99de-1898-4790-94ad-92097c9f12ba`).
+  - Deployed Pages preview `https://a2-spillover.ef-map.pages.dev` for validation.
+- Verification:
+  - Health shows A2 counts non-zero (e.g., ~140k rows moved) and `archivedCount = a1 + a2`.
+- Risk: Low. Scope limited to archiver routing + metrics visibility; no schema changes.
+- Follow-ups: Promote A2 binding to production Pages environment on next deploy; monitor A1 fill and adjust thresholds if needed.
 
 ## 2025-09-10 – Raw logs archival to D1 (Option A)
 - Goal: Stop primary D1 growth by moving historical `raw_logs` to archive D1 databases while keeping SQL queryability.
@@ -1069,7 +1895,7 @@
 - Goal: Bring all public/project documentation into alignment with Cloudflare-as-primary reality, retire active migration phrasing, and surface new defensive + future-planning notes (BOM strip, dynamic structures, D1 scaffold).
 - Files Updated:
   - `README.md` (root): Removed Netlify fallback language, updated architecture & deployment notes, added BOM parsing hardening rationale, clarified KV namespaces & D1 mention.
-  - `docs/MIGRATION_PLAN.md`: Marked HISTORICAL (archival banner), summarized skipped Dual Write (Phase 3) & completed Cutover (Phase 4), left CLEANUP pending.
+  - `docs/archive/migration/MIGRATION_PLAN.md`: Marked HISTORICAL (archival banner), summarized skipped Dual Write (Phase 3) & completed Cutover (Phase 4), left CLEANUP pending.
   - `eve-frontier-map/README.md`: Replaced Vite boilerplate with concise frontend quick start + legacy note.
   - `docs/README.md`: Added dynamic structures planning docs, historical migration section, status notes (Cloudflare primary, BOM strip).
   - `eve-frontier-map/netlify/functions/README.md`: New legacy notice clarifying directory retained temporarily for historical reference only (no active runtime usage).
@@ -1151,7 +1977,7 @@
 - Goal: Capture newly provided domain clarifications for dynamic smart gate integration: tribe-based (org) gating predominance, programmable contract logic via `configureGate`, irrelevance of fuel level beyond binary ONLINE state, and confirmation of current world address `0x7085f3e652987f656fb8dee5aa6592197bb75de8` for wipe/version tracking.
 - Changes:
   - `dynamic_structures_plan.md`: Added Section 8.1 clarifications (tribe access, wallet→character→tribe mapping, event source RPC reference, fuel irrelevance) + extended open questions (18–20).
-  - `d1_schema_draft.sql`: Added `gate_access_cache` table (visibility_class + optional tribe_id + direction fields) and notes emphasizing tribe-centric gating & ignoring fuel for traversal.
+  - `docs/archive/d1/d1_schema_draft.sql`: Added `gate_access_cache` table (visibility_class + optional tribe_id + direction fields) and notes emphasizing tribe-centric gating & ignoring fuel for traversal.
 - Rationale: Shift early optimization from per-wallet ACL enumeration to tribe-scoped visibility caching; avoid premature complexity around fuel-based path weighting; ensure world versioning keyed to confirmed address.
 - Risk: Low (documentation + draft schema only, no deployed migrations yet). If tribe logic later proves multi-level (alliance/corp) we may extend `gate_access_cache` with hierarchy normalization rather than redesign core tables.
 - Follow-ups: Determine extraction method for tribe predicates from configured gate system contracts (table presence vs dynamic call); confirm if multiple tribes per character; decide caching granularity (per tribe vs aggregated public snapshot) before implementing indexer phase.
@@ -1193,7 +2019,7 @@
 
 ## 2025-09-07 – Cloudflare Cutover: Remove Netlify Fallbacks
 - Goal: Finalize migration by eliminating all client fallbacks to Netlify Functions (`/.netlify/functions/*`) for shares, usage, and stats; enforce Cloudflare Worker (`/api/*`) as sole backend.
-- Files: `src/utils/shortShare.ts`, `src/utils/usage.ts`, `src/components/StatsPage.tsx`, `.github/copilot-instructions.md`, `docs/migration_status.json`, `docs/MIGRATION_PLAN.md` (phase update pending), `decision-log.md` (this entry).
+- Files: `src/utils/shortShare.ts`, `src/utils/usage.ts`, `src/components/StatsPage.tsx`, `.github/copilot-instructions.md`, `docs/archive/migration/migration_status.json`, `docs/archive/migration/MIGRATION_PLAN.md` (phase update pending), `decision-log.md` (this entry).
 - Changes: Removed fallback candidate arrays & retry logic; HTML (text/html) responses now hard errors. Updated instructions file to mark Cloudflare Pages + Worker + KV as primary and note legacy Netlify code as deprecated. Added explicit console error diagnostics when /api endpoints unavailable to surface misconfigured deploy early.
 - Diff: ~ -120 LOC (fallback paths & comments) / +40 LOC (instructions + error messages) net.
 - Risk: Medium (removal of redundancy; any deploy misconfig now surfaces immediately). Rollback plan: revert this commit to restore fallback while investigating Worker bind/deploy issue.
@@ -1202,7 +2028,7 @@
 
 ## 2025-09-07 – Migration Phase 1 Completion
 - Goal: Conclude Phase 1 (Adapter Introduction) with no runtime behavior change while preparing for shadow reads.
-- Files: `wrangler.jsonc`, `netlify/functions/_store.js` (flag logic), `src/lib/cf_kv.ts`, `docs/MIGRATION_PLAN.md`, `.env.example`, `migration_status.json`.
+- Files: `wrangler.jsonc`, `netlify/functions/_store.js` (flag logic), `src/lib/cf_kv.ts`, `docs/archive/migration/MIGRATION_PLAN.md`, `.env.example`, `docs/archive/migration/migration_status.json`.
 - Changes:
   - Added KV namespace bindings & assets SPA handling in wrangler config (placeholder worker entry).
   - Implemented `CF_ADAPTER_ENABLE` feature flag in `_store.js` (Cloudflare branch with graceful fallback + dev warning).
@@ -1627,7 +2453,7 @@
 - Goal: Capture newly provided domain clarifications for dynamic smart gate integration: tribe-based (org) gating predominance, programmable contract logic via `configureGate`, irrelevance of fuel level beyond binary ONLINE state, and confirmation of current world address `0x7085f3e652987f656fb8dee5aa6592197bb75de8` for wipe/version tracking.
 - Changes:
   - `dynamic_structures_plan.md`: Added Section 8.1 clarifications (tribe access, wallet→character→tribe mapping, event source RPC reference, fuel irrelevance) + extended open questions (18–20).
-  - `d1_schema_draft.sql`: Added `gate_access_cache` table (visibility_class + optional tribe_id + direction fields) and notes emphasizing tribe-centric gating & ignoring fuel for traversal.
+  - `docs/archive/d1/d1_schema_draft.sql`: Added `gate_access_cache` table (visibility_class + optional tribe_id + direction fields) and notes emphasizing tribe-centric gating & ignoring fuel for traversal.
 - Rationale: Shift early optimization from per-wallet ACL enumeration to tribe-scoped visibility caching; avoid premature complexity around fuel-based path weighting; ensure world versioning keyed to confirmed address.
 - Risk: Low (documentation + draft schema only, no deployed migrations yet). If tribe logic later proves multi-level (alliance/corp) we may extend `gate_access_cache` with hierarchy normalization rather than redesign core tables.
 - Follow-ups: Determine extraction method for tribe predicates from configured gate system contracts (table presence vs dynamic call); confirm if multiple tribes per character; decide caching granularity (per tribe vs aggregated public snapshot) before implementing indexer phase.
@@ -1854,7 +2680,7 @@
 
 ## 2025-09-07 – Cloudflare Cutover: Remove Netlify Fallbacks
 - Goal: Finalize migration by eliminating all client fallbacks to Netlify Functions (`/.netlify/functions/*`) for shares, usage, and stats; enforce Cloudflare Worker (`/api/*`) as sole backend.
-- Files: `src/utils/shortShare.ts`, `src/utils/usage.ts`, `src/components/StatsPage.tsx`, `.github/copilot-instructions.md`, `docs/migration_status.json`, `docs/MIGRATION_PLAN.md` (phase update pending), `decision-log.md` (this entry).
+- Files: `src/utils/shortShare.ts`, `src/utils/usage.ts`, `src/components/StatsPage.tsx`, `.github/copilot-instructions.md`, `docs/archive/migration/migration_status.json`, `docs/archive/migration/MIGRATION_PLAN.md` (phase update pending), `decision-log.md` (this entry).
 - Changes: Removed fallback candidate arrays & retry logic; HTML (text/html) responses now hard errors. Updated instructions file to mark Cloudflare Pages + Worker + KV as primary and note legacy Netlify code as deprecated. Added explicit console error diagnostics when /api endpoints unavailable to surface misconfigured deploy early.
 - Diff: ~ -120 LOC (fallback paths & comments) / +40 LOC (instructions + error messages) net.
 - Risk: Medium (removal of redundancy; any deploy misconfig now surfaces immediately). Rollback plan: revert this commit to restore fallback while investigating Worker bind/deploy issue.
@@ -2252,7 +3078,7 @@
 
 ## 2025-09-06 – Migration Planning Framework Introduction
 - Goal: Establish structured, token-gated multi-phase plan for upcoming Netlify → Cloudflare persistence migration without altering runtime behavior yet.
-- Files: `docs/MIGRATION_PLAN.md` (new), `docs/migration_status.json` (machine-readable phase state), `docs/decision-log.md` (this entry), updated forthcoming `.github/copilot-instructions.md` (pending in same change set) to reference plan (will be applied shortly).
+- Files: `docs/archive/migration/MIGRATION_PLAN.md` (new), `docs/archive/migration/migration_status.json` (machine-readable phase state), `docs/decision-log.md` (this entry), updated forthcoming `.github/copilot-instructions.md` (pending in same change set) to reference plan (will be applied shortly).
 - Diff: + ~250 LOC new docs (plan + status JSON minimal 4 lines) | no code changes.
 - Risk: None (documentation only, no imports or runtime references consumed yet).
 - Rationale: Prevent scope creep & provide clear resume points for AI-assisted sessions; enable operator to gate each phase via explicit tokens (MIGRATE PHASE0 OK → CLEANUP OK).
@@ -2260,7 +3086,7 @@
 
 ## 2025-09-06 – Natural Language Migration Triggers & UI Prep Docs
 - Goal: Allow operator to initiate migration phases using plain English (no need to cite exact token strings) and provide up-front Cloudflare UI checklist for smoother onboarding.
-- Files: `.github/copilot-instructions.md` (added natural language trigger mapping + Cloudflare UI setup cheat sheet), `docs/MIGRATION_PLAN.md` (extended Phase 0 tasks with operator namespace prep), `decision-log.md` (this entry).
+- Files: `.github/copilot-instructions.md` (added natural language trigger mapping + Cloudflare UI setup cheat sheet), `docs/archive/migration/MIGRATION_PLAN.md` (extended Phase 0 tasks with operator namespace prep), `decision-log.md` (this entry).
 - Diff: ~+55 LOC combined across docs.
 - Risk: None (documentation only).
 - Rationale: Reduce cognitive load for non‑coder operator; ensure assistant interprets phrases like "let's start the migration" as Phase 0 token grant; pre-stage Cloudflare namespace tasks to avoid blocking later phases.
@@ -2278,7 +3104,7 @@
 
 ## 2025-09-07 – Migration Phase 1 Completion
 - Goal: Conclude Phase 1 (Adapter Introduction) with no runtime behavior change while preparing for shadow reads.
-- Files: `wrangler.jsonc`, `netlify/functions/_store.js` (flag logic), `src/lib/cf_kv.ts`, `docs/MIGRATION_PLAN.md`, `.env.example`, `migration_status.json`.
+- Files: `wrangler.jsonc`, `netlify/functions/_store.js` (flag logic), `src/lib/cf_kv.ts`, `docs/archive/migration/MIGRATION_PLAN.md`, `.env.example`, `docs/archive/migration/migration_status.json`.
 - Changes:
   - Added KV namespace bindings & assets SPA handling in wrangler config (placeholder worker entry).
   - Implemented `CF_ADAPTER_ENABLE` feature flag in `_store.js` (Cloudflare branch with graceful fallback + dev warning).
@@ -2496,6 +3322,151 @@
 - Risk: low (read-only estimation path; no schema or write changes)
 - Gates: typecheck ✅ | build ✅ | preview deploy ✅ (alias `feature-ingest-scaling`)
 - Follow-ups: Adjust index overhead factor if observed drift vs D1 UI remains >15%; optionally surface `size_method` in UI for debugging.
+
+
+
+
+## 2025-09-10 – Pause decode during active ingest (guard + UI)
+- Goal: Prevent decode batches from contending with ingestion after observing a stall; prioritize backfill completion.
+- Files: `eve-frontier-map/_worker.js` (decode-batch guard), `eve-frontier-map/src/components/IndexerPage.tsx` (disable controls + note).
+- Diff: ~20 LoC (worker guard + small UI condition).
+- Behavior: `/api/indexer-decode-batch` now returns 409 `{ error: "ingest_active" }` if any `indexer_run` has `run_finished_at IS NULL`. UI disables the tables input and button and shows "Decode is paused while ingestion is active." when Health reports an active run.
+- Risk: Low (read-only check, small UI change). No impact when idle.
+- Gates: typecheck ✅ build ✅ preview deploy ✅; manual 409 check pending but health shows active run and UI controls are disabled on preview.
+- Follow-ups: Re-enable decode once ingestion finishes; consider extending guard to allow decoding from archives (A1/A2) later without touching primary when backfill is complete.
+
+
+
+
+
+## 2025-09-11 – Local indexer native SQLite fast path
+- Goal: Greatly increase local ingestion throughput by preferring native SQLite (`better-sqlite3`) over `sql.js` while keeping WASM fallback.
+- Files: tools/local-indexer/ingest_raw.js, package.json
+- Diff: ~+120 LOC (conditional engine, batched transactions), deps +1
+- Behavior: When `better-sqlite3` is installed (default now) or `DB_ENGINE=better-sqlite3`, ingestor opens a real SQLite DB file with WAL + NORMAL sync and executes batched inserts inside a single transaction per chunk. Persistence happens immediately (no export/write step). WASM fallback remains available with `DB_ENGINE=sql.js`.
+- Expected Impact: 5–20× faster local writes vs sql.js due to native engine and no full DB export on each save. Save interval reduced to 2s on native engine; segment save threshold lowered to 1 to surface progress quickly.
+- Ops: `npm i` installs `better-sqlite3`; Windows prebuilt should download automatically. If build tools are missing, engine falls back to `sql.js` without breaking. Can force WASM via env.
+- Risk: Low (local tooling only). If native module fails to load, code transparently uses WASM. DB file is compatible across engines.
+- Follow-ups: Expose `DB_ENGINE` choice + current engine in dashboard status; add ingest rate metrics (rows/s, blocks/s).
+
+
+
+
+
+## 2025-09-11 – Local indexer dashboard refresh hardening
+- Goal: Ensure the status page visibly updates even when one request fails or a DOM node is temporarily missing.
+- Changes:
+  - Added null-safe `setText()` helper and used it across updates to avoid exceptions halting the loop.
+  - Decoupled the 1s update loop steps so `/api/history` and proc stats still run if `/api/status` fails (and vice versa), using `finally`.
+  - Computed ETA from the most recent status snapshot to remove a second status fetch dependency.
+  - Added a subtle pulse animation to the LIVE pill to make liveness obvious.
+- Files: `tools/local-indexer/status_server.js`.
+- Risk: low (client-only).
+- Smoke: Network panel shows steady `/api/status` + `/api/history` calls; LIVE pill pulses; Recent and chart update; no console errors.
+
+
+
+
+
+## 2025-09-12 – Dashboard typed coverage for MUD Wave‑1
+- Goal: Show typed presence coverage alongside latest/values for Wave‑1 to track progress at a glance.
+- Files: tools/local-indexer/metrics_server.js (/api/mud-latest adds typed counts); tools/local-indexer/dashboard.js (ECS card shows Typed totals and per-table percentages).
+- Diff: ~+40 LoC combined.
+- Risk: low (read-only queries, UI only).
+- Gates: typecheck N/A | build N/A | smoke: endpoint returns typed field, dashboard displays Typed totals and per-table typed counts/percentages.
+- Follow-ups: Extend typed materializers to decode values for selected tables; consider a compact sparkline or badge when typed != latest.
+
+
+
+
+
+## 2025-09-14 – Grafana wired to Postgres (World API counts)
+- Goal: Make Grafana show World API row counts directly from the local Postgres (no legacy endpoints). Provide stable SQL and a helper DB view to simplify panels.
+- Files: `tools/sql/world_api_counts_queries.sql` (queries for panels), `tmp_create_world_api_counts_view.sql` (one-off SQL to create helper views).
+- DB Changes: Created schema `world_api_metrics` and views:
+  - `world_api_metrics.table_counts` – UNION ALL of exact COUNT(*) per relevant table across `world_api` and `world_api_dlt`.
+  - `world_api_metrics.approx_table_rows` – fast approximate counts from `pg_class` (no full scans).
+- How to apply (local Postgres in Docker):
+  1) `docker cp tmp_create_world_api_counts_view.sql pg-indexer-reader-postgres-1:/tmp/wacounts.sql`
+  2) `docker exec pg-indexer-reader-postgres-1 psql -U user -d postgres -v ON_ERROR_STOP=1 -f /tmp/wacounts.sql`
+  3) Verify: `docker exec pg-indexer-reader-postgres-1 psql -U user -d postgres -c "SELECT * FROM world_api_metrics.table_counts ORDER BY 1;"`
+- Grafana panels (Postgres datasource):
+  - SingleStat: `SELECT COUNT(*) FROM world_api_dlt.raw_solarsystems` (repeat for each table), or
+  - Table: `SELECT * FROM world_api_metrics.table_counts ORDER BY table_name` for a one-shot “All counts” view.
+- Notes: `world_api.table_row_counts` appears stale (zeros) and isn’t used. Views compute live counts; switch to `approx_table_rows` if full scans become slow later.
+- Risk: Low (read-only views). No changes to app/worker. Rollback: `DROP SCHEMA world_api_metrics CASCADE;` (if ever needed).
+
+
+
+
+
+## 2025-09-14 – Add dlt/OpenAPI ingestion scaffold + Grafana template
+- Goal: Replace legacy World API pipeline with a simpler, config-driven ingestion into Postgres schema world_api_dlt and prep Grafana panels.
+- Files:
+  - tools/world_api_dlt_v2/ingest_openapi.py (requests + psycopg2; DRY-RUN if DB unavailable)
+  - tools/world_api_dlt_v2/config.example.yaml, requirements.txt, README.md
+  - tools/win/run_world_api_dlt_v2.ps1 (manual one-shot runner; no scheduling)
+  - grafana/world_api_dlt_dashboard.json + grafana/README.md
+- Diff: New files only; minimal scope.
+- Risk: Low (local tooling + Grafana assets; no prod code touched).
+- Gates: typecheck N/A | build N/A | smoke: script prints DRY-RUN if DB missing (✅).
+- Follow-ups: Configure real endpoints/auth, add paging, wire datasource UID in Grafana, and update panels as the schema solidifies.
+
+
+
+
+
+## 2025-09-15 – VS Code extensions installed + Grafana freshness clarified
+- Goal: Install and validate six recommended VS Code extensions/tools and clarify World API freshness semantics in Grafana, plus add per-table last loads panel.
+- Extensions installed (VS Code marketplace ids):
+  - Docker (ms-azuretools.vscode-docker)
+  - Dev Containers (ms-vscode-remote.remote-containers)
+  - REST Client (humao.rest-client)
+  - PostgreSQL (ckolkman.vscode-postgres)
+  - SQLite (alexcvzz.vscode-sqlite)
+  - Grafana Utils (yesoreyeram.grafana) and Grafana (grafana.grafana-vscode)
+- Validation: Docker containers up (postgres:5432, grafana:3000, worldapi-cron healthy); Grafana /api/health 200 JSON (version 10.4.3) via PowerShell Invoke-WebRequest.
+- Dashboard updates:
+  - Renamed stat tile to "World API newest load age (min)" and added inline SQL comment clarifying it shows staleness (minutes since newest insert across _dlt_loads or killmails time).
+  - Added "World API last loads (per table)" table panel listing table_name, last_load_id, loaded_at, and age_min for key dlt tables.
+- Files: tools/grafana/dashboards/ef-map/ef_map_overview_dashboard.json
+- Risk: low (Grafana-only JSON + docs).
+- Gates: typecheck N/A | build N/A | smoke: Grafana healthy ✅; panels expected to render on next provision cycle.
+- Follow-ups: Expand per-table list if additional resources are enabled; consider adding a per-table freshness stat with thresholds.
+
+
+
+
+
+## 2025-09-16 – DLT allowlist fallback for custom resources
+- Goal: Ensure FORCE_ALLOW_RESOURCES can target custom extras (batch details, killmails) even when generic OpenAPI registry returns empty.
+- Files: `tools/worldapi-pipeline/worldapi/worldapi_pipeline/worldapi/__init__.py` (allowlist selection block)
+- Diff: +8 LOC – when primary registry selection yields none, fall back to an `extras_registry` with `get_v_2_killmails` and `get_v_2_smartassemblies_details_batch` so final selection isn't empty.
+- Risk: low (construction-time only). No API schema change.
+- Gates: typecheck N/A | build N/A | smoke: next cron tick should show `[cadence] final:` containing the batch resource, and the pipeline should emit GETs to `/v2/smartassemblies/{id}`.
+- Follow-ups: If selection still empty, print registry keys length for diagnostics; then verify first inserts appear in `world_api_dlt.smartassembly` and DECIMAL coord typing holds.
+
+
+
+
+## 2025-09-19 – Grafana tribe_member panels (freshness + counts)
+- Goal: Surface the new tribe membership ingestion on dashboards with count and freshness so Grafana remains the freshness source of truth.
+- Files: tools/grafana/world_api_minimal_dashboard.json; tools/grafana/dashboards/ef-map/ef_map_overview_dashboard.json
+- Diff: ~+30 LoC – added two panels to minimal dashboard (count + freshness in minutes via worldapi_ingest_health), included tribe_member in overview counts table and canonical counts; planned a dedicated stat tile.
+- Risk: low (Grafana JSON only).
+- Gates: typecheck N/A | build N/A | smoke: panels will render after next import/provision; freshness depends on heartbeat + _dlt_loads entries from tribe-members cron.
+- Follow-ups: If needed, add a members-per-tribe top-N table; consider threshold coloring once volumes stabilize.
+
+
+## 2025-09-19 – Archive Netlify functions (Cloudflare-only backend)
+- Goal: Reflect the completed Cloudflare cutover by removing Netlify from the active tree and preventing accidental reintroduction.
+- Changes:
+  - Moved `eve-frontier-map/netlify/functions/*` to `legacy/netlify/functions/`.
+  - Moved Netlify configs to `legacy/netlify/` (root `netlify.toml`) and `legacy/netlify/eve-frontier-map/netlify.toml` (if present).
+  - Added `legacy/ARCHIVE.md` documenting contents and the Cloudflare-only stance.
+  - Will refresh `README.md` next to point to Cloudflare-only flow and note the archive.
+- Risk: Low (no runtime codepaths depend on Netlify after prior cutover; client fallbacks were removed). Rollback: move the directory back if needed.
+- Gates: typecheck N/A | build N/A | smoke N/A (no app code changed). Follow-up: README update + .gitignore extension.
 
 
 

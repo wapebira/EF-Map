@@ -1,0 +1,36 @@
+{
+  "title": "EF-Map – World API (dlt)",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "panels": [
+    {
+      "type": "table",
+      "title": "Systems (count by region)",
+      "gridPos": {"x":0, "y":0, "w":12, "h":9},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT r.name AS region, COUNT(s.id) AS systems FROM world_api_dlt.systems s JOIN world_api_dlt.regions r ON s.region_id = r.id GROUP BY r.name ORDER BY systems DESC;",
+          "datasource": {"type": "postgres", "uid": "POSTGRES_DS_UID"}
+        }
+      ],
+      "options": {"showHeader": true}
+    },
+    {
+      "type": "stat",
+      "title": "Total Systems",
+      "gridPos": {"x":12, "y":0, "w":6, "h":4},
+      "targets": [
+        {
+          "refId": "B",
+          "format": "table",
+          "rawSql": "SELECT COUNT(*) AS total FROM world_api_dlt.systems;",
+          "datasource": {"type": "postgres", "uid": "POSTGRES_DS_UID"}
+        }
+      ]
+    }
+  ],
+  "templating": {"list": []}
+}

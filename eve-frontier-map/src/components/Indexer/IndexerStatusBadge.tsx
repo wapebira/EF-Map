@@ -49,7 +49,8 @@ export const IndexerStatusBadge: React.FC<IndexerStatusBadgeProps> = ({ inline }
   const timerRef = useRef<any>(null);
   const fetchHealth = async () => {
     try {
-      const r = await fetch('/api/indexer-health?details=1');
+      // Lightweight: no counts/db/probe by default for badge
+      const r = await fetch('/api/indexer-health');
       if(!r.ok) throw new Error('health_http_'+r.status);
       const j = await r.json();
       setHealth(j);

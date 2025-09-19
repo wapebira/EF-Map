@@ -52,6 +52,9 @@ CREATE INDEX IF NOT EXISTS idx_record_latest_block ON record_latest(last_block);
 CREATE TABLE IF NOT EXISTS decoded_cursor (id INTEGER PRIMARY KEY CHECK (id=1), last_block INTEGER NOT NULL DEFAULT 0, last_log_index INTEGER NOT NULL DEFAULT 0, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP);
 INSERT INTO decoded_cursor (id, last_block, last_log_index) SELECT 1,0,0 WHERE NOT EXISTS (SELECT 1 FROM decoded_cursor WHERE id=1);`
   , '015_run_attempted': `ALTER TABLE indexer_run ADD COLUMN attempted_logs INTEGER DEFAULT 0;`
+  , '016_store_events_unique': `-- Idempotency and lookup speed for decoded store events
+CREATE UNIQUE INDEX IF NOT EXISTS u_store_events_row ON store_events(block_number, log_index, table_id);
+CREATE INDEX IF NOT EXISTS idx_store_events_tbl_block ON store_events(table_id, block_number);`
 };
 // Table Allowlist (MUD Store tableIds) – introduced 2025-09-09
 // Rationale: Reduce ingestion volume & accelerate backfill by ignoring World contract logs
@@ -251,10 +254,19 @@ async function handleIndexerHealth(env, url){
     }
   const { results } = await env.INDEX_DB.prepare("SELECT version_number, world_address, contracts_version FROM world_version WHERE archived_at IS NULL ORDER BY version_number DESC LIMIT 1").all();
     const world = results?.[0] || null;
-    const details = url.searchParams.get('details')==='1';
-  let counts=null;
-  let lastRun=null;
-    if(details){
+    // Lightweight flags: gate heavy queries behind explicit params
+    const qp = url.searchParams;
+    const wantCounts = qp.get('counts')==='1';
+    const wantDb = qp.get('db')==='1';
+    const wantProbe = qp.get('probe')==='1';
+    let counts=null;
+    let lastRun=null;
+    // Always return the most recent run (cheap single-row lookup)
+    try {
+      const lr = await env.INDEX_DB.prepare("SELECT id, mode, run_started_at, run_finished_at, run_duration_ms, error_count, last_progress_at, rows_so_far, seg_requests_so_far, batch_flushes, adaptive_batch_current, stall_restarts, attempted_logs, rows_added, rows_updated, rows_removed, gate_edges_rebuilt FROM indexer_run ORDER BY id DESC LIMIT 1").all();
+      lastRun = lr.results?.[0] || null;
+    } catch { /* ignore */ }
+    if(wantCounts){
       try {
         const countQueries = [
           { k:'smart_assembly', q:"SELECT COUNT(1) as c FROM smart_assembly" },
@@ -270,10 +282,6 @@ async function handleIndexerHealth(env, url){
         for(const cq of countQueries){
           try { const r = await env.INDEX_DB.prepare(cq.q).all(); counts[cq.k]= r.results?.[0]?.c ?? 0; } catch { counts[cq.k]='err'; }
         }
-        try {
-          const lr = await env.INDEX_DB.prepare("SELECT id, mode, run_started_at, run_finished_at, run_duration_ms, assemblies_scanned, rows_added, rows_updated, rows_removed, gate_edges_rebuilt, error_count, last_progress_at, rows_so_far, stall_restarts, seg_requests_so_far, batch_flushes, adaptive_batch_current, attempted_logs FROM indexer_run ORDER BY id DESC LIMIT 1").all();
-          lastRun = lr.results?.[0] || null;
-        } catch { /* ignore */ }
       } catch { /* swallow */ }
     }
   // Cursor snapshot + ingestion lag
@@ -286,9 +294,9 @@ async function handleIndexerHealth(env, url){
         if(!isNaN(updatedTs)) ingestionLagMs = Date.now() - updatedTs;
       }
     } catch { /* ignore */ }
-    // Pending changes probe with 5s cache keyed by fromBlock
+    // Pending changes probe with 5s cache keyed by fromBlock (disabled by default)
     let pendingChanges=null;
-    if(cursor){
+    if(wantProbe && cursor){
       const fromBlock = (cursor.last_block_number||0)+1;
       const now = Date.now();
       if(_pendingProbeCache.value && now - _pendingProbeCache.ts < 5000 && _pendingProbeCache.fromBlock === fromBlock){
@@ -336,6 +344,7 @@ async function handleIndexerHealth(env, url){
     _pendingProbeStats.lastMs = Date.now() - t0;
       }
     }
+  // Decoded cursor fields removed (rollback of decode UI/analysis phase)
   const includeProbeStats = url.searchParams.get('probeStats')==='1';
   // DB metrics helper (page_count/page_size + raw_logs stats)
   async function dbMetrics(db){
@@ -365,11 +374,22 @@ async function handleIndexerHealth(env, url){
       } catch { /* ignore */ }
     }
     if(page_count>0 && page_size>0){ approx_size_bytes = page_count * page_size; size_method='pragma_pages'; }
+    // Raw logs metadata: light by default (no COUNT(*)); use sqlite_sequence for approx row count
     let raw_logs = null;
     try {
-      const rl = await db.prepare('SELECT MIN(block_number) AS min_block, MAX(block_number) AS max_block, COUNT(1) AS count FROM raw_logs').all();
-      const r0 = (rl.results||[])[0] || {};
-      raw_logs = { count: Number(r0.count||0), min_block: r0.min_block ?? null, max_block: r0.max_block ?? null };
+      let approx_count = null;
+      try {
+        const seq = await db.prepare("SELECT seq FROM sqlite_sequence WHERE name='raw_logs'").all();
+        const v = Number(seq.results?.[0]?.seq || 0);
+        if(isFinite(v) && v>0) approx_count = v;
+      } catch { /* ignore */ }
+      let min_block = null, max_block = null;
+      try {
+        const mm = await db.prepare('SELECT MIN(block_number) AS min_block, MAX(block_number) AS max_block FROM raw_logs').all();
+        const r0 = (mm.results||[])[0] || {};
+        min_block = r0.min_block ?? null; max_block = r0.max_block ?? null;
+      } catch { /* ignore if table absent */ }
+      raw_logs = { approx_count, min_block, max_block };
     } catch { /* table may not exist */ }
     // Optional dbstat fallback for size if still missing (may be unavailable on D1)
     if(!(approx_size_bytes>0)){
@@ -387,17 +407,19 @@ async function handleIndexerHealth(env, url){
   }
   // Collect metrics for primary and archives if bound
   let db = { primary: null, a1: null, a2: null };
-  try { db.primary = await dbMetrics(env.INDEX_DB); } catch { db.primary = null; }
-  try { if(env.INDEX_DB_A1) db.a1 = await dbMetrics(env.INDEX_DB_A1); } catch { db.a1 = null; }
-  try { if(env.INDEX_DB_A2) db.a2 = await dbMetrics(env.INDEX_DB_A2); } catch { db.a2 = null; }
+  if(wantDb){
+    try { db.primary = await dbMetrics(env.INDEX_DB); } catch { db.primary = null; }
+    try { if(env.INDEX_DB_A1) db.a1 = await dbMetrics(env.INDEX_DB_A1); } catch { db.a1 = null; }
+    try { if(env.INDEX_DB_A2) db.a2 = await dbMetrics(env.INDEX_DB_A2); } catch { db.a2 = null; }
+  }
   // Archiver summary (fill pct relative to 10GB soft cap)
   const capBytes = 10 * 1024 * 1024 * 1024;
-  const archiver = {
-    primaryCount: db.primary?.raw_logs?.count ?? null,
-    archivedCount: (db.a1?.raw_logs?.count||0) + (db.a2?.raw_logs?.count||0),
+  const archiver = wantDb ? {
+    primaryCount: (db.primary?.raw_logs?.count ?? db.primary?.raw_logs?.approx_count) ?? null,
+    archivedCount: ((db.a1?.raw_logs?.count ?? db.a1?.raw_logs?.approx_count) || 0) + ((db.a2?.raw_logs?.count ?? db.a2?.raw_logs?.approx_count) || 0),
     a1FillPct_10g: db.a1?.approx_size_bytes!=null? Math.round((db.a1.approx_size_bytes/capBytes)*1000)/10 : null,
     a2FillPct_10g: db.a2?.approx_size_bytes!=null? Math.round((db.a2.approx_size_bytes/capBytes)*1000)/10 : null
-  };
+  } : null;
   // Snapshot advisory (no side effects). Compute only when classification performed.
   let snapshotRecommended=false; let snapshotReason=null; let changeSummary=null;
   if(pendingChanges && pendingChanges.classified){
@@ -413,8 +435,10 @@ async function handleIndexerHealth(env, url){
   let hasAdminToken = !!(env.INDEXER_ADMIN_TOKEN && env.INDEXER_ADMIN_TOKEN.trim().length);
   let migrationsApplied = null;
   try {
-    const migProbe = await env.INDEX_DB.prepare("SELECT id FROM _migrations ORDER BY id").all();
-    migrationsApplied = (migProbe.results||[]).map(r=>r.id);
+    if(qp.get('migrations')==='1'){
+      const migProbe = await env.INDEX_DB.prepare("SELECT id FROM _migrations ORDER BY id").all();
+      migrationsApplied = (migProbe.results||[]).map(r=>r.id);
+    }
   } catch { /* ignore if table absent */ }
   // Derived active run timing metrics (if lastRun still active)
   let activeRunAgeMs=null, lastProgressAgoMs=null;
@@ -464,7 +488,7 @@ async function handleIndexerMigrate(req, env){
   if(!authDisabled && !tokenValid && !bypassAuth) return json({ error:'Unauthorized' },401);
   if(!env.INDEX_DB) return json({ error:'INDEX_DB binding missing' },500);
   await env.INDEX_DB.exec("CREATE TABLE IF NOT EXISTS _migrations (id TEXT PRIMARY KEY, applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)");
-  const migrationList = ['001_init','002_enrichment','003_cursor','004_run_duration','005_overlay','006_store_registry','007_raw_logs','008_progress','009_run_metrics','010_raw_logs_shadow','011_decode_schema','012_latest_state','013_gap_scan_results','014_decode_bootstrap','015_run_attempted'];
+  const migrationList = ['001_init','002_enrichment','003_cursor','004_run_duration','005_overlay','006_store_registry','007_raw_logs','008_progress','009_run_metrics','010_raw_logs_shadow','011_decode_schema','012_latest_state','013_gap_scan_results','014_decode_bootstrap','015_run_attempted','016_store_events_unique'];
   
   // (Table allowlist constants defined globally for shared use.)
   const appliedRes = await env.INDEX_DB.prepare("SELECT id FROM _migrations").all();
@@ -872,7 +896,7 @@ async function handleIndexerIngest(req, env){
       await flush();
       // Persist live metrics (seg_requests_so_far, batch_flushes, adaptive_batch_current) mid-run best-effort
   if(runId){ try { await env.INDEX_DB.prepare("UPDATE indexer_run SET seg_requests_so_far=?, batch_flushes=?, adaptive_batch_current=?, attempted_logs=COALESCE(?,attempted_logs) WHERE id=?").bind(segRequests, batchFlushes, adaptiveBatch, attempted, runId).run(); } catch {/* ignore */} }
-      // Duplicate-only segment handling: if we attempted logs and inserted none, probe coverage.
+  // Duplicate-only segment handling: if we attempted logs and inserted none, probe coverage.
       if(attempted>0 && actualInserted===0 && writeLegacy){
         let coverageCount=null; let coverageOk=false; let probeErr=null;
         try {
@@ -896,15 +920,25 @@ async function handleIndexerIngest(req, env){
         await finalizeRun(0, segRequests, batchFlushes, adaptiveBatch, 'store_all batch_insert_failed shrinks:'+batchShrinks+' errs:'+insertErrors.length+' cov:'+(coverageCount??'null')+' probeErr:'+(probeErr||'')+' firstErr:'+(insertErrors[0]||''));
         return json({ status:'batch_insert_failed', retry:true, cursor, range:{ from:Number(startBlock), to:Number(toBlock) }, inserted, actualInserted, attempted, adaptiveBatch, batchShrinks, batchFlushes, coverageCount, probeErr, insertErrorCount: insertErrors.length, firstInsertError: insertErrors[0]||null, uniqueTopics: Array.from(uniqueTopics), topicCount: uniqueTopics.size, rowCapApplied: rowCap, bypassAuth, segRequests, segmentsProcessed, truncated, segmentBlocksRequested: segmentBlocks||0, rpcFailures: globalThis.__rpcFailures||0, segmentRetries: globalThis.__segmentRetries||0 });
       }
+      // If we reached here and no rows were inserted, but we did scan segments (segRequests>0),
+      // advance the cursor anyway to avoid reprocessing the same window when allowlist filtered out all logs.
+      let __autoAdvanceNoInserts = false;
       if(!reindexMode){
         const advanceTo = (inserted < rowCap) ? Number(toBlock) : (lastBlock!==null? lastBlock: Number(toBlock));
         if(inserted>0){
           await env.INDEX_DB.prepare("UPDATE event_cursor SET last_block_number=?, updated_at=CURRENT_TIMESTAMP WHERE id=1").bind(advanceTo).run();
           const c2 = await env.INDEX_DB.prepare("SELECT id, last_block_number, last_log_index, updated_at FROM event_cursor WHERE id=1").all();
           cursor = c2.results?.[0] || cursor;
+        } else if(segRequests>0) {
+          try {
+            await env.INDEX_DB.prepare("UPDATE event_cursor SET last_block_number=?, updated_at=CURRENT_TIMESTAMP WHERE id=1").bind(Number(toBlock)).run();
+            const c2 = await env.INDEX_DB.prepare("SELECT id, last_block_number, last_log_index, updated_at FROM event_cursor WHERE id=1").all();
+            cursor = c2.results?.[0] || cursor;
+            __autoAdvanceNoInserts = true;
+          } catch { /* best-effort */ }
         }
       }
-    await finalizeRun(inserted, segRequests, batchFlushes, adaptiveBatch, 'store_all raw '+inserted+' batches:'+batchFlushes+' shrinks:'+batchShrinks+' segReq:'+segRequests);
+  await finalizeRun(inserted, segRequests, batchFlushes, adaptiveBatch, 'store_all raw '+inserted+' batches:'+batchFlushes+' shrinks:'+batchShrinks+' segReq:'+segRequests + (__autoAdvanceNoInserts? ' advance_noinserts':''));
   return json({ status:'ok', mode:'store_all', cursor, range:{ from:Number(startBlock), to:Number(toBlock) }, inserted, actualInserted, attempted, adaptiveBatchInitial:REQUESTED_BATCH, adaptiveBatchFinal:adaptiveBatch, batchShrinks, batchFlushes, insertErrorCount: insertErrors.length, firstInsertError: insertErrors[0]||null, uniqueTopics: Array.from(uniqueTopics), topicCount: uniqueTopics.size, rowCapApplied: rowCap, blocks:{ first:firstBlock, last:lastBlock }, bypassAuth, segRequests, segmentsProcessed, truncated, segmentBlocksRequested: segmentBlocks||0, reindexMode, dualRaw, rpcFailures: globalThis.__rpcFailures||0, segmentRetries: globalThis.__segmentRetries||0, skippedAllowlist: globalThis.__skippedAllowlist||0, allowlistEnabled: env.INDEXER_TABLE_ALLOWLIST === '1' });
     } catch(e){
       // Attempt to finalize with whatever progress we tracked (heartbeat may have updated rows_so_far already)
@@ -1002,11 +1036,11 @@ async function handleIndexerTrigger(req, env){
   if(!authDisabled && expected && token?.trim() !== expected && !bypassAuth) return json({ error:'Unauthorized' },401);
   // Detect in-progress run (no finished_at yet) to avoid overlapping heavy RPC bursts.
   try {
-    const active = await env.INDEX_DB.prepare("SELECT id, mode, run_started_at FROM indexer_run WHERE run_finished_at IS NULL ORDER BY id DESC LIMIT 1").all();
+  const active = await env.INDEX_DB.prepare("SELECT id, mode, run_started_at FROM indexer_run WHERE run_finished_at IS NULL ORDER BY id DESC LIMIT 1").all();
     const running = active.results?.[0] || null;
   if(running){
       // Extended watchdog: consider progress heartbeat (last_progress_at) if column exists
-      let lastProgressTs=null;
+  let lastProgressTs=null;
       try {
         const lp = await env.INDEX_DB.prepare("SELECT last_progress_at FROM indexer_run WHERE id=?").bind(running.id).all();
         lastProgressTs = lp.results?.[0]?.last_progress_at || null;
@@ -1020,10 +1054,13 @@ async function handleIndexerTrigger(req, env){
         let noProgress=false;
         if(lastProgressTs){
           const lpDate = new Date(lastProgressTs + (lastProgressTs.endsWith('Z')?'':'Z'));
-            if(!isNaN(lpDate.getTime())){
-              const since = Date.now() - lpDate.getTime();
-              if(since > NO_PROGRESS_MS) noProgress=true;
-            }
+          if(!isNaN(lpDate.getTime())){
+            const since = Date.now() - lpDate.getTime();
+            if(since > NO_PROGRESS_MS) noProgress=true;
+          }
+        } else {
+          // If no heartbeat was ever recorded, treat as no-progress once age exceeds threshold.
+          if(!isNaN(ageMs) && ageMs > NO_PROGRESS_MS) noProgress = true;
         }
         if(!isNaN(ageMs) && ageMs > STALE_MS){
           await env.INDEX_DB.prepare("UPDATE indexer_run SET run_finished_at=CURRENT_TIMESTAMP, run_duration_ms=COALESCE(run_duration_ms, ?) , notes=COALESCE(notes,'auto-finalized_stale') WHERE id=?")
@@ -1350,9 +1387,81 @@ async function handleIndexerGapReport(req, env){
 export default {
   async fetch(req, env, ctx){
     const url = new URL(req.url); const p = url.pathname;
+    const PAUSED = env.PAUSE_DB === '1';
+    // Fast-path pause: block indexer endpoints and stats/usage to avoid D1/KV reads/writes
+    if(PAUSED){
+      // No-op usage writes to KV
+      if(p === '/api/usage-event') return new Response(null,{ status:204 });
+      // Synthetic stats responses without KV reads
+      if(p === '/api/stats'){
+        const now = new Date().toISOString();
+        return json({ current: { version: SCHEMA_VERSION, updatedAt: now, counters:{}, sums:{}, paused:true }, history: [], paused:true });
+      }
+      if(p === '/api/list-stats' || p === '/api/debug-kv'){
+        return json({ paused:true, message:'stats paused' });
+      }
+      // Indexer endpoints fully paused (no D1 access)
+      const pausedIndexer = [
+        '/api/indexer-health','/api/indexer-runs','/api/indexer-migrate','/api/indexer-bootstrap','/api/indexer-ingest','/api/indexer-trigger','/api/indexer-env','/api/indexer-reset','/api/indexer-secret-debug','/api/indexer-overlay','/api/indexer-rawlogs-range','/api/indexer-gap-report','/api/indexer-topic-map','/api/indexer-topic-map-refresh','/api/indexer-wipe','/api/indexer-rawlogs-archive-chunk'
+      ];
+      if(pausedIndexer.includes(p)){
+        return json({ status:'paused' });
+      }
+      // Shares endpoints remain active; all other routes fall through to assets
+    }
     if(p === '/api/create-share') return handleCreateShare(req, env);
     if(p === '/api/get-share') return handleGetShare(url, env);
     if(p === '/api/usage-event') return handleUsageEvent(req, env);
+    // World API counts (parity with root worker):
+    if(p === '/api/worldapi-stats'){
+      // Read snapshot from EF_STATS KV (key: worldapi/current.json) or fallback to ASSETS scratch file.
+      try {
+        if(!env.EF_STATS && !env.ASSETS){
+          return json({ status:'error', message:'EF_STATS KV not bound and no ASSETS for fallback' },500);
+        }
+        let current=null;
+        if(env.EF_STATS){
+          try {
+            const raw = await env.EF_STATS.get('worldapi/current.json');
+            if(raw) current = JSON.parse(raw);
+          } catch{ /* ignore parse/bind errors */ }
+        }
+        if(!current && env.ASSETS && typeof env.ASSETS.fetch === 'function'){
+          try {
+            const origin = new URL(req.url).origin;
+            const metaResp = await env.ASSETS.fetch(origin + '/scratch/world_api/meta.json');
+            if(metaResp.ok){ current = await metaResp.json(); }
+          } catch{ /* ignore */ }
+        }
+        if(!current) return json({ status:'empty' });
+        const counts = current.counts || {};
+        const totalRows = Object.values(counts).reduce((a,b)=> a + (Number(b)||0), 0);
+        return json({ status:'ok', updatedAt: current.updatedAt||current.timestamp||null, base: current.base||null, counts, totalRows });
+      } catch(e){
+        return json({ status:'error', message:String(e) },500);
+      }
+    }
+    if(p === '/api/worldapi-update'){
+      // Accept POST { counts: {table:number}, base?, updatedAt? } and store into EF_STATS
+      if(req.method !== 'POST') return json({ error:'Method Not Allowed' },405);
+      // Admin token optional on *.pages.dev with openPreview=1; required otherwise
+      const token = req.headers.get('X-Indexer-Admin');
+      const expected = (env.INDEXER_ADMIN_TOKEN||'').trim();
+      const host = req.headers.get('host')||''; const isPreviewHost = host.endsWith('.pages.dev');
+      let bypass=false; try { const u=new URL(req.url); bypass = isPreviewHost && u.searchParams.get('openPreview')==='1' && (!!expected ? token?.trim()!==expected : !token); } catch{}
+      if(expected && token?.trim()!==expected && !bypass) return json({ error:'Unauthorized' },401);
+      if(!env.EF_STATS) return json({ error:'EF_STATS KV not bound' },500);
+      let body={}; try { if(req.headers.get('content-type')?.includes('application/json')) body = await req.json(); } catch { return json({ error:'Invalid JSON' },400); }
+      const counts = body && typeof body==='object' ? body.counts : null;
+      if(!counts || typeof counts!=='object') return json({ error:'Missing counts' },400);
+      const payload = { base: body.base||null, counts, updatedAt: body.updatedAt || new Date().toISOString(), version: 1 };
+      try {
+        await env.EF_STATS.put('worldapi/current.json', JSON.stringify(payload));
+        const day = new Date().toISOString().slice(0,10);
+        await env.EF_STATS.put('worldapi/daily/'+day+'.json', JSON.stringify(payload));
+      } catch(e){ return json({ error:'store_failed', message:String(e) },500); }
+      return json({ status:'stored', bypass });
+    }
   if(p === '/api/stats') return handleStats(url, env);
   if(p === '/api/list-stats') return handleListStats(env);
   if(p === '/api/debug-kv') return handleDebugKV(url, env);
@@ -1472,20 +1581,6 @@ export default {
       return json({ status:'stored', abiHash });
     } catch(e){ return json({ error:'topic_map_store_failed', message:String(e) },500); }
   }
-  if(p === '/api/indexer-decode-batch') {
-    if(req.method !== 'POST') return json({ error:'Method Not Allowed' },405);
-    if(!env.INDEX_DB) return json({ error:'INDEX_DB binding missing' },500);
-    const token = req.headers.get('X-Indexer-Admin');
-    const expected = (env.INDEXER_ADMIN_TOKEN||'').trim();
-    const host = req.headers.get('host')||''; const isPreviewHost = host.endsWith('.pages.dev');
-    const urlObj = new URL(req.url); const bypass = isPreviewHost && urlObj.searchParams.get('openPreview')==='1' && (!expected || token?.trim()!==expected);
-    if(expected && token?.trim()!==expected && !bypass) return json({ error:'Unauthorized' },401);
-    try {
-      const cur = await env.INDEX_DB.prepare("SELECT last_block, last_log_index FROM decoded_cursor WHERE id=1").all();
-      const cursor = cur.results?.[0] || { last_block:0, last_log_index:0 };
-      return json({ status:'noop', decoded:0, cursor });
-    } catch(e){ return json({ error:'decode_batch_failed', message:String(e) },500); }
-  }
   if(p === '/api/indexer-wipe') {
     if(req.method !== 'POST') return json({ error:'Method Not Allowed' },405);
     const token = req.headers.get('X-Indexer-Admin');
@@ -1515,7 +1610,8 @@ export default {
 // with configured window (INDEXER_CRON_MAX_BLOCKS / SEGMENT_BLOCKS / ROW_CAP). Internal call bypasses external auth.
 export async function scheduled(event, env, ctx){
   try {
-    if(env.INDEXER_CRON_ENABLED !== '1') return; // disabled gate
+  if(env.PAUSE_DB === '1') return; // global pause gate
+  if(env.INDEXER_CRON_ENABLED !== '1') return; // disabled gate
     if(!env.INDEX_DB) return; // nothing to do without DB
     // Overlap lock: detect unfinished run
     let active=null;
