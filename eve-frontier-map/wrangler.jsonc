@@ -26,7 +26,6 @@
   // PYROPE_RPC: Public/read RPC endpoint (non-auth); WORLD_ADDRESS: world contract; DEPLOY_BLOCK: deployment block
   // CONFIRM_DEPTH: confirmations to treat head as finalized.
   "vars": {
-    "PYROPE_RPC": "https://rpc.pyropechain.com",
     "WORLD_ADDRESS": "0x7085f3e652987f656fB8dEE5aA6592197Bb75de8",
     "DEPLOY_BLOCK": "7288348",
   "CONFIRM_DEPTH": "8",

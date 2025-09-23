@@ -13,7 +13,6 @@ Older entries and legacy indexer details have been archived: [archive\decision-l
   - EF_STATS → cccc1a708dd74aa8aabd91c8bfc33c3f
   - EF_SNAPSHOTS → 2af7298532dd4acfbda8bf06020981ba
 - Chain / indexer config (Pages vars)
-  - PYROPE_RPC: https://rpc.pyropechain.com
   - WORLD_ADDRESS: 0x7085f3e652987f656fB8dEE5aA6592197Bb75de8
   - DEPLOY_BLOCK: 7288348
   - CONFIRM_DEPTH: 8
