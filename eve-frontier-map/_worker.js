@@ -219,6 +219,90 @@ const EVENT_MAP = new Map(Object.entries({
   cpu_cores_bucket: { countersDynamic: (b)=> { const v=b.bucket; const allowed=['cores_1_2','cores_3_4','cores_5_8','cores_9_12','cores_13_16','cores_17_plus']; return allowed.includes(v)? [v]: []; } }
 }));
 
+// ---- In-worker usage aggregation (feature-flagged) ----
+// Reduce KV write volume by aggregating usage events in-memory per-hour and flushing ~every 15 minutes.
+// Keys written on flush:
+//  - hourly/YYYY-MM-DDTHH.json (coarse buckets for diagnostics/backfill)
+//  - daily/YYYY-MM-DD.json (maintains existing Stats compatibility)
+// Toggle via env.SERVER_AGGREGATE_USAGE === '1'.
+const USAGE_AGG_STATE = {
+  buckets: new Map(), // key: 'YYYY-MM-DDTHH' -> { counters:{}, sums:{}, version, updatedAt }
+  lastFlushTs: 0,
+  flushing: false
+};
+const USAGE_DEFAULT_FLUSH_MS = 15 * 60 * 1000; // 15 minutes
+const USAGE_MAX_BUCKETS_BEFORE_FLUSH = 24; // safety: flush if many distinct hours accumulate
+function usageHourKey(d){
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth()+1).padStart(2,'0');
+  const day = String(d.getUTCDate()).padStart(2,'0');
+  const h = String(d.getUTCHours()).padStart(2,'0');
+  return `${y}-${m}-${day}T${h}`; // e.g., 2025-09-23T14
+}
+function usageDayFromHourKey(hk){ return hk.slice(0,10); }
+function usageEnsureBucket(hourKey){
+  let b = USAGE_AGG_STATE.buckets.get(hourKey);
+  if(!b){ b = { version: SCHEMA_VERSION, updatedAt: new Date().toISOString(), counters:{}, sums:{} }; USAGE_AGG_STATE.buckets.set(hourKey, b); }
+  return b;
+}
+function usageApplySnapshot(dst, src){
+  // Merge counters and sums from src into dst (both shapes like stats snapshots sans date)
+  dst.version = SCHEMA_VERSION;
+  dst.updatedAt = new Date().toISOString();
+  for(const [k,v] of Object.entries(src.counters||{})){
+    const n = Number(v); if(!isFinite(n)) continue; dst.counters[k] = (dst.counters[k]||0) + n;
+  }
+  for(const [k,v] of Object.entries(src.sums||{})){
+    const n = Number(v); if(!isFinite(n)) continue; dst.sums[k] = (dst.sums[k]||0) + n;
+  }
+}
+function usageApplyEventToBucket(hourKey, type, body){
+  const b = usageEnsureBucket(hourKey);
+  applyEvent(b, type, body||{});
+}
+async function usageFlush(env){
+  if(!env.EF_STATS) return { flushed:0, reason:'no_kv' };
+  if(USAGE_AGG_STATE.flushing) return { flushed:0, reason:'already_flushing' };
+  USAGE_AGG_STATE.flushing = true;
+  let flushed=0; const errors=[]; const hourKeys = Array.from(USAGE_AGG_STATE.buckets.keys()).sort();
+  try {
+    for(const hk of hourKeys){
+      const bucket = USAGE_AGG_STATE.buckets.get(hk);
+      if(!bucket) continue;
+      // Write hourly bucket (merge with existing if present)
+      const hourlyKey = `hourly/${hk}.json`;
+      try {
+        const existingText = await env.EF_STATS.get(hourlyKey);
+        if(existingText){
+          try { const ex = JSON.parse(existingText); upgradeSnapshot(ex); usageApplySnapshot(ex, bucket); await env.EF_STATS.put(hourlyKey, JSON.stringify(ex)); }
+          catch{ await env.EF_STATS.put(hourlyKey, JSON.stringify(bucket)); }
+        } else {
+          await env.EF_STATS.put(hourlyKey, JSON.stringify(bucket));
+        }
+      } catch(e){ errors.push(`hourly:${hk}:${String(e).slice(0,80)}`); }
+      // Also update daily aggregate so Stats UI continues to work without code changes
+      const day = usageDayFromHourKey(hk);
+      const dailyKey = `daily/${day}.json`;
+      try {
+        const existingDaily = await env.EF_STATS.get(dailyKey);
+        if(existingDaily){
+          try {
+            const ex = JSON.parse(existingDaily); upgradeSnapshot(ex); usageApplySnapshot(ex, bucket); await env.EF_STATS.put(dailyKey, JSON.stringify(ex));
+          } catch { await env.EF_STATS.put(dailyKey, JSON.stringify({ version:SCHEMA_VERSION, updatedAt:new Date().toISOString(), counters:{...bucket.counters}, sums:{...bucket.sums}, date: day })); }
+        } else {
+          await env.EF_STATS.put(dailyKey, JSON.stringify({ version:SCHEMA_VERSION, updatedAt:new Date().toISOString(), counters:{...bucket.counters}, sums:{...bucket.sums}, date: day }));
+        }
+      } catch(e){ errors.push(`daily:${day}:${String(e).slice(0,80)}`); }
+      flushed++;
+    }
+  } finally {
+    USAGE_AGG_STATE.buckets.clear();
+    USAGE_AGG_STATE.lastFlushTs = Date.now();
+    USAGE_AGG_STATE.flushing = false;
+  }
+  return { flushed, errors };
+}
+
 // ---- Auth helpers (SIWE-lite with HMAC; 7-day sliding window) ----
 const SESSION_COOKIE = 'EFSESS';
 const SLIDING_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
@@ -1568,12 +1652,31 @@ function applyEvent(snapshot, type, body){
   if(def.sum){ const v = Number(body?.[def.sum.valueField]); if(isFinite(v) && v>=0){ snapshot.sums[def.sum.key] = (snapshot.sums[def.sum.key]||0)+v; snapshot.sums[def.sum.countKey] = (snapshot.sums[def.sum.countKey]||0)+1; } }
   return true;
 }
-async function handleUsageEvent(req, env){
+async function handleUsageEvent(req, env, ctx){
   if(req.method !== 'POST') return new Response('Method Not Allowed',{ status:405 });
   let body={}; try { body = req.headers.get('content-type')?.includes('application/json') ? await req.json():{}; } catch { return new Response('Invalid JSON',{ status:400 }); }
   // Batch support: accept { events:[{ type, body? }, ...] } or single { type, ... }
   const events = Array.isArray(body?.events) ? body.events : (body && typeof body.type==='string' ? [{ type: body.type, body }] : []);
   if(!events.length) return new Response('Missing events',{ status:400 });
+  // Feature-flagged in-worker aggregation path
+  if(env.SERVER_AGGREGATE_USAGE === '1'){
+    const now = new Date();
+    const hk = usageHourKey(now);
+    let applied=false;
+    for(const ev of events){
+      if(!ev || typeof ev.type !== 'string') continue;
+      if(!EVENT_MAP.has(ev.type)) continue;
+      usageApplyEventToBucket(hk, ev.type, ev.body||{});
+      applied=true;
+    }
+    // Schedule periodic flush using waitUntil to avoid blocking response
+    if(applied && ctx){
+      const due = (Date.now() - (USAGE_AGG_STATE.lastFlushTs||0)) >= (parseInt(env.USAGE_FLUSH_INTERVAL_MS||'0',10) || USAGE_DEFAULT_FLUSH_MS);
+      const tooMany = USAGE_AGG_STATE.buckets.size >= USAGE_MAX_BUCKETS_BEFORE_FLUSH;
+      if(due || tooMany){ ctx.waitUntil(usageFlush(env)); }
+    }
+    return new Response(null,{ status:204 });
+  }
   const day = new Date().toISOString().slice(0,10); const dailyKey = 'daily/'+day+'.json';
   const daily = await loadSnapshot(env.EF_STATS,dailyKey); upgradeSnapshot(daily);
   let applied=false;
@@ -1883,7 +1986,17 @@ export default {
     }
     if(p === '/api/create-share') return handleCreateShare(req, env);
     if(p === '/api/get-share') return handleGetShare(url, env);
-    if(p === '/api/usage-event') return handleUsageEvent(req, env);
+    if(p === '/api/usage-event') return handleUsageEvent(req, env, ctx);
+    if(p === '/api/usage-flush'){
+      const host = req.headers.get('host')||'';
+      const isPreviewHost = host.endsWith('.pages.dev');
+      if(env.SERVER_AGGREGATE_USAGE === '1' && isPreviewHost){
+        // Force flush synchronously for testing
+        const res = await usageFlush(env);
+        return json({ status:'flushed', ...res });
+      }
+      return json({ status:'disabled' }, 403);
+    }
     // Lightweight data exposure endpoints (snapshots)
     if(p === '/api/smart-gate-links'){
       const forceBypass = url.searchParams.get('force') === '1';

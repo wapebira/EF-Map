@@ -66,6 +66,10 @@ Older entries and legacy indexer details have been archived: [archive\decision-l
 - Preview URLs
   - Pattern: `https://<branch-or-alias>.ef-map.pages.dev` (project `ef-map`).
 
+## 2025-09-23 – Production deploy (ef-map): Smart Gates live
+- Goal: Deploy Smart Gates feature set (routing modes none/public/authorized, directional links, origin-side itemId hyperlinks, visuals parity, UI polish) to production after merging to `main`.
+- Risk: low (config fix only; worker/app behavior unchanged aside from binding resolution).
+- Gates: typecheck ✅ | build ✅ | deploy ✅ | smoke ✅
 ## 2025-09-23 – Context menu: View on Datacore
 - Goal: Add a right-click context menu action on systems to open the external Datacore page in a new tab using the numeric solarsystem ID.
 - Risk: low (external link only; no state changes).
