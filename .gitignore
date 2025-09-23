@@ -32,6 +32,12 @@ tmp_*.json
 tmp_*.txt
 eve-frontier-map/tmp_*.json
 
+# Portable Node runtime (large binaries; keep out of Git)
+tools/node-portable/
+
+# Safety: if we flatten a nested git repo, we may temporarily back up its .git dir
+eve-frontier-map/.git_nested_backup/
+
 # Accidental nested copy
 eve-frontier-map/eve-frontier-map/
 
