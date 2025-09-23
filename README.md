@@ -40,6 +40,7 @@ This repo focuses on *transforming* + *serving* that data and implementing inter
 ## 2. Feature Highlights
 * Fast point‑to‑point routing (A* or Dijkstra) with waypoint chaining & optional order heuristic.
 * Ship jump vs. stargate hop visual differentiation (dashed inner core on ship arcs).
+* Smart Gates: routing modes (none / public / authorized), directional public edges, live‑link filtering, and origin‑side in‑game showinfo hyperlinks in route notes; SG hops rendered with chevrons.
 * Scout baseline & multi‑worker optimization with savings metrics (lightyears saved & distributions).
 * Reachability analysis: unreachable dimming, in‑range highlighting, animated range bubble with camera framing.
 * Stargate selection gradient shader (accent fade ~2/3 length) with precedence rules (region highlight > selection > unreachable override).
@@ -47,6 +48,7 @@ This repo focuses on *transforming* + *serving* that data and implementing inter
 * Station overlay (optional) with intelligent scaling, focus hysteresis & depth‑correct sprites.
 * Rich anonymous usage statistics & trend charts (activation funnel, share/copy rates, optimization impact, distributions).
 * Share links (compressed route state) via short IDs stored in serverless key‑value blob storage.
+* Context menu shortcut: open selected system on evedataco.re for quick external lookups.
 * Theme accent variants (orange / blue) – all shaders normalize brightness to keep visual balance.
 
 ## 3. Architecture
