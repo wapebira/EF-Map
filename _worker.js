@@ -1,5 +1,4 @@
-// (Moved from worker.js) Cloudflare Pages Edge Worker – Full stats + shares + short URLs
-// See decision log 2025-09-07 entry for details.
+// Cloudflare Pages Edge Worker – thin re-export of root worker to avoid code drift
+// See decision log 2025-09-07 for consolidation rationale.
 export * from './worker.js';
-import mod from './worker.js';
-export default mod;
+export { default } from './worker.js';

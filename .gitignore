@@ -55,3 +55,6 @@ eve-frontier-map/public/data/index-latest/*.json
 
 # Local DuckDB files created by smoke tests
 **/*.duckdb
+
+# Cloudflare exporter local env (contains secrets; do not commit)
+tools/worldapi-cron/.env*

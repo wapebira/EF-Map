@@ -741,7 +741,7 @@ function startIngestDetached(){
         env.CHAIN_ID = env.CHAIN_ID || '695569';
         env.WORLD_ADDRESS = env.WORLD_ADDRESS && !/^true$/i.test(String(env.WORLD_ADDRESS)) ? env.WORLD_ADDRESS : '0x7085f3e652987f656fB8dEE5aA6592197Bb75de8';
         env.FROM_BLOCK = env.FROM_BLOCK || '7288348';
-        env.CONFIRM_DEPTH = env.CONFIRM_DEPTH || '8';
+  env.CONFIRM_DEPTH = env.CONFIRM_DEPTH || '6';
         env.WINDOW_BLOCKS = env.WINDOW_BLOCKS || '20000';
         env.SEGMENT_BLOCKS = env.SEGMENT_BLOCKS || '1200';
         return env;

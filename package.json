@@ -2,6 +2,10 @@
   "name": "ef-map-root",
   "private": true,
   "scripts": {
+  "kv:fresh": "node tools/snapshot-exporter/check_kv_freshness.js --namespace-id %EF_SNAPSHOTS_NAMESPACE_ID% --remote",
+    "kv:watch": "node tools/snapshot-exporter/check_kv_freshness.js --namespace-id %EF_SNAPSHOTS_NAMESPACE_ID% --remote --threshold 7 --watch 120",
+    "docs:curate": "node tools/docs/curate_decision_log.js --compact --strict",
+    "hooks:install": "node tools/hooks/install_precommit.js",
     "migrate:netlify-to-cf": "node tools/migrate_netlify_to_cf.js",
     "compare:stats": "node tools/compare_stats.js",
     "local:ingest": "node tools/local-indexer/ingest_raw.js",
@@ -52,12 +56,22 @@
     "pg": "^8.16.3",
     "qrcode": "^1.5.4",
     "sql.js": "^1.13.0",
-    "viem": "^2.21.15"
+    "viem": "^2.21.15",
+    "wrangler": "^4.38.0"
   },
   "devDependencies": {
     "@types/sql.js": "^1.4.9",
     "js-sha3": "^0.9.3",
     "node-fetch": "^3.3.2"
   },
-  "packageManager": "pnpm@8.15.9+sha512.499434c9d8fdd1a2794ebf4552b3b25c0a633abcee5bb15e7b5de90f32f47b513aca98cd5cfd001c31f0db454bc3804edccd578501e4ca293a6816166bbd9f81"
+  "packageManager": "pnpm@8.15.9+sha512.499434c9d8fdd1a2794ebf4552b3b25c0a633abcee5bb15e7b5de90f32f47b513aca98cd5cfd001c31f0db454bc3804edccd578501e4ca293a6816166bbd9f81",
+  "version": "1.0.0",
+  "description": "<div align=\"center\">\r     <h1>EVE Frontier Interactive Map</h1>\r     <p><strong>Client‑side 3D starmap, routing & optimization tools, reachability analysis and usage stats for EVE Frontier.</strong></p>\r     <sub>React + TypeScript + Vite • Three.js custom shaders • Web Workers • Cloudflare Pages + Worker (KV + optional D1) • Zero PII instrumentation</sub>\r </div>",
+  "main": "archiver_worker.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
 }

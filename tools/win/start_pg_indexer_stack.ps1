@@ -3,7 +3,15 @@ param(
   [string]$RpcHttpUrl,
   [int]$ChainId,
   [string]$WorldAddress,
-  [long]$StartBlock
+  [long]$StartBlock,
+  # Tuning knobs supported by Primodium store-indexer writer (via env)
+  # FOLLOW_BLOCK_TAG: one of 'latest' | 'safe' | 'finalized'
+  [ValidateSet('latest','safe','finalized')]
+  [string]$FollowBlockTag,
+  # POLLING_INTERVAL in milliseconds (controls viem public client polling)
+  [int]$PollingIntervalMs,
+  # MAX_BLOCK_RANGE for batch fetches (number of blocks per request)
+  [int]$MaxBlockRange
 )
 $ErrorActionPreference = 'Stop'
 
@@ -21,6 +29,9 @@ try {
   if ($ChainId)    { $envLines += ('      CHAIN_ID: "' + $ChainId + '"') }
   if ($WorldAddress){ $envLines += ('      WORLD_ADDRESS: "' + $WorldAddress + '"') }
   if ($StartBlock) { $envLines += ('      START_BLOCK: "' + $StartBlock + '"') }
+  if ($FollowBlockTag) { $envLines += ('      FOLLOW_BLOCK_TAG: "' + $FollowBlockTag + '"') }
+  if ($PollingIntervalMs) { $envLines += ('      POLLING_INTERVAL: "' + $PollingIntervalMs + '"') }
+  if ($MaxBlockRange) { $envLines += ('      MAX_BLOCK_RANGE: "' + $MaxBlockRange + '"') }
 
   $overridePath = Join-Path $RepoDir "docker-compose.override.local.yml"
   # Build YAML for restart policies always; include environment only when env lines provided

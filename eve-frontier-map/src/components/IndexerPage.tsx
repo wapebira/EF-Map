@@ -20,11 +20,21 @@ interface RunsResp {
 
 const fmt = (d?:string)=>{ if(!d) return '-'; try { return new Date(d.replace(' ','T')+'Z').toLocaleString(); } catch { return d; } };
 const ms = (n?:number|null)=> (n==null||!isFinite(n))?'-': n.toLocaleString();
+const ageText = (iso?:string|null)=>{
+  if(!iso) return '—';
+  let t=NaN; try { t = Date.parse(iso.endsWith('Z')? iso : (iso+'Z')); } catch { t = NaN; }
+  if(!isFinite(t)) return '—';
+  const ageMs = Date.now() - t;
+  if(ageMs < 60_000) return Math.max(0, Math.round(ageMs/1000))+'s ago';
+  const m = Math.round(ageMs/60000);
+  return m+'m ago';
+};
 
 const IndexerPage: React.FC = () => {
   const [health, setHealth] = useState<Health|null>(null);
   const [runs, setRuns] = useState<RunsResp|null>(null);
   const [loading, setLoading] = useState(false);
+  const [snapshots, setSnapshots] = useState<{ links?: { updatedAt?: string|null; count?: number|null }|null, acl?: { updatedAt?: string|null; count?: number|null }|null } | null>(null);
   // counts load is background-only; no UI spinner to keep header clean
   const [dbLoading, setDbLoading] = useState(false);
   const [dbLoaded, setDbLoaded] = useState(false);
@@ -42,6 +52,11 @@ const IndexerPage: React.FC = () => {
         const hc = await fetch(`/api/indexer-health?counts=1${isPreview?'&openPreview=1':''}`).then(r=> r.json());
         setHealth(prev => ({...(prev||{}), counts: hc.counts } as any));
       } catch { /* ignore counts fetch */ }
+      // Snapshots freshness (Smart Gates)
+      try {
+        const sj = await fetch('/api/debug-snapshots').then(r=> r.json());
+        setSnapshots({ links: sj?.links || null, acl: sj?.acl || null });
+      } catch { /* ignore */ }
       // Runs list (cheap)
       const rj = await fetch(`/api/indexer-runs${qp}`).then(r=> r.json());
       setRuns(rj);
@@ -162,6 +177,13 @@ const IndexerPage: React.FC = () => {
           <div style={cardStyle}>
             <h3 style={cardTitle}>Store Events</h3>
             <div>{health.counts? ms(Number(health.counts?.store_events||0)) : '-'}</div>
+          </div>
+          <div style={cardStyle}>
+            <h3 style={cardTitle}>Smart Gates Snapshots</h3>
+            <div style={{fontFamily:'monospace', fontSize:12, lineHeight:1.5}}>
+              <div>Links: {snapshots?.links?.count ?? '-'} <span style={subtle}>updated {ageText(snapshots?.links?.updatedAt)}</span></div>
+              <div>ACL: {snapshots?.acl?.count ?? '-'} <span style={subtle}>updated {ageText(snapshots?.acl?.updatedAt)}</span></div>
+            </div>
           </div>
         </div>
       )}

@@ -14,6 +14,7 @@ Useful entry points:
 - Cloudflare migration status & plan: `docs/archive/migration/MIGRATION_PLAN.md`, `docs/archive/migration/migration_status.json`
 - Frontend root: `eve-frontier-map/` (see `src/App.tsx`, `src/utils/usage.ts`)
 - Cloudflare Worker (API, KV, routing): `_worker.js` (+ any sibling worker files)
+ - Data Exposure Plan (current initiative): `docs/initiatives/DATA_EXPOSURE_PLAN.md`
 
 ## Agent operating rules (must follow)
 1) Prefer smallest safe change; don’t refactor broadly without explicit approval.
@@ -23,6 +24,7 @@ Useful entry points:
 5) Workers & heavy compute: Keep algorithms in web workers; throttle progress ≤5Hz; respect cache invalidation rules in routing.
 6) Sensitive edits: Treat worker files (`*_worker.js`, `_worker.js`) and production config as sensitive; ask before structural changes.
 7) Database access: Use the VS Code Postgres extension (configured for the local Docker Postgres) for schema inspection and routine queries. Prefer this path over PowerShell `docker exec` to avoid nested quoting issues.
+8) Preview-only rule: Any website/Worker/API changes must be tested via Cloudflare Pages Preview deployments first; do not modify production (main) unless explicitly approved.
 
 ## Fast context to load on start
 - Read `.github/copilot-instructions.md` (source of truth for patterns & guardrails)

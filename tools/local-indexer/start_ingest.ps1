@@ -11,7 +11,7 @@ if (-not $env:HISTORY_PATH  -or $env:HISTORY_PATH  -eq 'True' -or $env:HISTORY_P
 if (-not $env:CONTROL_PATH  -or $env:CONTROL_PATH  -eq 'True' -or $env:CONTROL_PATH  -eq 'true')  { $env:CONTROL_PATH   = 'c:\EF-Map-main\data\local-indexer-control.json' }
 if (-not $env:PID_PATH      -or $env:PID_PATH      -eq 'True' -or $env:PID_PATH      -eq 'true')  { $env:PID_PATH       = 'c:\EF-Map-main\data\local-indexer-ingest.pid' }
 if (-not $env:FROM_BLOCK)     { $env:FROM_BLOCK     = '7288348' }
-if (-not $env:CONFIRM_DEPTH)  { $env:CONFIRM_DEPTH  = '8' }
+if (-not $env:CONFIRM_DEPTH)  { $env:CONFIRM_DEPTH  = '6' }
 if (-not $env:WINDOW_BLOCKS)  { $env:WINDOW_BLOCKS  = '20000' }
 if (-not $env:SEGMENT_BLOCKS) { $env:SEGMENT_BLOCKS = '1200' }
 if (-not $env:DB_ENGINE -or $env:DB_ENGINE -eq 'True' -or $env:DB_ENGINE -eq 'true') { $env:DB_ENGINE = 'better-sqlite3' }

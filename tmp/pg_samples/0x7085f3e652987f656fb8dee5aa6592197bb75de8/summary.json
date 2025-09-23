@@ -1,0 +1,809 @@
+﻿{
+    "schema":  "0x7085f3e652987f656fb8dee5aa6592197bb75de8",
+    "container":  "pg-indexer-reader-postgres-1",
+    "outputDir":  "C:\\EF-Map-main\\tmp\\pg_samples\\0x7085f3e652987f656fb8dee5aa6592197bb75de8",
+    "exported":  133,
+    "failed":  0,
+    "total":  133,
+    "generatedAt":  "2025-09-19T18:30:25",
+    "items":  [
+                  {
+                      "status":  "ok",
+                      "table":  "algo_gates__command",
+                      "rows":  10,
+                      "file":  "algo_gates__command.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "algo_gates__config",
+                      "rows":  10,
+                      "file":  "algo_gates__config.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "algo_net__access",
+                      "rows":  10,
+                      "file":  "algo_net__access.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "algo_net__algorithms",
+                      "rows":  10,
+                      "file":  "algo_net__algorithms.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "algo_net__config",
+                      "rows":  10,
+                      "file":  "algo_net__config.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "algo_net__delegation",
+                      "rows":  10,
+                      "file":  "algo_net__delegation.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "algo_net__management",
+                      "rows":  10,
+                      "file":  "algo_net__management.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "algo_storage__command",
+                      "rows":  10,
+                      "file":  "algo_storage__command.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "algo_storage__config",
+                      "rows":  10,
+                      "file":  "algo_storage__config.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "algo_storage__systems",
+                      "rows":  10,
+                      "file":  "algo_storage__systems.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "algo_turrets__command",
+                      "rows":  10,
+                      "file":  "algo_turrets__command.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "algo_turrets__config",
+                      "rows":  10,
+                      "file":  "algo_turrets__config.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "altria__gate_access",
+                      "rows":  10,
+                      "file":  "altria__gate_access.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "altria_g1_k__gate_access",
+                      "rows":  10,
+                      "file":  "altria_g1_k__gate_access.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "aw__global_character_b",
+                      "rows":  10,
+                      "file":  "aw__global_character_b.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "aw__global_character_w",
+                      "rows":  10,
+                      "file":  "aw__global_character_w.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "aw__global_moderators",
+                      "rows":  10,
+                      "file":  "aw__global_moderators.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "aw__global_tribe_black",
+                      "rows":  10,
+                      "file":  "aw__global_tribe_black.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "aw__global_tribe_white",
+                      "rows":  10,
+                      "file":  "aw__global_tribe_white.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "bio_don__turret_allowlist",
+                      "rows":  10,
+                      "file":  "bio_don__turret_allowlist.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "biodon__ratio_config",
+                      "rows":  10,
+                      "file":  "biodon__ratio_config.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "biodon__turret_allowlist",
+                      "rows":  10,
+                      "file":  "biodon__turret_allowlist.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "chitlin__gate_access",
+                      "rows":  10,
+                      "file":  "chitlin__gate_access.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "erc20_puppet__erc20_registry",
+                      "rows":  10,
+                      "file":  "erc20_puppet__erc20_registry.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "etc__gate_access",
+                      "rows":  10,
+                      "file":  "etc__gate_access.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "etcf3_r__gate_access",
+                      "rows":  10,
+                      "file":  "etcf3_r__gate_access.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "etcg12_ta2__gate_access",
+                      "rows":  10,
+                      "file":  "etcg12_ta2__gate_access.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "etcp2_i__gate_access",
+                      "rows":  10,
+                      "file":  "etcp2_i__gate_access.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "etcp2_ins__gate_access",
+                      "rows":  10,
+                      "file":  "etcp2_ins__gate_access.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "etcvending__ratio_config",
+                      "rows":  10,
+                      "file":  "etcvending__ratio_config.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "eve_datacore__gates",
+                      "rows":  10,
+                      "file":  "eve_datacore__gates.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "eve_datacore__gates_character_ex",
+                      "rows":  10,
+                      "file":  "eve_datacore__gates_character_ex.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "eve_datacore__gates_corp_excepti",
+                      "rows":  10,
+                      "file":  "eve_datacore__gates_corp_excepti.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "eve_datacore__gates_dapp",
+                      "rows":  10,
+                      "file":  "eve_datacore__gates_dapp.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "eveerc20__allowances",
+                      "rows":  10,
+                      "file":  "eveerc20__allowances.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "eveerc20__balances",
+                      "rows":  10,
+                      "file":  "eveerc20__balances.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "eveerc20__metadata",
+                      "rows":  10,
+                      "file":  "eveerc20__metadata.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "eveerc20__total_supply",
+                      "rows":  10,
+                      "file":  "eveerc20__total_supply.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "evefrontier__access_config",
+                      "rows":  10,
+                      "file":  "evefrontier__access_config.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "evefrontier__assembly_energy_co",
+                      "rows":  10,
+                      "file":  "evefrontier__assembly_energy_co.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "evefrontier__call_access",
+                      "rows":  10,
+                      "file":  "evefrontier__call_access.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "evefrontier__characters",
+                      "rows":  10,
+                      "file":  "evefrontier__characters.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "evefrontier__characters_by_acco",
+                      "rows":  10,
+                      "file":  "evefrontier__characters_by_acco.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "evefrontier__deployable_state",
+                      "rows":  10,
+                      "file":  "evefrontier__deployable_state.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "evefrontier__entity",
+                      "rows":  10,
+                      "file":  "evefrontier__entity.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "evefrontier__entity_record",
+                      "rows":  10,
+                      "file":  "evefrontier__entity_record.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "evefrontier__entity_record_meta",
+                      "rows":  10,
+                      "file":  "evefrontier__entity_record_meta.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "evefrontier__entity_tag_map",
+                      "rows":  10,
+                      "file":  "evefrontier__entity_tag_map.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "evefrontier__ephemeral_inv_capa",
+                      "rows":  10,
+                      "file":  "evefrontier__ephemeral_inv_capa.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "evefrontier__ephemeral_inv_item",
+                      "rows":  10,
+                      "file":  "evefrontier__ephemeral_inv_item.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "evefrontier__ephemeral_invento",
+                      "rows":  10,
+                      "file":  "evefrontier__ephemeral_invento.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "evefrontier__ephemeral_item_tra",
+                      "rows":  10,
+                      "file":  "evefrontier__ephemeral_item_tra.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "evefrontier__fuel",
+                      "rows":  10,
+                      "file":  "evefrontier__fuel.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "evefrontier__fuel_consumption_s",
+                      "rows":  10,
+                      "file":  "evefrontier__fuel_consumption_s.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "evefrontier__fuel_efficiency_co",
+                      "rows":  10,
+                      "file":  "evefrontier__fuel_efficiency_co.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "evefrontier__global_static_data",
+                      "rows":  10,
+                      "file":  "evefrontier__global_static_data.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "evefrontier__has_role",
+                      "rows":  10,
+                      "file":  "evefrontier__has_role.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "evefrontier__initialize",
+                      "rows":  10,
+                      "file":  "evefrontier__initialize.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "evefrontier__initialized",
+                      "rows":  10,
+                      "file":  "evefrontier__initialized.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "evefrontier__inventory",
+                      "rows":  10,
+                      "file":  "evefrontier__inventory.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "evefrontier__inventory_by_ephem",
+                      "rows":  10,
+                      "file":  "evefrontier__inventory_by_ephem.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "evefrontier__inventory_by_item",
+                      "rows":  10,
+                      "file":  "evefrontier__inventory_by_item.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "evefrontier__inventory_item",
+                      "rows":  10,
+                      "file":  "evefrontier__inventory_item.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "evefrontier__inventory_item_tra",
+                      "rows":  10,
+                      "file":  "evefrontier__inventory_item_tra.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "evefrontier__kill_mail",
+                      "rows":  10,
+                      "file":  "evefrontier__kill_mail.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "evefrontier__location",
+                      "rows":  10,
+                      "file":  "evefrontier__location.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "evefrontier__network_node",
+                      "rows":  10,
+                      "file":  "evefrontier__network_node.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "evefrontier__network_node_assem",
+                      "rows":  10,
+                      "file":  "evefrontier__network_node_assem.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "evefrontier__network_node_by_ass",
+                      "rows":  10,
+                      "file":  "evefrontier__network_node_by_ass.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "evefrontier__network_node_energ",
+                      "rows":  10,
+                      "file":  "evefrontier__network_node_energ.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "evefrontier__ownership_by_objec",
+                      "rows":  10,
+                      "file":  "evefrontier__ownership_by_objec.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "evefrontier__role",
+                      "rows":  10,
+                      "file":  "evefrontier__role.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "evefrontier__smart_assembly",
+                      "rows":  10,
+                      "file":  "evefrontier__smart_assembly.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "evefrontier__smart_gate_config",
+                      "rows":  10,
+                      "file":  "evefrontier__smart_gate_config.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "evefrontier__smart_gate_link",
+                      "rows":  10,
+                      "file":  "evefrontier__smart_gate_link.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "evefrontier__smart_turret_confi",
+                      "rows":  10,
+                      "file":  "evefrontier__smart_turret_confi.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "evefrontier__tenant",
+                      "rows":  10,
+                      "file":  "evefrontier__tenant.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "evefrontier__world_version",
+                      "rows":  10,
+                      "file":  "evefrontier__world_version.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "example__toggle_table",
+                      "rows":  10,
+                      "file":  "example__toggle_table.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "froz_b_ws__gate_access",
+                      "rows":  10,
+                      "file":  "froz_b_ws__gate_access.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "jiao__gate_access",
+                      "rows":  10,
+                      "file":  "jiao__gate_access.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "jiao__ratio_config",
+                      "rows":  10,
+                      "file":  "jiao__ratio_config.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "jiao__turret_allowlist",
+                      "rows":  10,
+                      "file":  "jiao__turret_allowlist.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "kalipatu__gate_acc_char",
+                      "rows":  10,
+                      "file":  "kalipatu__gate_acc_char.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "kalipatu__turret_allowlist",
+                      "rows":  10,
+                      "file":  "kalipatu__turret_allowlist.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "korigin__ratio_config",
+                      "rows":  10,
+                      "file":  "korigin__ratio_config.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "korigintest__ratio_config",
+                      "rows":  10,
+                      "file":  "korigintest__ratio_config.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "metadata__resource_tag",
+                      "rows":  10,
+                      "file":  "metadata__resource_tag.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "new_namespace__ratio_config",
+                      "rows":  10,
+                      "file":  "new_namespace__ratio_config.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "puppet__puppet_registry",
+                      "rows":  10,
+                      "file":  "puppet__puppet_registry.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "reapers__gate_access",
+                      "rows":  10,
+                      "file":  "reapers__gate_access.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "silver__gate_access_char",
+                      "rows":  10,
+                      "file":  "silver__gate_access_char.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "silver__gate_access_tribe",
+                      "rows":  10,
+                      "file":  "silver__gate_access_tribe.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "silver__whitelist_char",
+                      "rows":  10,
+                      "file":  "silver__whitelist_char.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "silver__whitelist_tribe",
+                      "rows":  10,
+                      "file":  "silver__whitelist_tribe.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "sm_v0_2_0__bucket_config",
+                      "rows":  10,
+                      "file":  "sm_v0_2_0__bucket_config.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "sm_v0_2_0__bucket_inventory",
+                      "rows":  10,
+                      "file":  "sm_v0_2_0__bucket_inventory.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "sm_v0_2_0__bucket_metadata",
+                      "rows":  10,
+                      "file":  "sm_v0_2_0__bucket_metadata.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "sm_v0_2_0__bucket_owners",
+                      "rows":  10,
+                      "file":  "sm_v0_2_0__bucket_owners.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "sm_v0_2_0__bucketed_inventor",
+                      "rows":  10,
+                      "file":  "sm_v0_2_0__bucketed_inventor.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "sm_v0_2_0__inventory_balance",
+                      "rows":  10,
+                      "file":  "sm_v0_2_0__inventory_balance.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "staging__gates",
+                      "rows":  10,
+                      "file":  "staging__gates.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "staging__gates_character_ex",
+                      "rows":  10,
+                      "file":  "staging__gates_character_ex.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "staging__gates_corp_excepti",
+                      "rows":  10,
+                      "file":  "staging__gates_corp_excepti.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "staging__gates_dapp",
+                      "rows":  10,
+                      "file":  "staging__gates_dapp.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "staging__tribes_table",
+                      "rows":  10,
+                      "file":  "staging__tribes_table.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "staging__tribes_tickers",
+                      "rows":  10,
+                      "file":  "staging__tribes_tickers.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "store__resource_ids",
+                      "rows":  10,
+                      "file":  "store__resource_ids.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "store__store_hooks",
+                      "rows":  10,
+                      "file":  "store__store_hooks.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "store__tables",
+                      "rows":  10,
+                      "file":  "store__tables.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "task__tasklist",
+                      "rows":  10,
+                      "file":  "task__tasklist.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "teez__turret_allowlist",
+                      "rows":  10,
+                      "file":  "teez__turret_allowlist.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "test__gate_access",
+                      "rows":  10,
+                      "file":  "test__gate_access.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "test_zyy_ssu__ratio_config",
+                      "rows":  10,
+                      "file":  "test_zyy_ssu__ratio_config.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "test_zyy_ssu__toggle_table",
+                      "rows":  10,
+                      "file":  "test_zyy_ssu__toggle_table.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "testgate__gate_access",
+                      "rows":  10,
+                      "file":  "testgate__gate_access.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "vultur_tiger__gate_access",
+                      "rows":  10,
+                      "file":  "vultur_tiger__gate_access.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "vultur_tiger__turret_allowlist",
+                      "rows":  10,
+                      "file":  "vultur_tiger__turret_allowlist.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "w_white_t1__turret_allowlist",
+                      "rows":  10,
+                      "file":  "w_white_t1__turret_allowlist.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "w_white_t1__turret_exclude_lis",
+                      "rows":  10,
+                      "file":  "w_white_t1__turret_exclude_lis.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "w_white_t1__turret_kos_list",
+                      "rows":  10,
+                      "file":  "w_white_t1__turret_kos_list.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "world__balances",
+                      "rows":  10,
+                      "file":  "world__balances.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "world__function_selector",
+                      "rows":  10,
+                      "file":  "world__function_selector.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "world__function_signatur",
+                      "rows":  10,
+                      "file":  "world__function_signatur.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "world__init_module_addres",
+                      "rows":  10,
+                      "file":  "world__init_module_addres.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "world__installed_modules",
+                      "rows":  10,
+                      "file":  "world__installed_modules.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "world__namespace_delegat",
+                      "rows":  10,
+                      "file":  "world__namespace_delegat.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "world__namespace_owner",
+                      "rows":  10,
+                      "file":  "world__namespace_owner.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "world__resource_access",
+                      "rows":  10,
+                      "file":  "world__resource_access.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "world__system_hooks",
+                      "rows":  10,
+                      "file":  "world__system_hooks.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "world__system_registry",
+                      "rows":  10,
+                      "file":  "world__system_registry.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "world__systems",
+                      "rows":  10,
+                      "file":  "world__systems.csv"
+                  },
+                  {
+                      "status":  "ok",
+                      "table":  "world__user_delegation_co",
+                      "rows":  10,
+                      "file":  "world__user_delegation_co.csv"
+                  }
+              ]
+}

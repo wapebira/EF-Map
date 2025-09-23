@@ -30,6 +30,11 @@ Additional parameters we use/track (to be confirmed for your network):
 - `WORLD_ADDRESS` – deployed World contract (0x...)
 - `START_BLOCK` – block to start decoding from
 
+Tuning knobs (finality/throughput):
+- `FOLLOW_BLOCK_TAG` – one of `latest` | `safe` | `finalized`. Controls which head the indexer chases. Use `finalized` to track the chain’s finalized head; `safe` if your network supports it and you want slightly fresher but still reorg-resistant data.
+- `POLLING_INTERVAL` – milliseconds for the viem public client polling cadence. Lower for faster detection of new blocks; keep within RPC rate limits (e.g., 2000–4000ms).
+- `MAX_BLOCK_RANGE` – number of blocks per batch request when backfilling/catching up.
+
 Note: The stock compose doesnt include chain/world/startBlock; many MUD indexers infer from contracts/events. We will pass them via environment and log them for traceability once confirmed.
 
 ## Run
@@ -37,7 +42,16 @@ Note: The stock compose doesnt include chain/world/startBlock; many MUD indexer
    - `tools/win/start_docker_desktop.ps1`
    - `tools/win/wait_for_docker_ready.ps1`
 2) Launch Primodium stack:
-   - `tools/win/start_pg_indexer_stack.ps1`
+  - `tools/win/start_pg_indexer_stack.ps1`
+  - Optional flags (override env to control indexing behavior):
+    - `-RpcHttpUrl`, `-ChainId`, `-WorldAddress`, `-StartBlock`
+    - `-FollowBlockTag latest|safe|finalized`
+    - `-PollingIntervalMs <ms>` (e.g., 2000)
+    - `-MaxBlockRange <n>` (e.g., 500 or 1000 depending on your RPC)
+
+  Example to target near-finality (~6 blocks behind on many networks):
+  - PowerShell:
+    - `tools/win/start_pg_indexer_stack.ps1 -FollowBlockTag finalized -PollingIntervalMs 2000 -MaxBlockRange 1000`
 3) Start adapter pointing at Primodium Postgres:
    - `tools/pg-adapter/start_adapter.ps1 -Port 8850 -PgUrl "postgres://user:password@127.0.0.1:5432/postgres"`
 
@@ -56,10 +70,7 @@ Before indexing your world, confirm these values:
 - WORLD_ADDRESS: <0x...>
 - START_BLOCK: <number>
 
-Well extend `start_pg_indexer_stack.ps1` to accept these and inject them as compose overrides. Until then:
-- Set RPC (per-session):
-  - PowerShell: `$env:RPC_HTTP_URL='http://host.docker.internal:8545'`
-- Then rerun the stack script so the writer picks it up.
+The `start_pg_indexer_stack.ps1` script accepts these parameters and writes a docker-compose override that injects them as environment variables for the writer and reader services. You can also set them via `$env:` variables before running the script, but flags are preferred for repeatability.
 
 ## Rollback
 - Stop adapter: `tools/pg-adapter/stop_adapter.ps1`

@@ -23,10 +23,14 @@ interface RouteRibbonOptions {
   cameraRef: React.MutableRefObject<THREE.PerspectiveCamera | null>;
   rendererRef: React.MutableRefObject<THREE.WebGLRenderer | null>;
   animUpdatersRef: React.MutableRefObject<Array<() => void>>;
+  // Map of smart-gate directional pairs ("a-b") to itemId – used to render SGATE hops as straight, non-ship segments
+  smartGateItemByPair?: Record<string, number> | null;
+  // Set of directional pairs ("a-b") that were actually traversed via Smart Gate in the computed route
+  usedSmartGatePairs?: Set<string> | null;
 }
 
 export function createRouteRibbon(opts: RouteRibbonOptions): THREE.Group | null {
-  const { pathSystems, mapData, accentHex, getTransformedPosition, cameraRef, rendererRef, animUpdatersRef } = opts;
+  const { pathSystems, mapData, accentHex, getTransformedPosition, cameraRef, rendererRef, animUpdatersRef, usedSmartGatePairs } = opts;
   if(!pathSystems || pathSystems.length < 2) return null;
 
   const gatePairs = new Set<string>();
@@ -34,9 +38,14 @@ export function createRouteRibbon(opts: RouteRibbonOptions): THREE.Group | null 
     gatePairs.add(`${g.source_system_id}_${g.destination_system_id}`);
     gatePairs.add(`${g.destination_system_id}_${g.source_system_id}`);
   });
-  const isGate = (a: SystemLite, b: SystemLite) => gatePairs.has(`${a.id}_${b.id}`);
+  const isGate = (a: SystemLite, b: SystemLite) => {
+    if (gatePairs.has(`${a.id}_${b.id}`)) return true; // classic stargate
+    // Treat Smart Gate hops as gate-like (straight, non-dashed) ONLY if actually used in this route
+    if (usedSmartGatePairs && (usedSmartGatePairs.has(`${a.id}-${b.id}`) || usedSmartGatePairs.has(`${b.id}-${a.id}`))) return true;
+    return false;
+  };
 
-  interface Hop { pts: THREE.Vector3[]; length: number; isShip: boolean; aId:number; bId:number; }
+  interface Hop { pts: THREE.Vector3[]; length: number; isShip: boolean; isSmartGate: boolean; aId:number; bId:number; }
   const hops: Hop[] = [];
   for (let i = 0; i < pathSystems.length - 1; i++) {
     const a = pathSystems[i];
@@ -45,6 +54,7 @@ export function createRouteRibbon(opts: RouteRibbonOptions): THREE.Group | null 
     const bp = getTransformedPosition(b.position);
     const A = new THREE.Vector3(ap.x, ap.y, ap.z);
     const B = new THREE.Vector3(bp.x, bp.y, bp.z);
+    const sgUsed = !!(usedSmartGatePairs && (usedSmartGatePairs.has(`${a.id}-${b.id}`) || usedSmartGatePairs.has(`${b.id}-${a.id}`)));
   if (isGate(a, b)) {
       const dist = A.distanceTo(B);
       // Subdivide very long straight gate hops so screen-space expansion remains stable when viewed head-on
@@ -55,9 +65,9 @@ export function createRouteRibbon(opts: RouteRibbonOptions): THREE.Group | null 
           const t = s / subdivisions;
             pts.push(new THREE.Vector3().lerpVectors(A, B, t));
         }
-  hops.push({ pts, length: dist, isShip: false, aId:a.id, bId:b.id });
+        hops.push({ pts, length: dist, isShip: false, isSmartGate: sgUsed, aId:a.id, bId:b.id });
       } else {
-  hops.push({ pts: [A, B], length: dist, isShip: false, aId:a.id, bId:b.id });
+        hops.push({ pts: [A, B], length: dist, isShip: false, isSmartGate: sgUsed, aId:a.id, bId:b.id });
       }
     } else {
       const dist = A.distanceTo(B);
@@ -69,7 +79,7 @@ export function createRouteRibbon(opts: RouteRibbonOptions): THREE.Group | null 
       for (let t = 0; t <= 1.00001; t += 1 / segs) pts.push(curve.getPoint(t));
       const filtered: THREE.Vector3[] = [];
       for (const p of pts) if (!filtered.length || !filtered[filtered.length - 1].equals(p)) filtered.push(p);
-  hops.push({ pts: filtered, length: dist, isShip: true, aId:a.id, bId:b.id });
+      hops.push({ pts: filtered, length: dist, isShip: true, isSmartGate: false, aId:a.id, bId:b.id });
     }
   }
   if (!hops.length) return null;
@@ -90,6 +100,7 @@ export function createRouteRibbon(opts: RouteRibbonOptions): THREE.Group | null 
   const hopLengthAttr = new Float32Array(vertCount); // hop length
   const hopIndexAttr = new Float32Array(vertCount); // hop index
   const hopIsShipAttr = new Float32Array(vertCount); // 1 if ship jump (non-gate)
+  const hopIsSmartGateAttr = new Float32Array(vertCount); // 1 if smart-gate hop (straight) used
   // hopDir attribute & conflict logic removed (dash animation deprecated)
 
   const setV3 = (arr: Float32Array, i: number, v: THREE.Vector3) => { arr[i * 3] = v.x; arr[i * 3 + 1] = v.y; arr[i * 3 + 2] = v.z; };
@@ -113,7 +124,8 @@ export function createRouteRibbon(opts: RouteRibbonOptions): THREE.Group | null 
         hopLocal[vPtr] = locals[k];
         hopLengthAttr[vPtr] = hop.length;
         hopIndexAttr[vPtr] = hopIdx;
-  hopIsShipAttr[vPtr] = hop.isShip ? 1 : 0;
+        hopIsShipAttr[vPtr] = hop.isShip ? 1 : 0;
+        hopIsSmartGateAttr[vPtr] = (!hop.isShip && hop.isSmartGate) ? 1 : 0;
         vPtr++;
       }
     }
@@ -132,6 +144,7 @@ export function createRouteRibbon(opts: RouteRibbonOptions): THREE.Group | null 
   geom.setAttribute('hopLength', new THREE.BufferAttribute(hopLengthAttr, 1));
   geom.setAttribute('hopIndex', new THREE.BufferAttribute(hopIndexAttr, 1));
   geom.setAttribute('hopIsShip', new THREE.BufferAttribute(hopIsShipAttr, 1));
+  geom.setAttribute('hopIsSmartGate', new THREE.BufferAttribute(hopIsSmartGateAttr, 1));
   // geom.setAttribute('hopDir', ...) removed
   geom.setIndex(indices);
 
@@ -153,15 +166,22 @@ export function createRouteRibbon(opts: RouteRibbonOptions): THREE.Group | null 
   u_dashFade: { value: 0.25 },  // off brightness floor
   u_enableShipDash: { value: 1.0 }, // toggle (1 on, 0 off)
   u_headStrength: { value: 1.4 }, // additional strength for rounded head bloom
-  u_headAspect: { value: 1.15 } // longitudinal stretch ( >1 elongates along route )
+  u_headAspect: { value: 1.15 }, // longitudinal stretch ( >1 elongates along route )
+  // Smart Gate static dash pattern (short–long repeating)
+  u_enableSgPattern: { value: 1.0 },
+  u_sgRepeat: { value: 10.0 },
+  u_sgShortOn: { value: 0.20 },
+  u_sgGap: { value: 0.08 },
+  u_sgLongOn: { value: 0.40 },
+  u_sgDashFade: { value: 0.35 },
     },
     transparent: true,
     depthWrite: false,
     depthTest: false,
     side: THREE.DoubleSide,
     blending: THREE.NormalBlending,
-  vertexShader: `precision highp float;\n      attribute vec3 prev;\n      attribute vec3 next;\n      attribute float side;\n      attribute float hopLocal;\n      attribute float hopLength;\n      attribute float hopIndex;\n      attribute float hopIsShip;\n      uniform float u_pxTarget;\n      uniform vec2 u_viewport;\n      varying float v_side;\n      varying float v_hopLocal;\n      varying float v_hopLength;\n      varying float v_hopIndex;\n      varying float v_isShip;\n      void main(){\n        vec4 prevClip = projectionMatrix * modelViewMatrix * vec4(prev,1.0);\n        vec4 nextClip = projectionMatrix * modelViewMatrix * vec4(next,1.0);\n        vec4 currClip = projectionMatrix * modelViewMatrix * vec4(position,1.0);\n        vec2 prevN = prevClip.xy / prevClip.w;\n        vec2 nextN = nextClip.xy / nextClip.w;\n        vec2 rawDir = nextN - prevN;\n        float rawLen = length(rawDir);\n        vec2 dir;\n        if(rawLen < 0.00025){\n          dir = vec2(1.0,0.0);\n          float t = hopLength > 0.0 ? hopLocal / hopLength : 0.0;\n          float minSpan = 2.0 / min(u_viewport.x, u_viewport.y);\n          currClip.xy += (t - 0.5) * minSpan * currClip.w * dir;\n        } else {\n          dir = rawDir / rawLen;\n        }\n        if(any(isnan(dir))) dir = vec2(1.0,0.0);\n        vec2 perp = vec2(-dir.y, dir.x);\n        vec2 offsetNdc = perp * side * u_pxTarget * 2.0 / u_viewport;\n        currClip.xy += offsetNdc * currClip.w;\n        v_side = side;\n        v_hopLocal = hopLocal;\n        v_hopLength = hopLength;\n        v_hopIndex = hopIndex;\n        v_isShip = hopIsShip;\n        gl_Position = currClip;\n      }\n    `,
-  fragmentShader: `precision highp float;\n      uniform vec3 u_color;\n      uniform float u_time;\n      uniform float u_pulseWidth;\n      uniform float u_pulseStrength;\n      uniform float u_hopTravelTime;\n      uniform float u_targetMax;\n      uniform float u_tailStrength;\n      uniform float u_tailDecay;\n      uniform float u_baseBoost;\n      uniform float u_headStrength;\n      uniform float u_headAspect;\n      uniform float u_dashRepeat;\n      uniform float u_dashDuty;\n      uniform float u_dashFade;\n      uniform float u_enableShipDash;\n      varying float v_side;\n      varying float v_hopLocal;\n      varying float v_hopLength;\n      varying float v_hopIndex;\n      varying float v_isShip;\n      void main(){\n        float edge = abs(v_side);\n        float core = smoothstep(0.82, 0.0, edge);\n        float glow = smoothstep(1.25, 0.0, edge);\n        float maxC = max(max(u_color.r, u_color.g), u_color.b);\n        float scale = maxC > u_targetMax ? (u_targetMax / maxC) : 1.0;\n        vec3 baseCol = u_color * scale * u_baseBoost;\n        float phase = fract((u_time / u_hopTravelTime) + v_hopIndex * 0.173);\n        float pulsePos = phase * v_hopLength;\n        float sigma = u_pulseWidth * v_hopLength + 1e-5;\n        float relCenter = (v_hopLocal - pulsePos);\n        float rel = relCenter / max(v_hopLength, 1e-5);\n        float d1 = abs(relCenter);\n        float pulse = exp(-pow(d1 / sigma, 2.0));\n        float headLong = relCenter / (sigma * u_headAspect);\n        float headLat = v_side * 0.75;\n        float head = exp(-(headLong*headLong + headLat*headLat));\n        head *= smoothstep(-0.35, 0.15, rel);\n        float tail = 0.0; if(rel < 0.0){ tail = exp(rel / max(u_tailDecay, 1e-4)); }\n        float brightness = 1.0 + head * u_headStrength + pulse * (u_pulseStrength*0.75) + tail * u_tailStrength;\n        if(v_isShip > 0.5 && u_enableShipDash > 0.5){\n          float normPos = v_hopLength > 0.0 ? v_hopLocal / v_hopLength : 0.0;\n          float dashPhase = fract(normPos * u_dashRepeat);\n          float dashOn = step(dashPhase, u_dashDuty);\n          float dashMix = mix(u_dashFade, 1.0, dashOn);\n          brightness *= mix(1.0, dashMix, core);\n        }\n        vec3 col = baseCol * brightness;\n        float alphaPulse = max(pulse, head);\n        float alpha = (core * 0.90 + glow * 0.45) * clamp(0.50 + alphaPulse * 0.40 + tail * 0.25, 0.0, 1.0);\n        if(alpha < 0.02) discard;\n        gl_FragColor = vec4(col, alpha);\n      }\n    `
+  vertexShader: `precision highp float;\n      attribute vec3 prev;\n      attribute vec3 next;\n      attribute float side;\n      attribute float hopLocal;\n      attribute float hopLength;\n      attribute float hopIndex;\n      attribute float hopIsShip;\n      attribute float hopIsSmartGate;\n      uniform float u_pxTarget;\n      uniform vec2 u_viewport;\n      varying float v_side;\n      varying float v_hopLocal;\n      varying float v_hopLength;\n      varying float v_hopIndex;\n      varying float v_isShip;\n      varying float v_isSmartGate;\n      void main(){\n        vec4 prevClip = projectionMatrix * modelViewMatrix * vec4(prev,1.0);\n        vec4 nextClip = projectionMatrix * modelViewMatrix * vec4(next,1.0);\n        vec4 currClip = projectionMatrix * modelViewMatrix * vec4(position,1.0);\n        vec2 prevN = prevClip.xy / prevClip.w;\n        vec2 nextN = nextClip.xy / nextClip.w;\n        vec2 rawDir = nextN - prevN;\n        float rawLen = length(rawDir);\n        vec2 dir;\n        if(rawLen < 0.00025){\n          dir = vec2(1.0,0.0);\n          float t = hopLength > 0.0 ? hopLocal / hopLength : 0.0;\n          float minSpan = 2.0 / min(u_viewport.x, u_viewport.y);\n          currClip.xy += (t - 0.5) * minSpan * currClip.w * dir;\n        } else {\n          dir = rawDir / rawLen;\n        }\n        if(any(isnan(dir))) dir = vec2(1.0,0.0);\n        vec2 perp = vec2(-dir.y, dir.x);\n        vec2 offsetNdc = perp * side * u_pxTarget * 2.0 / u_viewport;\n        currClip.xy += offsetNdc * currClip.w;\n        v_side = side;\n        v_hopLocal = hopLocal;\n        v_hopLength = hopLength;\n        v_hopIndex = hopIndex;\n        v_isShip = hopIsShip;\n        v_isSmartGate = hopIsSmartGate;\n        gl_Position = currClip;\n      }\n    `,
+  fragmentShader: `precision highp float;\n      uniform vec3 u_color;\n      uniform float u_time;\n      uniform float u_pulseWidth;\n      uniform float u_pulseStrength;\n      uniform float u_hopTravelTime;\n      uniform float u_targetMax;\n      uniform float u_tailStrength;\n      uniform float u_tailDecay;\n      uniform float u_baseBoost;\n      uniform float u_headStrength;\n      uniform float u_headAspect;\n      uniform float u_dashRepeat;\n      uniform float u_dashDuty;\n      uniform float u_dashFade;\n      uniform float u_enableShipDash;\n      // Smart Gate static dash uniforms\n      uniform float u_enableSgPattern;\n      uniform float u_sgRepeat;\n      uniform float u_sgShortOn;\n      uniform float u_sgGap;\n      uniform float u_sgLongOn;\n      uniform float u_sgDashFade;\n      varying float v_side;\n      varying float v_hopLocal;\n      varying float v_hopLength;\n      varying float v_hopIndex;\n      varying float v_isShip;\n      varying float v_isSmartGate;\n      void main(){\n        float edge = abs(v_side);\n        float core = smoothstep(0.82, 0.0, edge);\n        float glow = smoothstep(1.25, 0.0, edge);\n        float maxC = max(max(u_color.r, u_color.g), u_color.b);\n        float scale = maxC > u_targetMax ? (u_targetMax / maxC) : 1.0;\n        vec3 baseCol = u_color * scale * u_baseBoost;\n        float phase = fract((u_time / u_hopTravelTime) + v_hopIndex * 0.173);\n        float pulsePos = phase * v_hopLength;\n        float sigma = u_pulseWidth * v_hopLength + 1e-5;\n        float relCenter = (v_hopLocal - pulsePos);\n        float rel = relCenter / max(v_hopLength, 1e-5);\n        float d1 = abs(relCenter);\n        float pulse = exp(-pow(d1 / sigma, 2.0));\n        float headLong = relCenter / (sigma * u_headAspect);\n        float headLat = v_side * 0.75;\n        float head = exp(-(headLong*headLong + headLat*headLat));\n        head *= smoothstep(-0.35, 0.15, rel);\n        float tail = 0.0; if(rel < 0.0){ tail = exp(rel / max(u_tailDecay, 1e-4)); }\n        float brightness = 1.0 + head * u_headStrength + pulse * (u_pulseStrength*0.75) + tail * u_tailStrength;\n        if(v_isShip > 0.5 && u_enableShipDash > 0.5){\n          float normPos = v_hopLength > 0.0 ? v_hopLocal / v_hopLength : 0.0;\n          float dashPhase = fract(normPos * u_dashRepeat);\n          float dashOn = step(dashPhase, u_dashDuty);\n          float dashMix = mix(u_dashFade, 1.0, dashOn);\n          brightness *= mix(1.0, dashMix, core);\n        }\n        // Smart Gate short–long dash pattern (static) on SG hops only\n        if(u_enableSgPattern > 0.5 && v_isShip < 0.5 && v_isSmartGate > 0.5){\n          float normPos = v_hopLength > 0.0 ? v_hopLocal / v_hopLength : 0.0;\n          float ph = fract(normPos * u_sgRepeat);\n          float seg1 = u_sgShortOn;\n          float seg2 = seg1 + u_sgGap;\n          float seg3 = seg2 + u_sgLongOn;\n          float onMask = 0.0;\n          onMask += step(ph, seg1);\n          onMask += step(seg2, ph) * step(ph, seg3);\n          float dashMix = mix(u_sgDashFade, 1.0, clamp(onMask, 0.0, 1.0));\n          brightness *= mix(1.0, dashMix, core);\n        }\n        vec3 col = baseCol * brightness;\n        float alphaPulse = max(pulse, head);\n        float alpha = (core * 0.90 + glow * 0.45) * clamp(0.50 + alphaPulse * 0.40 + tail * 0.25, 0.0, 1.0);\n        if(alpha < 0.02) discard;\n        gl_FragColor = vec4(col, alpha);\n      }\n    `
   });
 
   // Additive glow mesh for bloom emphasis (focuses on bright pulse & tail)
@@ -202,6 +222,8 @@ export function createRouteRibbon(opts: RouteRibbonOptions): THREE.Group | null 
   u.u_time.value = now;
   // static dash toggle
   if(u.u_enableShipDash){ u.u_enableShipDash.value = (window as any).__efShowShipDash === false ? 0.0 : 1.0; }
+  // smart gate pattern toggle
+  if(u.u_enableSgPattern){ u.u_enableSgPattern.value = (window as any).__efShowSmartGateChevrons === false ? 0.0 : 1.0; }
   // route thickness global update (written by display settings event)
   try { (window as any).__efRouteThickness = (window as any).__efRouteThickness ?? 1.0; } catch {}
   // Pulse customization mapping

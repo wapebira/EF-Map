@@ -17,6 +17,12 @@ interface RoutingRequest {
   // Explore tuning (optional)
   exploreCorridorPct?: number; // width as % of AB length (default 18)
   exploreProgressBiasPct?: number; // 0..100, higher prefers later detours (default 50)
+  // Smart Gate routing: directed edges allowed for this request (system id pairs as "a-b")
+  smartGateEdges?: string[];
+  // Version for cache invalidation when edge set changes
+  smartGateVersion?: number;
+  // Optional: enable lightweight Smart Gate debug tracing (progress events)
+  debugSmartGate?: boolean;
 }
 
 interface ExploreMeta {
@@ -70,6 +76,26 @@ const reconstructPath = (cameFrom: { [key: number]: number }, current: SolarSyst
 // Spatial grid and neighbor cache to speed up neighbor queries.
 const spatialGrids: Map<number, Map<string, SolarSystem[]>> = new Map();
 const neighborCache: Map<string, { system: SolarSystem; cost: number }[]> = new Map();
+let lastSmartGateVersion: number | undefined = undefined;
+
+// Build a stable, order-independent signature for the Smart Gate edge set to scope neighbor cache entries.
+// This prevents reusing neighbors computed with a different Smart Gate mode/set (none/public/authorized).
+const smartGateSignature = (edges?: string[]): string => {
+  if (!edges || edges.length === 0) return 'sg:none';
+  // Sort for order-independence and compute a lightweight djb2 hash
+  const sorted = [...edges].sort();
+  let hash = 5381 >>> 0;
+  for (let i = 0; i < sorted.length; i++) {
+    const s = sorted[i];
+    for (let j = 0; j < s.length; j++) {
+      hash = (((hash << 5) + hash) + s.charCodeAt(j)) >>> 0; // hash*33 + char
+    }
+    // delimiter impact
+    hash = (((hash << 5) + hash) + 124) >>> 0; // '|'
+  }
+  // Include count to reduce accidental collisions in tiny sets
+  return `sg:${sorted.length}:${hash.toString(36)}`;
+};
 
 const buildGrid = (cellSize: number, allSystems: SolarSystem[]) => {
   const grid = new Map<string, SolarSystem[]>();
@@ -117,9 +143,17 @@ const getNeighbors = (
   stargates: { [key: string]: Stargate },
   maxJumpDist: number,
   optimizeFor: 'fuel' | 'jumps' | 'explore',
-  systemsById: { [id: number]: SolarSystem }
+  systemsById: { [id: number]: SolarSystem },
+  smartGateAdj?: Map<number, number[]>,
+  cacheScope: string = 'sg:none',
+  debugSmartGate?: boolean
 ): { system: SolarSystem; cost: number }[] => {
-  const cacheKey = `${system.id}:${Math.max(1, Math.floor(maxJumpDist))}:${optimizeFor}`;
+  // Include both the coarse cellSize and a precise maxJumpDist component in the cache key.
+  // Using only floor(maxJumpDist) can incorrectly reuse neighbors computed for a larger range
+  // when two requests share the same floored value (e.g. 60.9 vs 60.1). This ensures correctness.
+  const cellSizeKey = Math.max(1, Math.floor(maxJumpDist));
+  const preciseRangeKey = Math.round(maxJumpDist * 1000) / 1000; // millily precision
+  const cacheKey = `${system.id}:${cellSizeKey}:${preciseRangeKey}:${optimizeFor}:${cacheScope}`;
   if (neighborCache.has(cacheKey)) return neighborCache.get(cacheKey)!;
 
   const neighbors: { system: SolarSystem; cost: number }[] = [];
@@ -139,6 +173,17 @@ const getNeighbors = (
     for (const otherSystem of candidates) {
       neighbors.push({ system: otherSystem, cost: 1 });
     }
+    // Smart Gate edges contribute unit cost in jumps mode as well
+    if (smartGateAdj && smartGateAdj.has(system.id)) {
+      let sgCount = 0;
+      for (const toId of smartGateAdj.get(system.id)!) {
+        const dest = systemsById[toId];
+        if (dest) { neighbors.push({ system: dest, cost: 1 }); sgCount++; }
+      }
+      if (debugSmartGate && sgCount>0) {
+  // removed noisy [SG-DBG] progress message
+      }
+    }
     neighborCache.set(cacheKey, neighbors);
     return neighbors;
   }
@@ -151,6 +196,22 @@ const getNeighbors = (
         if (destSystem) {
           neighbors.push({ system: destSystem, cost: 1 });
         }
+      }
+    }
+
+    // Add Smart Gate directed edges if provided
+    if (smartGateAdj && smartGateAdj.has(system.id)) {
+      let sgCount = 0;
+      for (const toId of smartGateAdj.get(system.id)!) {
+        const dest = systemsById[toId];
+        if (dest) {
+          // In fuel/explore, smart gates have zero fuel cost
+          neighbors.push({ system: dest, cost: 0 });
+          sgCount++;
+        }
+      }
+      if (debugSmartGate && sgCount>0) {
+  // removed noisy [SG-DBG] progress message
       }
     }
 
@@ -271,7 +332,8 @@ const existsPathWithin = (
   from: SolarSystem,
   to: SolarSystem,
   maxJump: number,
-  systemsById: { [id:number]: SolarSystem }
+  systemsById: { [id:number]: SolarSystem },
+  smartGateAdj?: Map<number, number[]>
 ): boolean => {
   if(from.id === to.id) return true;
   const allSystems = Object.values(systems);
@@ -290,6 +352,14 @@ const existsPathWithin = (
     if(!gateAdjLocal.has(g.destination_system_id)) gateAdjLocal.set(g.destination_system_id, []);
     gateAdjLocal.get(g.source_system_id)!.push(g.destination_system_id);
     gateAdjLocal.get(g.destination_system_id)!.push(g.source_system_id);
+  }
+  // Include Smart Gate edges
+  if (smartGateAdj) {
+    for (const [a, list] of smartGateAdj) {
+      if (!gateAdjLocal.has(a)) gateAdjLocal.set(a, []);
+      const arr = gateAdjLocal.get(a)!;
+      for (const b of list) arr.push(b);
+    }
   }
   while(q.length){
     const curId = q.shift()!;
@@ -353,6 +423,24 @@ const findPathAstar = (request: RoutingRequest): RoutingResponse => {
   let lastEmit = 0;
   let exploredCount = 0;
 
+  // Build Smart Gate adjacency map once for the request
+  let smartAdj: Map<number, number[]> | undefined = undefined;
+  if (request.smartGateEdges && request.smartGateEdges.length) {
+    smartAdj = new Map();
+    for (const key of request.smartGateEdges) {
+      const [aStr, bStr] = key.split('-');
+      const a = Number(aStr), b = Number(bStr);
+      if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
+      if (!smartAdj.has(a)) smartAdj.set(a, []);
+      smartAdj.get(a)!.push(b);
+    }
+  }
+  const sgSig = smartGateSignature(request.smartGateEdges);
+  // Emit a one-time summary for Smart Gate scope to aid debugging
+  if (request.debugSmartGate) {
+  // removed noisy [SG-DBG] request start message
+  }
+
   while (!openSet.isEmpty()) {
     const current = openSet.dequeue()!;
     exploredCount++;
@@ -385,7 +473,7 @@ const findPathAstar = (request: RoutingRequest): RoutingResponse => {
       }
     }
 
-    const neighbors = getNeighbors(current, allSystemsList, stargates, maxJumpDistance, optimizeFor, systemsById)
+    const neighbors = getNeighbors(current, allSystemsList, stargates, maxJumpDistance, optimizeFor, systemsById, smartAdj, sgSig, request.debugSmartGate)
       .filter(n => !avoidSet.has(n.system.name.toLowerCase()));
 
     for (const neighbor of neighbors) {
@@ -414,16 +502,16 @@ const findPathAstar = (request: RoutingRequest): RoutingResponse => {
       let low = request.maxJumpDistance;
       let high = Math.min(direct, Math.max(low*2, low + 1));
       const systemsByIdMap: { [id:number]: SolarSystem } = {}; Object.values(systems).forEach(s=> systemsByIdMap[s.id]=s);
-      while(high < direct + 1e-6 && !existsPathWithin(systems, stargates, startNode, endNode, high, systemsByIdMap)){
+      while(high < direct + 1e-6 && !existsPathWithin(systems, stargates, startNode, endNode, high, systemsByIdMap, (request.smartGateEdges && request.smartGateEdges.length)? (():Map<number,number[]>=>{ const m=new Map<number,number[]>(); for(const e of request.smartGateEdges!){ const [a,b]=e.split('-'); const ai=Number(a), bi=Number(b); if(Number.isFinite(ai)&&Number.isFinite(bi)){ if(!m.has(ai)) m.set(ai,[]); m.get(ai)!.push(bi); } } return m; })(): undefined)){
         low = high; high = Math.min(direct, high * 2); if(high >= direct - 1e-6) break;
       }
-      let pathExistsAtHigh = existsPathWithin(systems, stargates, startNode, endNode, high, systemsByIdMap);
+      let pathExistsAtHigh = existsPathWithin(systems, stargates, startNode, endNode, high, systemsByIdMap, smartAdj);
       if(!pathExistsAtHigh){
         minRequired = direct;
       } else {
         for(let i=0;i<7;i++){
           const mid = (low + high) / 2;
-          if(existsPathWithin(systems, stargates, startNode, endNode, mid, systemsByIdMap)) high = mid; else low = mid;
+          if(existsPathWithin(systems, stargates, startNode, endNode, mid, systemsByIdMap, smartAdj)) high = mid; else low = mid;
         }
         minRequired = high;
       }
@@ -512,6 +600,23 @@ const findPathDijkstra = (request: RoutingRequest): RoutingResponse => {
   let lastEmit = 0;
   const avoidSet = new Set<string>((avoidSystemNames||[]).map(n=> n.toLowerCase()).filter(n=> n!==fromSystemName.toLowerCase() && n!==toSystemName.toLowerCase()));
 
+  // Build Smart Gate adjacency map once for the request
+  let smartAdj: Map<number, number[]> | undefined = undefined;
+  if (request.smartGateEdges && request.smartGateEdges.length) {
+    smartAdj = new Map();
+    for (const key of request.smartGateEdges) {
+      const [aStr, bStr] = key.split('-');
+      const a = Number(aStr), b = Number(bStr);
+      if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
+      if (!smartAdj.has(a)) smartAdj.set(a, []);
+      smartAdj.get(a)!.push(b);
+    }
+  }
+  const sgSig = smartGateSignature(request.smartGateEdges);
+  if (request.debugSmartGate) {
+  // removed noisy [SG-DBG] request start message
+  }
+
   while (!heap.isEmpty()) {
     const top = heap.pop()!;
     const current = top.val;
@@ -545,7 +650,7 @@ const findPathDijkstra = (request: RoutingRequest): RoutingResponse => {
       }
     }
 
-  const neighbors = getNeighbors(current, allSystemsList, stargates, maxJumpDistance, optimizeFor, systemsById)
+  const neighbors = getNeighbors(current, allSystemsList, stargates, maxJumpDistance, optimizeFor, systemsById, smartAdj, sgSig, request.debugSmartGate)
     .filter(n => !avoidSet.has(n.system.name.toLowerCase()));
     for (const neighbor of neighbors) {
       const cost = (() => {
@@ -555,6 +660,13 @@ const findPathDijkstra = (request: RoutingRequest): RoutingResponse => {
           (g.source_system_id === neighbor.system.id && g.destination_system_id === current.id)
         );
         if (isGateEdge) return 0;
+        // Smart Gate edge check: zero cost in fuel/explore
+        if (smartAdj && smartAdj.get(current.id)?.includes(neighbor.system.id)) {
+          if (request.debugSmartGate) {
+            // removed noisy [SG-DBG] cost0 smartGate progress message
+          }
+          return 0;
+        }
         return heuristic(current, neighbor.system);
       })();
 
@@ -589,14 +701,14 @@ const findPathDijkstra = (request: RoutingRequest): RoutingResponse => {
     } else {
       const systemsById: { [id:number]: SolarSystem } = {}; Object.values(systems).forEach(s=> systemsById[s.id]=s);
       let low = request.maxJumpDistance; let high = Math.min(direct, Math.max(low*2, low+1));
-      while(high < direct + 1e-6 && !existsPathWithin(systems, stargates, startNode, endNode, high, systemsById)){
+      while(high < direct + 1e-6 && !existsPathWithin(systems, stargates, startNode, endNode, high, systemsById, smartAdj)){
         low = high; high = Math.min(direct, high*2); if(high >= direct - 1e-6) break; }
-      if(!existsPathWithin(systems, stargates, startNode, endNode, high, systemsById)){
+      if(!existsPathWithin(systems, stargates, startNode, endNode, high, systemsById, smartAdj)){
         minRequired = direct;
       } else {
         for(let i=0;i<7;i++){
           const mid = (low + high)/2;
-          if(existsPathWithin(systems, stargates, startNode, endNode, mid, systemsById)) high = mid; else low = mid;
+          if(existsPathWithin(systems, stargates, startNode, endNode, mid, systemsById, smartAdj)) high = mid; else low = mid;
         }
         minRequired = high;
       }
@@ -612,6 +724,11 @@ const findPath = (request: RoutingRequest): RoutingResponse => {
   if (!spatialGrids.has(cellSize)) {
     spatialGrids.clear();
     neighborCache.clear();
+  }
+  // Invalidate neighbor cache when Smart Gate edges version changes
+  if (request.smartGateVersion !== undefined && request.smartGateVersion !== lastSmartGateVersion) {
+    neighborCache.clear();
+    lastSmartGateVersion = request.smartGateVersion;
   }
 
   const algo = request.algorithm ?? 'astar';

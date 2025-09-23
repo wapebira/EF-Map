@@ -14,7 +14,10 @@
   // reuse by an external triggering mechanism.
   "kv_namespaces": [
   { "binding": "EF_SHARES", "id": "93333a061a734ceca8da9f055cf189d1" },
-  { "binding": "EF_STATS", "id": "cccc1a708dd74aa8aabd91c8bfc33c3f" }
+  { "binding": "EF_STATS", "id": "cccc1a708dd74aa8aabd91c8bfc33c3f" },
+  // New: Dedicated KV for data snapshots (gate links, overlays). Use a separate namespace to avoid
+  // operational coupling with EF_STATS. Replace the placeholder ID with the authoritative namespace.
+  { "binding": "EF_SNAPSHOTS", "id": "2af7298532dd4acfbda8bf06020981ba" }
   ],
   // D1 databases intentionally unbound (databases removed). Indexer endpoints will return
   // clear "binding missing" errors until D1 recreated and bindings restored.

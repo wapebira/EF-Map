@@ -11,12 +11,12 @@ export interface EFMapPreferencesV7 extends Omit<EFMapPreferencesV6,'v'> { v:7; 
 export interface EFMapPreferencesV8 extends Omit<EFMapPreferencesV7,'v'|'animateShipDashSpeed'|'animateShipDashes'> { v:8; }
 export interface EFMapPreferencesV9 extends Omit<EFMapPreferencesV8,'v'> { v:9; showShipDash?:boolean }
 export interface EFMapPreferencesV10 extends Omit<EFMapPreferencesV9,'v'> { v:10; pulseBrightness?:number; starSizeScale?:number }
-export interface EFMapPreferencesV11 extends Omit<EFMapPreferencesV10,'v'> { v:11; routeThickness?:number }
+export interface EFMapPreferencesV11 extends Omit<EFMapPreferencesV10,'v'> { v:11; routeThickness?:number; showSmartGateChevrons?:boolean }
 
 export type EFMapPreferences = EFMapPreferencesV1|EFMapPreferencesV2|EFMapPreferencesV3|EFMapPreferencesV4|EFMapPreferencesV5|EFMapPreferencesV6|EFMapPreferencesV7|EFMapPreferencesV8|EFMapPreferencesV9|EFMapPreferencesV10|EFMapPreferencesV11;
 
 const KEY='efmap:prefs';
-const defaultPrefsV11: EFMapPreferencesV11 = { v:11, accent:'orange', openPanels:[], uiScale:1, showStations:false, overlaySort:'createdAt:-1', overlayAgingDays:3, transmissionSeen:false, transmissionAudioMuted:false, transmissionAudioVolume:0.25, gateGradientSpan:0.66, hoverPrecisionFloor:0.12, pulseSpeed:1.0, pulseHeadSize:0.25, pulseTailSize:0.65, pulseWidth:0.15, showShipDash:true, pulseBrightness:1.0, starSizeScale:1.0, routeThickness:1.0 };
+const defaultPrefsV11: EFMapPreferencesV11 = { v:11, accent:'orange', openPanels:[], uiScale:1, showStations:false, overlaySort:'createdAt:-1', overlayAgingDays:3, transmissionSeen:false, transmissionAudioMuted:false, transmissionAudioVolume:0.25, gateGradientSpan:0.66, hoverPrecisionFloor:0.12, pulseSpeed:1.0, pulseHeadSize:0.25, pulseTailSize:0.65, pulseWidth:0.15, showShipDash:true, pulseBrightness:1.0, starSizeScale:1.0, routeThickness:1.0, showSmartGateChevrons:true };
 
 export function loadPrefs(): EFMapPreferences {
   try {
@@ -25,7 +25,7 @@ export function loadPrefs(): EFMapPreferences {
   const upgradeTo8 = (base:any): EFMapPreferencesV8 => ({ ...defaultPrefsV11, ...base, v:8 });
   const upgradeTo9 = (base:any): EFMapPreferencesV9 => ({ ...defaultPrefsV11, ...base, v:9, showShipDash: base.showShipDash !== false });
   const upgradeTo10 = (base:any): EFMapPreferencesV10 => ({ ...defaultPrefsV11, ...base, v:10, pulseBrightness: base.pulseBrightness ?? 1.0, starSizeScale: base.starSizeScale ?? 1.0 });
-  const upgradeTo11 = (base:any): EFMapPreferencesV11 => ({ ...defaultPrefsV11, ...base, v:11, routeThickness: base.routeThickness ?? 1.0 });
+  const upgradeTo11 = (base:any): EFMapPreferencesV11 => ({ ...defaultPrefsV11, ...base, v:11, routeThickness: base.routeThickness ?? 1.0, showSmartGateChevrons: base.showSmartGateChevrons !== false });
     switch(parsed.v){
       case 1:{ const v2:EFMapPreferencesV2={...parsed,v:2,uiScale:1}; const v3:EFMapPreferencesV3={...v2,v:3,overlaySort:'createdAt:-1',overlayAgingDays:3,transmissionSeen:false}; const v4:EFMapPreferencesV4={...v3,v:4,transmissionAudioMuted:false}; const v5:EFMapPreferencesV5={...v4,v:5,transmissionAudioVolume:0.65}; const v6:EFMapPreferencesV6={...v5,v:6,gateGradientSpan:0.66,animateShipDashes:false,hoverPrecisionFloor:0.12}; const v7:EFMapPreferencesV7={...v6,v:7,animateShipDashSpeed:1.0,pulseSpeed:1.0,pulseHeadSize:0.25,pulseTailSize:0.65,pulseWidth:0.15}; return upgradeTo8(v7);} 
       case 2:{ const v3:EFMapPreferencesV3={...parsed,v:3,overlaySort:parsed.overlaySort||'createdAt:-1',overlayAgingDays:parsed.overlayAgingDays||3,transmissionSeen:false}; const v4:EFMapPreferencesV4={...v3,v:4,transmissionAudioMuted:false}; const v5:EFMapPreferencesV5={...v4,v:5,transmissionAudioVolume:0.65}; const v6:EFMapPreferencesV6={...v5,v:6,gateGradientSpan:0.66,animateShipDashes:false,hoverPrecisionFloor:0.12}; const v7:EFMapPreferencesV7={...v6,v:7,animateShipDashSpeed:1.0,pulseSpeed:1.0,pulseHeadSize:0.25,pulseTailSize:0.65,pulseWidth:0.15}; return upgradeTo8(v7);} 
@@ -38,6 +38,11 @@ export function loadPrefs(): EFMapPreferences {
   case 9:{ return upgradeTo11(upgradeTo10(parsed)); }
   case 10:{ return upgradeTo11(parsed); }
   case 11:{ return { ...defaultPrefsV11, ...parsed }; }
+  case 12:{
+    // Backward-compat: drop fxaaEnabled and downgrade to v11 schema
+    const { fxaaEnabled: _drop, ...rest } = parsed as any;
+    return { ...defaultPrefsV11, ...rest, v:11 } as EFMapPreferencesV11;
+  }
   default: return { ...defaultPrefsV11 };
     }
   } catch { return { ...defaultPrefsV11 }; }
@@ -72,4 +77,5 @@ export function setShowShipDash(v:boolean){ updatePrefs(p=>{ (p as any).showShip
 export function setPulseBrightness(v:number){ updatePrefs(p=>{ (p as any).pulseBrightness=Math.max(0.2,Math.min(3.0,v)); }); }
 export function setStarSizeScale(v:number){ updatePrefs(p=>{ (p as any).starSizeScale=Math.max(0.5,Math.min(1.5,v)); }); }
 export function setRouteThickness(v:number){ updatePrefs(p=>{ (p as any).routeThickness=Math.max(0.5,Math.min(2.0,v)); }); }
+export function setShowSmartGateChevrons(v:boolean){ updatePrefs(p=>{ (p as any).showSmartGateChevrons = !!v; }); }
 try { window.addEventListener('beforeunload', writeNow); document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='hidden') writeNow(); }); } catch {}

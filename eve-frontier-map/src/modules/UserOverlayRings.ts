@@ -113,11 +113,15 @@ export class UserOverlayRings {
   // Debug helper: logs current per-system color lists and active attribute values
   debugLog(){
     try {
-      if(!this.points) { console.log('[overlay] no points'); return; }
-      const geom = this.points.geometry as THREE.BufferGeometry;
-      const attr:any = geom.getAttribute('color');
-      const per = (this.points as any).userData.colorsPerSystem;
-      console.log('[overlay-debug] systems=', this.systemIds, 'colorsPerSystem=', per, 'attributeSample=', Array.from({length: Math.min(5, attr.count)}, (_,i)=> [attr.getX(i), attr.getY(i), attr.getZ(i)]));
+      if(!this.points) { /* suppressed debug: no points */ return; }
+      // Only log when explicit runtime flag is set to true; otherwise do nothing
+      if((window as any).__EF_OVERLAY_DEBUG === true){
+        const geom = this.points.geometry as THREE.BufferGeometry;
+        const colorAttr:any = geom.getAttribute('color');
+        const per = (this.points as any).userData.colorsPerSystem;
+        const sample = Array.from({length: Math.min(5, colorAttr.count)}, (_,i)=> [colorAttr.getX(i), colorAttr.getY(i), colorAttr.getZ(i)]);
+        console.debug('[overlay-debug] systems=', this.systemIds, 'colorsPerSystem=', per, 'attributeSample=', sample);
+      }
     } catch(e){ console.warn('[overlay-debug] failed', e); }
   }
 }

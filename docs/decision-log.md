@@ -1,6 +1,6 @@
 <!-- Curated on 2025-09-23. This log keeps entries relevant to: Primordium indexer (World API via Docker), Postgres, Grafana, Docker, and the Cloudflare-hosted website (KV stats/snapshots/overlays). Older/legacy D1 indexer & cron/decoder content moved to archive. -->
 
-Older entries and legacy indexer details have been archived: [archive\decision-log\decision-log-legacy-2025-09-20.md](./archive/decision-log/decision-log-legacy-2025-09-20.md)
+Older entries and legacy indexer details have been archived: [archive\decision-log\decision-log-legacy-2025-09-23.md](./archive/decision-log/decision-log-legacy-2025-09-23.md)
 
 ## Current Environment Quick Reference (as of 2025-09-23)
 - Hosting/runtime

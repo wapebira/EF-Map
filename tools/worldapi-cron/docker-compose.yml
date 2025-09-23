@@ -8,6 +8,39 @@ services:
     networks:
       - indexer-network
 
+  # Snapshot exporter: publishes smart_gate_links_v1 to Cloudflare KV from local Postgres
+  snapshot-exporter:
+    build:
+      context: ../..
+      dockerfile: tools/snapshot-exporter/Dockerfile
+    image: ef-snapshot-exporter:local
+    restart: unless-stopped
+    environment:
+      # Postgres (Primordium reader)
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGDATABASE: postgres
+      PGUSER: user
+      PGPASSWORD: password
+      # Cloudflare (provide actual values via env or Docker secrets at runtime)
+      CF_ACCOUNT_ID: ${CF_ACCOUNT_ID}
+      CF_API_TOKEN: ${CF_API_TOKEN}
+      KV_NAMESPACE_ID: ${EF_SNAPSHOTS_NAMESPACE_ID}
+      # Behavior
+      ONLY_ONLINE: "1"
+      DRY_RUN: ${SNAPSHOT_DRY_RUN:-0}
+      LOG_JSON: "1"
+      # Ensure remote writes (Cloudflare API) rather than local: set FORCE_REMOTE=1
+      FORCE_REMOTE: "1"
+    networks:
+      - indexer-network
+    healthcheck:
+      test: ["CMD-SHELL", "wrangler --version >/dev/null 2>&1 || exit 1"]
+      interval: 1m
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
   # Killmails: 1-2 min tail-only
   worldapi-cron-killmails:
     image: ef-worldapi-cron:local

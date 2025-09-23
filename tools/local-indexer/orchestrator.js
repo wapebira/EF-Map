@@ -245,6 +245,10 @@ function startIngest() {
   // Always spawn the Node ingestor directly so we keep the real child handle
   // (Using a launcher script causes the child to exit immediately and triggers respawn loops)
   const env = { ...process.env };
+  // Default confirmation depth to 6 if not explicitly provided
+  if (!env.CONFIRM_DEPTH || String(env.CONFIRM_DEPTH).trim() === '' || /^true$/i.test(String(env.CONFIRM_DEPTH))) {
+    env.CONFIRM_DEPTH = '6';
+  }
   const p = spawn(process.execPath || 'node', [path.join(ROOT, 'tools/local-indexer/ingest_raw.js')], {
     cwd: ROOT,
     env,

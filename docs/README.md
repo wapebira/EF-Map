@@ -36,11 +36,15 @@ Active docs here:
 - `primodium-indexer.md` (current canonical chain ingestion)
 - `UNIVERSE_DATA_PIPELINE.md`, `WORLD_ROTATION_PLAYBOOK.md`
 
+## References
+- World v2 Quick Reference: `references/WorldV2-QuickRef.md`
+
 ## AI Usage Guidance
 If using an AI assistant ("Vibe coding" workflow – user provides intent, AI designs & implements):
 - Always restate the user's plain-language goal as a short actionable checklist.
 - Confirm whether a change touches protected baseline areas before editing (see playbooks above).
 - Propose safer alternative if user asks for something large/risky without required tokens (CORE CHANGE OK, SCHEMA CHANGE OK, etc.).
+ - Use available VS Code extensions when present (e.g., PostgreSQL, REST Client, SQLite, Grafana). Prefer the extension UX over ad‑hoc shell when it improves safety/clarity, and prefer assistant‑executed CLI for Cloudflare/Wrangler per `.github/copilot-instructions.md`. Do not ask the operator to install new tools unless they request it.
 
 ## Status Notes
 * Cloudflare Pages Worker is primary; legacy Netlify functions retained only for historical reference pending deletion.

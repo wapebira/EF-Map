@@ -4,13 +4,12 @@ const fs = require('fs');
 const path = require('path');
 
 const root = path.resolve(process.cwd(), '..'); // repo root
-// Prefer the app-local _worker.js (Pages implementation) before falling back to root variants.
-// Root _worker.js is a thin re-export wrapper; deploying it caused HTML fallback for API endpoints when the richer
-// Pages worker existed. This ordering ensures we ship the full Pages worker logic.
+// Prefer the consolidated root worker implementation to avoid drift and ensure latest fixes (e.g., tribe fallbacks)
+// are used in Pages. If missing, fall back to app-level, then legacy root worker.js.
 const candidates = [
-  path.join(process.cwd(), '_worker.js'), // app-level
-  path.join(root, '_worker.js'),          // root-level (wrapper)
-  path.join(root, 'worker.js')            // legacy root worker.js direct
+  path.join(root, '_worker.js'),          // root-level (thin re-export of worker.js)
+  path.join(root, 'worker.js'),           // direct root worker (legacy direct export)
+  path.join(process.cwd(), '_worker.js')  // app-level (older, retain only as last resort)
 ];
 const dist = path.join(process.cwd(), 'dist');
 if(!fs.existsSync(dist)){

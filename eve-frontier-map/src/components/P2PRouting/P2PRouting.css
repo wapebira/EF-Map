@@ -237,3 +237,5 @@ input[type=number].p2p-input { -moz-appearance: textfield; appearance: textfield
 .neutral-select-option.hover, .neutral-select-option:hover { background:#2a2a2a; color:#fff; }
 .neutral-select-option.selected::before { content:""; width:6px; height:6px; border-radius:50%; background:#999; margin-right:6px; }
 .neutral-select-option.selected { font-weight:600; }
+.neutral-select-option.disabled { color:#777; cursor:not-allowed; opacity:0.65; }
+.neutral-select-option.disabled:hover { background:transparent; color:#777; }

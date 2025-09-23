@@ -1,0 +1,7 @@
+{
+  "updatedAt": "2025-09-19T00:00:00.000Z",
+  "links": [
+    { "gateId": "demo_gate_1", "origin": 10001001, "destination": 10002002, "linked": true, "online": true, "cost": 0 },
+    { "gateId": "demo_gate_2", "origin": 10002002, "destination": 10003003, "linked": true, "online": false, "cost": 3 }
+  ]
+}

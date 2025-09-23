@@ -56,7 +56,7 @@
     },
     {
       "type": "stat",
-      "title": "Indexer lag (blocks)",
+      "title": "Lag to finalized (blocks)",
       "id": 13,
       "gridPos": { "h": 6, "w": 6, "x": 12, "y": 1 },
       "datasource": { "type": "postgres", "uid": "ef-postgres" },
@@ -66,7 +66,7 @@
           "refId": "A",
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT now() AS \"time\", ( (SELECT MAX(block_number) FROM meta.chain_head) - (SELECT MAX(block_number) FROM meta.processed_head) )::bigint AS value;"
+          "rawSql": "SELECT now() AS \"time\", ( (SELECT COALESCE(MAX(block_number),0) FROM meta.chain_head) - 6 - (SELECT COALESCE(MAX(block_number),0) FROM meta.processed_head) )::bigint AS value;"
         }
       ]
     },

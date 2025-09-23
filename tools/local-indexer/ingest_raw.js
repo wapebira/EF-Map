@@ -75,17 +75,26 @@ function locateWasm(file){
 }
 
 async function openDb(){
+  // Try native engine first when requested and available; if it fails (ABI mismatch, missing deps), fall back to sql.js
   if (ENGINE === 'better-sqlite3' && BetterSqlite3) {
-    isBetter = true;
-    db = new BetterSqlite3(DB_PATH, { verbose: null, fileMustExist: false });
-    // Speed pragmas for better-sqlite3
-    db.pragma('journal_mode = WAL');
-    db.pragma('synchronous = NORMAL');
-    db.pragma('temp_store = MEMORY');
-    db.pragma('cache_size = -200000');
-    const schemaSql = fs.readFileSync(path.resolve(__dirname, './schema.sql'), 'utf8');
-    db.exec(schemaSql);
-  } else {
+    try {
+      isBetter = true;
+      db = new BetterSqlite3(DB_PATH, { verbose: null, fileMustExist: false });
+      // Speed pragmas for better-sqlite3
+      db.pragma('journal_mode = WAL');
+      db.pragma('synchronous = NORMAL');
+      db.pragma('temp_store = MEMORY');
+      db.pragma('cache_size = -200000');
+      const schemaSql = fs.readFileSync(path.resolve(__dirname, './schema.sql'), 'utf8');
+      db.exec(schemaSql);
+    } catch (e) {
+      // Native module failed to load; degrade gracefully to sql.js
+      try { console.error('better-sqlite3 load failed; falling back to sql.js engine:', e && (e.details || e.message || e)); } catch {}
+      isBetter = false;
+      db = null;
+    }
+  }
+  if (!db) {
     if (!SQL) SQL = await initSqlJs({ locateFile: locateWasm });
     let needSchema = false;
     if (fs.existsSync(DB_PATH)) {

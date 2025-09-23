@@ -40,26 +40,26 @@ async function flush(){
   if(!QUEUE.length) return;
   if(!USAGE_ENDPOINT){ await detectEndpoint(); }
   const batch = QUEUE.splice(0, MAX_BATCH);
-  // send sequentially (functions are cheap) to keep server logic simple
-  for(const evt of batch){
-    try {
-  const endpoint = USAGE_ENDPOINT!;
-      const res = await fetch(endpoint, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(evt) });
-      if(!res.ok && typeof window !== 'undefined'){
-        // Development aid: log unknown event types or errors (non-intrusive)
-        if(res.status === 400){
-          console.warn('[usage] event rejected', evt.type);
-        } else {
-          console.warn('[usage] event failed', evt.type, res.status);
-          if(res.status === 404){
-            disabledDueToMissingEndpoint = true;
-            console.warn('[usage] disabling usage tracking (endpoint 404).');
-            QUEUE.length = 0;
-            break;
-          }
-        }
+  try {
+    const endpoint = USAGE_ENDPOINT!;
+    const res = await fetch(endpoint, {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify({ events: batch })
+    });
+    if(!res.ok && typeof window !== 'undefined'){
+      if(res.status === 404){
+        disabledDueToMissingEndpoint = true;
+        console.warn('[usage] disabling usage tracking (endpoint 404).');
+        QUEUE.length = 0;
+      } else if(res.status === 400){
+        console.warn('[usage] some events rejected (400).');
+      } else {
+        console.warn('[usage] batch failed', res.status);
       }
-    } catch(e) { /* ignore network errors silently */ }
+    }
+  } catch(e) {
+    // network errors: drop silently to avoid retry storms; events are non-critical
   }
   if(QUEUE.length) scheduleFlush();
 }
@@ -107,7 +107,7 @@ export async function trackImmediate(evt: UsageEventBase){
   if(!USAGE_ENDPOINT){ await detectEndpoint(); }
   try {
   const endpoint = USAGE_ENDPOINT!;
-    const res = await fetch(endpoint, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(evt) });
+    const res = await fetch(endpoint, { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ events:[evt] }) });
     if(!res.ok){ track(evt); } else { noteActivity(); }
   } catch { track(evt); }
 }

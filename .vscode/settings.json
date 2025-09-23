@@ -22,5 +22,6 @@
 
     // Chat / UI ergonomics
     "workbench.secondarySideBar.defaultVisibility": "visible",
-    "chat.math.enabled": true
+    "chat.math.enabled": true,
+    "chat.agent.maxRequests": 100
 }
