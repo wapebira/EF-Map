@@ -1,0 +1,60 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Start metrics server",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"tools/local-indexer/metrics_server.js"
+			],
+			"isBackground": true,
+			"group": "none"
+		},
+		{
+			"label": "Fetch specific gates",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"tools/find_gates.mjs",
+				"https://feature-smart-gate-preview.ef-map.pages.dev",
+				"--contains",
+				"63994086827917643456569397617352518577262080062173992510601782164513069228530"
+			]
+		},
+		{
+			"label": "Fetch second gate",
+			"type": "shell",
+			"command": "node",
+			"args": [
+				"tools/find_gates.mjs",
+				"https://feature-smart-gate-preview.ef-map.pages.dev",
+				"--contains",
+				"8717844610379050986275486033636574330792592002627818827440625499175921023262"
+			]
+		},
+		{
+			"label": "Fetch debug snapshots (simple)",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"$base='https://feature-smart-gate-preview.ef-map.pages.dev'; $u=$base+'/api/debug-snapshots?force=1'; $r=Invoke-WebRequest -UseBasicParsing -Uri $u -Headers @{Accept='application/json'}; if($r.StatusCode -eq 200) { $json = $r.Content | ConvertFrom-Json; ($json | ConvertTo-Json -Depth 4) | Out-File -FilePath tmp_debug_snapshots.json -Encoding utf8; Get-Content tmp_debug_snapshots.json -TotalCount 80 } else { Write-Host ('HTTP ' + $r.StatusCode) }"
+			]
+		},
+		{
+			"label": "Build frontend",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-Command",
+				"cd eve-frontier-map; if (!(Test-Path node_modules)) { npm install }; npm run build"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		}
+	]
+}

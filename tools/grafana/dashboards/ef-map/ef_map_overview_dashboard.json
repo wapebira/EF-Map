@@ -1,0 +1,317 @@
+{
+  "__requires": [
+    { "id": "grafana", "name": "Grafana", "type": "grafana", "version": "10.4.3" },
+    { "id": "postgres", "name": "PostgreSQL", "type": "datasource", "version": "1" },
+    { "id": "stat", "name": "Stat", "type": "panel", "version": "1" },
+    { "id": "timeseries", "name": "Time series", "type": "panel", "version": "1" },
+    { "id": "table", "name": "Table", "type": "panel", "version": "1" }
+  ],
+  "schemaVersion": 38,
+  "title": "EF-Map Overview",
+  "uid": "ef-map-overview",
+  "version": 2,
+  "tags": ["ef-map", "chain", "world_api"],
+  "timezone": "",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "type": "row",
+      "title": "Chain Indexer",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 10,
+      "panels": []
+    },
+    {
+      "type": "stat",
+      "title": "Chain head (max block)",
+      "id": 11,
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 1 },
+      "datasource": { "type": "postgres", "uid": "ef-postgres" },
+      "options": { "reduceOptions": { "calcs": ["last"], "fields": "value" } },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT now() AS \"time\", MAX(block_number)::bigint AS value FROM meta.chain_head;"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Processed head (max block)",
+      "id": 12,
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 1 },
+      "datasource": { "type": "postgres", "uid": "ef-postgres" },
+      "options": { "reduceOptions": { "calcs": ["last"], "fields": "value" } },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT now() AS \"time\", MAX(block_number)::bigint AS value FROM meta.processed_head;"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Lag to finalized (blocks)",
+      "id": 13,
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 1 },
+      "datasource": { "type": "postgres", "uid": "ef-postgres" },
+      "options": { "reduceOptions": { "calcs": ["last"], "fields": "value" } },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT now() AS \"time\", ( (SELECT COALESCE(MAX(block_number),0) FROM meta.chain_head) - 6 - (SELECT COALESCE(MAX(block_number),0) FROM meta.processed_head) )::bigint AS value;"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Decoded tables",
+      "id": 30,
+      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 1 },
+      "datasource": { "type": "postgres", "uid": "ef-postgres" },
+      "options": { "reduceOptions": { "calcs": ["last"], "fields": "value" } },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT now() AS \"time\", COUNT(*)::bigint AS value FROM pg_stat_user_tables WHERE schemaname ~ '^0x';"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Chain head over time",
+      "id": 14,
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 7 },
+      "datasource": { "type": "postgres", "uid": "ef-postgres" },
+      "fieldConfig": { "defaults": { "unit": "none" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT ts AS \"time\", block_number::bigint AS \"Chain head\" FROM meta.chain_head WHERE ts > now() - interval '6 hours' ORDER BY ts;"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Processed head over time",
+      "id": 15,
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 7 },
+      "datasource": { "type": "postgres", "uid": "ef-postgres" },
+      "fieldConfig": { "defaults": { "unit": "none" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT ts AS \"time\", block_number::bigint AS \"Processed head\" FROM meta.processed_head WHERE ts > now() - interval '6 hours' ORDER BY ts;"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Processed blocks per minute",
+      "id": 16,
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 15 },
+      "datasource": { "type": "postgres", "uid": "ef-postgres" },
+      "fieldConfig": { "defaults": { "unit": "blocks" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT date_trunc('minute', ts) AS \"time\", (MAX(block_number) - MIN(block_number))::bigint AS \"Blocks/min\" FROM meta.processed_head WHERE ts > now() - interval '6 hours' GROUP BY 1 ORDER BY 1;"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "World API Counts",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 23 },
+      "id": 20,
+      "panels": []
+    },
+    {
+      "type": "stat",
+      "title": "World API newest load age (min)",
+      "id": 37,
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 24 },
+      "datasource": { "type": "postgres", "uid": "ef-postgres" },
+      "options": { "reduceOptions": { "calcs": ["last"], "fields": "value" } },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "-- Age in minutes of the newest World API ingestion across dlt loads or killmails time\nSELECT now() AS \"time\", EXTRACT(EPOCH FROM (now() - MAX(ts))) / 60.0 AS value FROM (\n  SELECT MAX(inserted_at) AS ts FROM world_api_dlt._dlt_loads\n  UNION ALL SELECT MAX(time) FROM world_api_dlt.killmails\n) t;"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "minutes" }, "overrides": [] }
+    },
+    {
+      "type": "table",
+      "title": "World API tables (counts)",
+      "id": 21,
+      "gridPos": { "h": 10, "w": 14, "x": 0, "y": 24 },
+      "datasource": { "type": "postgres", "uid": "ef-postgres" },
+      "options": { "showHeader": true },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT table_name, rows\nFROM world_api_metrics.table_counts\nWHERE table_name LIKE 'world_api_dlt.%'\n  AND ( split_part(table_name,'.',2) LIKE 'raw_%'\n        OR split_part(table_name,'.',2) IN ('smartassembly','smartassembly_flat','smartcharacter','killmails','solarsystem','type','tribe','tribe_member') )\nORDER BY table_name;"
+        }
+      ]
+    },
+    { "type": "stat", "title": "Total World API rows", "id": 22, "gridPos": { "h": 5, "w": 10, "x": 14, "y": 24 }, "datasource": { "type": "postgres", "uid": "ef-postgres" }, "options": { "reduceOptions": { "calcs": ["last"], "fields": "value" } }, "targets": [ { "refId": "A", "format": "time_series", "rawQuery": true, "rawSql": "SELECT now() AS \"time\", SUM(rows)::bigint AS value FROM world_api_metrics.table_counts;" } ] },
+    { "type": "stat", "title": "Solarsystems (dlt)", "id": 23, "gridPos": { "h": 5, "w": 5, "x": 14, "y": 29 }, "datasource": { "type": "postgres", "uid": "ef-postgres" }, "options": { "reduceOptions": { "calcs": ["last"], "fields": "value" } }, "targets": [ { "refId": "A", "format": "time_series", "rawQuery": true, "rawSql": "SELECT now() AS \"time\", COUNT(*)::bigint AS value FROM world_api_dlt.raw_solarsystems;" } ] },
+    { "type": "stat", "title": "Types (dlt)", "id": 24, "gridPos": { "h": 5, "w": 5, "x": 19, "y": 29 }, "datasource": { "type": "postgres", "uid": "ef-postgres" }, "options": { "reduceOptions": { "calcs": ["last"], "fields": "value" } }, "targets": [ { "refId": "A", "format": "time_series", "rawQuery": true, "rawSql": "SELECT now() AS \"time\", COUNT(*)::bigint AS value FROM world_api_dlt.raw_types;" } ] },
+    { "type": "stat", "title": "Tribes (dlt)", "id": 25, "gridPos": { "h": 5, "w": 5, "x": 14, "y": 34 }, "datasource": { "type": "postgres", "uid": "ef-postgres" }, "options": { "reduceOptions": { "calcs": ["last"], "fields": "value" } }, "targets": [ { "refId": "A", "format": "time_series", "rawQuery": true, "rawSql": "SELECT now() AS \"time\", COUNT(*)::bigint AS value FROM world_api_dlt.raw_tribes;" } ] },
+    { "type": "stat", "title": "Smartcharacters (dlt)", "id": 26, "gridPos": { "h": 5, "w": 5, "x": 19, "y": 34 }, "datasource": { "type": "postgres", "uid": "ef-postgres" }, "options": { "reduceOptions": { "calcs": ["last"], "fields": "value" } }, "targets": [ { "refId": "A", "format": "time_series", "rawQuery": true, "rawSql": "SELECT now() AS \"time\", COUNT(*)::bigint AS value FROM world_api_dlt.raw_smartcharacters;" } ] },
+    { "type": "stat", "title": "Smartcharacters (details)", "id": 27, "gridPos": { "h": 5, "w": 10, "x": 14, "y": 39 }, "datasource": { "type": "postgres", "uid": "ef-postgres" }, "options": { "reduceOptions": { "calcs": ["last"], "fields": "value" } }, "targets": [ { "refId": "A", "format": "time_series", "rawQuery": true, "rawSql": "SELECT now() AS \"time\", COUNT(*)::bigint AS value FROM world_api_dlt.raw_smartcharacters_details;" } ] },
+  { "type": "stat", "title": "Smartassembly links (details)", "id": 28, "gridPos": { "h": 5, "w": 10, "x": 14, "y": 44 }, "datasource": { "type": "postgres", "uid": "ef-postgres" }, "options": { "reduceOptions": { "calcs": ["last"], "fields": "value" } }, "targets": [ { "refId": "A", "format": "time_series", "rawQuery": true, "rawSql": "SELECT now() AS \"time\", COUNT(*)::bigint AS value FROM world_api_dlt.raw_smartcharacters_details__smart_assemblies;" } ] },
+  { "type": "stat", "title": "Smartassemblies (flat)", "id": 31, "gridPos": { "h": 5, "w": 5, "x": 14, "y": 49 }, "datasource": { "type": "postgres", "uid": "ef-postgres" }, "options": { "reduceOptions": { "calcs": ["last"], "fields": "value" } }, "targets": [ { "refId": "A", "format": "time_series", "rawQuery": true, "rawSql": "SELECT now() AS \"time\", COUNT(*)::bigint AS value FROM world_api_dlt.smartassembly_flat;" } ] },
+  { "type": "stat", "title": "Smartassemblies (canonical)", "id": 33, "gridPos": { "h": 5, "w": 5, "x": 19, "y": 49 }, "datasource": { "type": "postgres", "uid": "ef-postgres" }, "options": { "reduceOptions": { "calcs": ["last"], "fields": "value" } }, "targets": [ { "refId": "A", "format": "time_series", "rawQuery": true, "rawSql": "SELECT now() AS \"time\", COUNT(*)::bigint AS value FROM world_api_dlt.smartassembly;" } ] },
+  { "type": "stat", "title": "Killmails", "id": 34, "gridPos": { "h": 5, "w": 5, "x": 14, "y": 54 }, "datasource": { "type": "postgres", "uid": "ef-postgres" }, "options": { "reduceOptions": { "calcs": ["last"], "fields": "value" } }, "targets": [ { "refId": "A", "format": "time_series", "rawQuery": true, "rawSql": "SELECT now() AS \"time\", COALESCE((SELECT COUNT(*) FROM world_api_dlt.killmails),0)::bigint AS value;" } ] },
+  { "type": "stat", "title": "Solarsystems (canonical)", "id": 35, "gridPos": { "h": 5, "w": 5, "x": 19, "y": 54 }, "datasource": { "type": "postgres", "uid": "ef-postgres" }, "options": { "reduceOptions": { "calcs": ["last"], "fields": "value" } }, "targets": [ { "refId": "A", "format": "time_series", "rawQuery": true, "rawSql": "SELECT now() AS \"time\", COUNT(*)::bigint AS value FROM world_api_dlt.solarsystem;" } ] },
+  { "type": "stat", "title": "Tribes (canonical)", "id": 36, "gridPos": { "h": 5, "w": 5, "x": 14, "y": 59 }, "datasource": { "type": "postgres", "uid": "ef-postgres" }, "options": { "reduceOptions": { "calcs": ["last"], "fields": "value" } }, "targets": [ { "refId": "A", "format": "time_series", "rawQuery": true, "rawSql": "SELECT now() AS \"time\", COUNT(*)::bigint AS value FROM world_api_dlt.tribe;" } ] },
+  { "type": "stat", "title": "Tribe members (canonical)", "id": 47, "gridPos": { "h": 5, "w": 5, "x": 19, "y": 59 }, "datasource": { "type": "postgres", "uid": "ef-postgres" }, "options": { "reduceOptions": { "calcs": ["last"], "fields": "value" } }, "targets": [ { "refId": "A", "format": "time_series", "rawQuery": true, "rawSql": "SELECT now() AS \"time\", COUNT(*)::bigint AS value FROM world_api_dlt.tribe_member;" } ] },
+    {
+      "type": "table",
+      "title": "World API normalized tables (counts)",
+      "id": 32,
+      "gridPos": { "h": 10, "w": 14, "x": 0, "y": 54 },
+      "datasource": { "type": "postgres", "uid": "ef-postgres" },
+      "options": { "showHeader": true },
+      "targets": [
+  { "refId": "A", "format": "table", "rawQuery": true, "rawSql": "SELECT split_part(table_name,'.',1) AS schema, split_part(table_name,'.',2) AS table_name, rows FROM world_api_metrics.table_counts WHERE table_name LIKE 'world_api_dlt.%' AND split_part(table_name,'.',2) NOT LIKE 'raw_%' AND split_part(table_name,'.',2) NOT LIKE '_%' AND split_part(table_name,'.',2) <> 'smartassembly_flat' ORDER BY rows DESC, table_name;" }
+      ]
+    }
+    ,
+    {
+      "type": "row",
+      "title": "World API Health",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 64 },
+      "id": 43,
+      "panels": []
+    },
+    {
+      "type": "table",
+      "title": "World API ingest health (cadence, heartbeat)",
+      "id": 44,
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 65 },
+      "datasource": { "type": "postgres", "uid": "ef-postgres" },
+      "options": { "showHeader": true },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT schema, table_name, COALESCE(rows,0) AS rows, last_ingest_at, ROUND(minutes_since_ingest::numeric,2) AS minutes_since_ingest, expected_cadence_min, last_heartbeat, ROUND(minutes_since_heartbeat::numeric,2) AS minutes_since_heartbeat, job_ok, status FROM world_api_dlt.worldapi_ingest_health ORDER BY table_name;"
+        }
+      ]
+    }
+    ,
+    {
+      "type": "table",
+      "title": "World API last loads (per table)",
+      "id": 38,
+  "gridPos": { "h": 8, "w": 24, "x": 0, "y": 73 },
+      "datasource": { "type": "postgres", "uid": "ef-postgres" },
+      "options": { "showHeader": true },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "-- Per-table last load id/time for DLT tables with age in minutes.\n-- Uses each table's _dlt_load_id joined to _dlt_loads.inserted_at (canonical + raw).\nWITH loads AS (\n  -- raw/* sources\n  SELECT 'world_api_dlt.raw_solarsystems' AS table_name, MAX(_dlt_load_id) AS last_load_id FROM world_api_dlt.raw_solarsystems\n  UNION ALL SELECT 'world_api_dlt.raw_types',        MAX(_dlt_load_id) FROM world_api_dlt.raw_types\n  UNION ALL SELECT 'world_api_dlt.raw_tribes',       MAX(_dlt_load_id) FROM world_api_dlt.raw_tribes\n  UNION ALL SELECT 'world_api_dlt.raw_smartcharacters', MAX(_dlt_load_id) FROM world_api_dlt.raw_smartcharacters\n  UNION ALL SELECT 'world_api_dlt.raw_smartcharacters_details', MAX(_dlt_load_id) FROM world_api_dlt.raw_smartcharacters_details\n  -- nested array does not carry _dlt_load_id; derive via parent details rows\n  UNION ALL SELECT 'world_api_dlt.raw_smartcharacters_details__smart_assemblies', MAX(d._dlt_load_id)\n             FROM world_api_dlt.raw_smartcharacters_details d\n             JOIN world_api_dlt.raw_smartcharacters_details__smart_assemblies a\n               ON a._dlt_parent_id = d._dlt_id\n  -- canonical / normalized / flattened tables\n  UNION ALL SELECT 'world_api_dlt.smartassembly',       MAX(_dlt_load_id) FROM world_api_dlt.smartassembly\n  UNION ALL SELECT 'world_api_dlt.smartcharacter',      MAX(_dlt_load_id) FROM world_api_dlt.smartcharacter\n  UNION ALL SELECT 'world_api_dlt.smartassembly_flat',  MAX(_dlt_load_id) FROM world_api_dlt.smartassembly_flat\n  UNION ALL SELECT 'world_api_dlt.solarsystem',         MAX(_dlt_load_id) FROM world_api_dlt.solarsystem\n  UNION ALL SELECT 'world_api_dlt.tribe',               MAX(_dlt_load_id) FROM world_api_dlt.tribe\n  UNION ALL SELECT 'world_api_dlt.type',                MAX(_dlt_load_id) FROM world_api_dlt.type\n  UNION ALL SELECT 'world_api_dlt.tribe_member',        MAX(_dlt_load_id) FROM world_api_dlt.tribe_member\n  -- events\n  UNION ALL SELECT 'world_api_dlt.killmails',           MAX(_dlt_load_id) FROM world_api_dlt.killmails\n), joined AS (\n  SELECT l.table_name, l.last_load_id, ld.inserted_at AS loaded_at\n  FROM loads l\n  LEFT JOIN world_api_dlt._dlt_loads ld ON ld.load_id = l.last_load_id\n)\nSELECT table_name, last_load_id, loaded_at,\n       EXTRACT(EPOCH FROM (now() - loaded_at)) / 60.0 AS age_min\nFROM joined\nORDER BY age_min NULLS LAST, table_name;"
+        }
+      ]
+    }
+    ,
+    {
+      "type": "table",
+  "title": "Canonical table row counts",
+      "id": 41,
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 86 },
+      "datasource": { "type": "postgres", "uid": "ef-postgres" },
+      "options": { "showHeader": true },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT * FROM (\n  SELECT 'killmails' AS table_name, COUNT(*)::bigint AS rows FROM world_api_dlt.killmails\n  UNION ALL SELECT 'smartassembly', COUNT(*) FROM world_api_dlt.smartassembly\n  UNION ALL SELECT 'smartassembly_flat', COUNT(*) FROM world_api_dlt.smartassembly_flat\n  UNION ALL SELECT 'smartcharacter', COUNT(*) FROM world_api_dlt.smartcharacter\n  UNION ALL SELECT 'solarsystem', COUNT(*) FROM world_api_dlt.solarsystem\n  UNION ALL SELECT 'tribe', COUNT(*) FROM world_api_dlt.tribe\n  UNION ALL SELECT 'type', COUNT(*) FROM world_api_dlt.type\n  UNION ALL SELECT 'tribe_member', COUNT(*) FROM world_api_dlt.tribe_member\n) t\nORDER BY table_name;"
+        }
+      ]
+    }
+    ,
+    {
+      "type": "stat",
+      "title": "Smartassembly ingestion progress (%)",
+      "id": 42,
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 86 },
+      "datasource": { "type": "postgres", "uid": "ef-postgres" },
+      "options": { "reduceOptions": { "calcs": ["last"], "fields": "value" } },
+      "fieldConfig": { "defaults": { "unit": "percent" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT now() AS \"time\",\n  CASE WHEN flat_ct = 0 THEN 0::float\n       ELSE (asm_ct::float / flat_ct::float) * 100.0 END AS value\nFROM (\n  SELECT (SELECT COUNT(*) FROM world_api_dlt.smartassembly) AS asm_ct,\n         (SELECT COUNT(*) FROM world_api_dlt.smartassembly_flat) AS flat_ct\n) s;"
+        }
+      ]
+    }
+    ,
+    {
+      "type": "timeseries",
+      "title": "World API DLT loads/hour (6h)",
+      "id": 40,
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 72 },
+      "datasource": { "type": "postgres", "uid": "ef-postgres" },
+      "fieldConfig": { "defaults": { "unit": "none" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT date_trunc('hour', inserted_at) AS \"time\", COUNT(*)::bigint AS \"DLT loads\"\nFROM world_api_dlt._dlt_loads\nWHERE $__timeFilter(inserted_at)\nGROUP BY 1\nORDER BY 1;"
+        }
+      ],
+      "timeFrom": "24h"
+    }
+    ,
+    {
+      "type": "table",
+      "title": "Decoded tables (approx rows)",
+  "id": 29,
+  "gridPos": { "h": 12, "w": 24, "x": 0, "y": 81 },
+      "datasource": { "type": "postgres", "uid": "ef-postgres" },
+      "options": { "showHeader": true },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT schemaname AS namespace, relname AS table_name, n_live_tup::bigint AS rows FROM pg_stat_user_tables WHERE schemaname ~ '^0x' ORDER BY rows DESC, namespace, table_name LIMIT 200;"
+        }
+      ]
+    }
+  ],
+  "templating": { "list": [] },
+  "timepicker": {}
+}

@@ -27,16 +27,17 @@ export interface PanelDrawerHandle {
 }
 
 const baseDefaults: Record<string,{x:number;y:number}> = {
-  routing: { x:140, y:70 },
-  cinematic: { x:140, y:70 },
-  'region-stats': { x:140, y:70 },
-  'region-compare': { x:140, y:70 },
-  'user-overlay': { x:140, y:70 },
-  'display-settings': { x:140, y:70 },
+  routing: { x:128, y:84 },
+  cinematic: { x:128, y:84 },
+  'region-stats': { x:128, y:84 },
+  'region-compare': { x:128, y:84 },
+  'user-overlay': { x:128, y:84 },
+  'display-settings': { x:128, y:84 },
+  'smart-gates': { x:128, y:84 },
 };
 
 const PanelDrawer = forwardRef<PanelDrawerHandle, PanelDrawerProps>(({ id, title, onClose, children, defaultPos, scale=1, zIndex=1450, onActivate, resetToken, resizable=false, initialSize, minSize, maxSize, isMinimized=false, onToggleMinimize }, ref) => {
-  const initial = defaultPos || baseDefaults[id] || { x:140, y:70 };
+  const initial = defaultPos || baseDefaults[id] || { x:128, y:84 };
   const drag = useDraggable('drawer-'+id, initial);
   useImperativeHandle(ref, ()=>({
     autoPosition:(p)=> drag.setPosSilent(p)

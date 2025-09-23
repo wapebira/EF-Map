@@ -1,0 +1,23 @@
+# EF-Map – world_api_dlt ingestion config (example)
+# Copy to config.yaml and adjust endpoints and headers as needed.
+
+endpoints:
+  - name: systems
+    url: https://example-world-api/systems
+    method: GET
+    items_path: data
+    pk: id
+    table: systems
+    headers:
+      Accept: application/json
+    params: {}
+
+  - name: regions
+    url: https://example-world-api/regions
+    method: GET
+    items_path: data
+    pk: id
+    table: regions
+    headers:
+      Accept: application/json
+    params: {}

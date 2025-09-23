@@ -25,12 +25,13 @@ interface MapData {
 
 interface RouteSummary {
   stargateJumps: number;
+  smartGateJumps: number;
   shipJumps: number;
   totalDistance: number;
   shipJumpDistance: number;
 }
 
-const MAX_NOTE_LENGTH = 1500;
+const MAX_NOTE_LENGTH = 1400;
 
 const getDistance = (a: SolarSystem, b: SolarSystem): number => {
   return Math.sqrt(
@@ -40,9 +41,10 @@ const getDistance = (a: SolarSystem, b: SolarSystem): number => {
   );
 };
 
-const calculateRouteSummary = (path: string[], mapData: MapData): RouteSummary => {
+const calculateRouteSummary = (path: string[], mapData: MapData, usedSmartGatePairs?: Set<string> | null): RouteSummary => {
   const summary: RouteSummary = {
     stargateJumps: 0,
+    smartGateJumps: 0,
     shipJumps: 0,
     totalDistance: 0,
     shipJumpDistance: 0,
@@ -65,7 +67,15 @@ const calculateRouteSummary = (path: string[], mapData: MapData): RouteSummary =
         (g.source_system_id === endSystem.id && g.destination_system_id === startSystem.id)
     );
 
-    if (isStargate) {
+  // Treat Smart Gate hops as stargate-equivalent for summary metrics ONLY when actually used
+  const sgKeyF = `${startSystem.id}-${endSystem.id}`;
+  const sgKeyR = `${endSystem.id}-${startSystem.id}`;
+  const isSmartGate = !!(usedSmartGatePairs && (usedSmartGatePairs.has(sgKeyF) || usedSmartGatePairs.has(sgKeyR)));
+
+    // Prioritize Smart Gate classification when actually used, otherwise count as regular stargate if adjacent
+    if (isSmartGate) {
+      summary.smartGateJumps++;
+    } else if (isStargate) {
       summary.stargateJumps++;
     } else {
       summary.shipJumps++;
@@ -80,9 +90,10 @@ interface NoteFormatOptions {
   includeLegend: boolean;
   includeStats: boolean;
   summary?: RouteSummary | null;
+  maxNoteLength?: number; // optional override for pagination size
 }
 
-const formatRouteToNotes = (path: string[], mapData: MapData, options?: NoteFormatOptions): string[] => {
+const formatRouteToNotes = (path: string[], mapData: MapData, options?: NoteFormatOptions, smartGateItemByPair?: Record<string, number> | null, usedSmartGatePairs?: Set<string> | null): string[] => {
   if (path.length < 2) return [];
 
   const systemsByName: Map<string, SolarSystem> = new Map(Object.values(mapData.solar_systems).map(s => [s.name.toLowerCase(), s]));
@@ -101,7 +112,7 @@ const formatRouteToNotes = (path: string[], mapData: MapData, options?: NoteForm
   const legend = `Gate: (x)→ SmartGate: []→ Jump: <distance>→ | * = single-planet system with no stargates\n`;
   const legendBlock = options?.includeLegend !== false ? legend : '';
   const statsBlock = (options?.includeStats && options?.summary) ?
-    `Stats: Gates ${options.summary.stargateJumps} | Ship ${options.summary.shipJumps} | Dist ${options.summary.totalDistance.toFixed(2)} LY | ShipDist ${options.summary.shipJumpDistance.toFixed(2)} LY\n` : '';
+    `Stats: Stargates ${options.summary.stargateJumps} | Smart Gates ${options.summary.smartGateJumps} | Ship ${options.summary.shipJumps} | Dist ${options.summary.totalDistance.toFixed(2)} LY | ShipDist ${options.summary.shipJumpDistance.toFixed(2)} LY\n` : '';
 
   const getSystemLink = (system: SolarSystem): string => {
     const hasGates = gateSystemIds.has(system.id);
@@ -114,16 +125,29 @@ const formatRouteToNotes = (path: string[], mapData: MapData, options?: NoteForm
   let pageNum = 1;
   let currentBody = getSystemLink(from);
 
-  // This logic now correctly handles the condensed path for efficiency
-  // First, create the condensed path representation
+  // This logic condenses consecutive regular gates; Smart Gates are treated as single segments
   type RouteSegment = 
     | { type: 'GATE'; count: number; from: SolarSystem; to: SolarSystem }
+    | { type: 'SGATE'; itemId: number; from: SolarSystem; to: SolarSystem }
     | { type: 'JUMP'; distance: number; from: SolarSystem; to: SolarSystem };
   const condensedPath: RouteSegment[] = [];
   let i = 0;
   while (i < pathSystems.length - 1) {
     const startSystem = pathSystems[i];
     let endSystem = pathSystems[i + 1];
+
+    // First, check whether this hop was actually traversed via Smart Gate in the computed route
+    const sgKeyF = `${startSystem.id}-${endSystem.id}`;
+    const sgKeyR = `${endSystem.id}-${startSystem.id}`;
+    const usedSg = !!(usedSmartGatePairs && (usedSmartGatePairs.has(sgKeyF) || usedSmartGatePairs.has(sgKeyR)));
+    if (usedSg) {
+  // Look up item id for hyperlink using the forward (origin->destination) direction only
+  // The itemId should correspond to the gate located in the ORIGIN system
+  const sgItemId = (smartGateItemByPair && smartGateItemByPair[sgKeyF]) || 0;
+      condensedPath.push({ type: 'SGATE', itemId: sgItemId, from: startSystem, to: endSystem });
+      i++;
+      continue;
+    }
 
     const isStargate = Object.values(mapData.stargates).some(g => 
         (g.source_system_id === startSystem.id && g.destination_system_id === endSystem.id) ||
@@ -136,16 +160,17 @@ const formatRouteToNotes = (path: string[], mapData: MapData, options?: NoteForm
       while (currentIdx < pathSystems.length - 1) {
         const s1 = pathSystems[currentIdx];
         const s2 = pathSystems[currentIdx + 1];
+  // Stop merging if the next hop is actually a Smart Gate hop in this route
+  const runF = `${s1.id}-${s2.id}`;
+  const runR = `${s2.id}-${s1.id}`;
+  if (usedSmartGatePairs && (usedSmartGatePairs.has(runF) || usedSmartGatePairs.has(runR))) break;
         const isNextStargate = Object.values(mapData.stargates).some(g => 
             (g.source_system_id === s1.id && g.destination_system_id === s2.id) ||
             (g.source_system_id === s2.id && g.destination_system_id === s1.id)
         );
-        if (isNextStargate) {
-          gateCount++;
-          currentIdx++;
-        } else {
-          break;
-        }
+        if (!isNextStargate) break;
+        gateCount++;
+        currentIdx++;
       }
       endSystem = pathSystems[currentIdx];
       condensedPath.push({ type: 'GATE', count: gateCount, from: startSystem, to: endSystem });
@@ -158,16 +183,22 @@ const formatRouteToNotes = (path: string[], mapData: MapData, options?: NoteForm
   }
 
   // Now build pages from the condensed path
+  const LIMIT = options?.maxNoteLength && Number.isFinite(options.maxNoteLength) ? Math.max(200, options.maxNoteLength) : MAX_NOTE_LENGTH;
+
   for (const segment of condensedPath) {
     const separator = segment.type === 'GATE' 
       ? ` (${segment.count})→ ` 
-      : ` ${segment.distance.toFixed(2)}→ `;
+      : segment.type === 'SGATE' 
+        ? (segment.itemId
+            ? ` <a href="showinfo:88086//${(Number.isFinite(segment.itemId) ? (segment.itemId as number).toFixed(0) : String(segment.itemId))}">[Smart Gate]</a>→ `
+            : ` [Smart Gate]→ `)
+        : ` ${segment.distance.toFixed(2)}→ `;
     const nextLink = getSystemLink(segment.to);
     const nextPiece = separator + nextLink;
 
   const pageHeader = `${from.name} → ${to.name} (Page ${pageNum})\n` + (pages.length===0 ? statsBlock : '') + legendBlock;
     
-    if (pageHeader.length + currentBody.length + nextPiece.length > MAX_NOTE_LENGTH) {
+    if (pageHeader.length + currentBody.length + nextPiece.length > LIMIT) {
   const finalHeader = `${from.name} → ${to.name}${pages.length > 0 ? ` (Page ${pageNum})` : ''}\n` + (pages.length===0 ? statsBlock : '') + legendBlock;
       pages.push(finalHeader + currentBody);
       
@@ -203,6 +234,7 @@ interface P2PRoutingProps {
     overheadPct?: number,
     exploreCorridorPct?: number,
     exploreProgressBiasPct?: number,
+    smartGateMode?: 'none'|'public'|'authorized',
   ) => void;
   onStopCalculation?: () => void;
   isCalculating: boolean;
@@ -227,10 +259,14 @@ interface P2PRoutingProps {
   initialOptimizeFor?: 'fuel' | 'jumps' | 'explore';
   initialAlgorithm?: 'astar' | 'dijkstra';
   onParamChange?: (jump:number, optimize:'fuel'|'jumps'|'explore', algorithm:'astar'|'dijkstra')=>void;
+  // Optional: Smart Gates helpers (mode UI and note hyperlinking)
+  smartGateItemByPair?: Record<string, number> | null;
+  usedSmartGatePairs?: Set<string> | null;
+  isLoggedIn?: boolean;
 }
 
 // Minimal neutral custom select (no accent colors) for consistent option highlight across platforms
-interface NeutralOption<T extends string> { value: T; label: string }
+interface NeutralOption<T extends string> { value: T; label: string; disabled?: boolean }
 interface NeutralSelectProps<T extends string> {
   value: T; onChange: (v: T)=>void; options: NeutralOption<T>[]; ariaLabel: string; id: string;
 }
@@ -244,9 +280,10 @@ const NeutralSelect = <T extends string>({ value, onChange, options, ariaLabel, 
   const dropdownRef = useRef<HTMLDivElement|null>(null);
 
   const currentIdx = options.findIndex(o=>o.value===value);
+  const firstEnabledIdx = options.findIndex(o=>!o.disabled);
 
   const close = useCallback(()=>{ setOpen(false); setHoverIdx(-1); },[]);
-  const openList = useCallback(()=>{ setOpen(true); setHoverIdx(currentIdx>=0?currentIdx:0); },[currentIdx]);
+  const openList = useCallback(()=>{ setOpen(true); setHoverIdx(currentIdx>=0 && !options[currentIdx]?.disabled ? currentIdx : (firstEnabledIdx>=0?firstEnabledIdx:0)); },[currentIdx, firstEnabledIdx, options]);
 
   // Measure available viewport space and decide dropdown direction + max height
   const measure = useCallback(()=>{
@@ -287,9 +324,31 @@ const NeutralSelect = <T extends string>({ value, onChange, options, ariaLabel, 
   },[open, close, measure]);
 
   const onKey = (e: React.KeyboardEvent) => {
-    if(e.key==='ArrowDown'){ e.preventDefault(); if(!open) openList(); else setHoverIdx(i=> Math.min(options.length-1, (i<0?0:i)+1)); }
-    else if(e.key==='ArrowUp'){ e.preventDefault(); if(!open) openList(); else setHoverIdx(i=> Math.max(0, (i<0?0:i)-1)); }
-    else if(e.key==='Enter' || e.key===' '){ e.preventDefault(); if(!open) openList(); else { if(hoverIdx>=0){ onChange(options[hoverIdx].value); close(); } } }
+    if(e.key==='ArrowDown'){
+      e.preventDefault();
+      if(!open) openList();
+      else setHoverIdx(i=>{
+        let next = (i<0?firstEnabledIdx:(i+1));
+        while(next < options.length && options[next]?.disabled) next++;
+        return Math.min(options.length-1, next);
+      });
+    }
+    else if(e.key==='ArrowUp'){
+      e.preventDefault();
+      if(!open) openList();
+      else setHoverIdx(i=>{
+        let prev = (i<0?firstEnabledIdx:(i-1));
+        while(prev >= 0 && options[prev]?.disabled) prev--;
+        return Math.max(0, prev);
+      });
+    }
+    else if(e.key==='Enter' || e.key===' '){
+      e.preventDefault();
+      if(!open) openList();
+      else {
+        if(hoverIdx>=0 && !options[hoverIdx]?.disabled){ onChange(options[hoverIdx].value); close(); }
+      }
+    }
     else if(e.key==='Escape'){ if(open){ e.preventDefault(); close(); } }
   };
 
@@ -309,10 +368,10 @@ const NeutralSelect = <T extends string>({ value, onChange, options, ariaLabel, 
           style={{ position:'fixed', left: portalStyle.left, top: portalStyle.top, width: portalStyle.width, maxHeight: portalStyle.maxHeight, zIndex: 4000 }}
         >
           {options.map((o,i)=>(
-            <div key={o.value} id={`${id}-opt-${i}`} role="option" aria-selected={o.value===value}
-              className={`neutral-select-option${i===hoverIdx?' hover':''}${o.value===value?' selected':''}`}
-              onMouseEnter={()=>setHoverIdx(i)}
-              onMouseDown={(e)=>{ e.preventDefault(); onChange(o.value); close(); }}>
+            <div key={o.value} id={`${id}-opt-${i}`} role="option" aria-selected={o.value===value} aria-disabled={o.disabled||undefined}
+              className={`neutral-select-option${o.disabled?' disabled':''}${i===hoverIdx?' hover':''}${o.value===value?' selected':''}`}
+              onMouseEnter={()=>{ if(!o.disabled) setHoverIdx(i); }}
+              onMouseDown={(e)=>{ e.preventDefault(); if(o.disabled) return; onChange(o.value); close(); }}>
               {o.label}
             </div>
           ))}
@@ -323,7 +382,7 @@ const NeutralSelect = <T extends string>({ value, onChange, options, ariaLabel, 
   );
 };
 
-const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeResult, mapData, systemNames, progress, routeCalcTimeMs, open, onToggle, resetToken, selectedSystemName, selectedDestinationSystemName, waypoints = [], avoidSystems = [], onRemoveWaypoint, onRemoveAvoidSystem, waypointOptimize = false, onWaypointOptimizeChange, embedded = false, initialJumpDistance=60, initialOptimizeFor='fuel', initialAlgorithm='astar', onParamChange }: P2PRoutingProps) => {
+const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeResult, mapData, systemNames, progress, routeCalcTimeMs, open, onToggle, resetToken, selectedSystemName, selectedDestinationSystemName, waypoints = [], avoidSystems = [], onRemoveWaypoint, onRemoveAvoidSystem, waypointOptimize = false, onWaypointOptimizeChange, embedded = false, initialJumpDistance=60, initialOptimizeFor='fuel', initialAlgorithm='astar', onParamChange, smartGateItemByPair = null, usedSmartGatePairs = null, isLoggedIn = false }: P2PRoutingProps) => {
   const [fromSystem, setFromSystem] = useState('');
   const [toSystem, setToSystem] = useState('');
   const [jumpDistance, setJumpDistance] = useState(String(initialJumpDistance)); // editing this must not reset from/to
@@ -355,14 +414,22 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
   const [notePages, setNotePages] = useState<string[]>([]);
   const [includeLegend, setIncludeLegend] = useState(true);
   const [includeStats, setIncludeStats] = useState(false);
+  const [useEveMailPagination, setUseEveMailPagination] = useState(false);
   const [summary, setSummary] = useState<RouteSummary | null>(null);
   const [activeNotePage, setActiveNotePage] = useState(0);
   const [copyButtonText, setCopyButtonText] = useState('Copy');
+  const [smartGateMode, setSmartGateMode] = useState<'none'|'public'|'authorized'>(()=> 'none');
+
+  // If user is not logged in, silently downgrade 'authorized' selection to 'public'
+  useEffect(()=>{
+    if(!isLoggedIn && smartGateMode==='authorized') setSmartGateMode('public');
+  }, [isLoggedIn, smartGateMode]);
 
   useEffect(() => {
     if (routeResult?.path && mapData) {
-      const routeSummary = calculateRouteSummary(routeResult.path, mapData);
-      const notes = formatRouteToNotes(routeResult.path, mapData, { includeLegend, includeStats, summary: routeSummary });
+      const routeSummary = calculateRouteSummary(routeResult.path, mapData, usedSmartGatePairs);
+      const maxLen = useEveMailPagination ? MAX_NOTE_LENGTH * 2 : undefined;
+      const notes = formatRouteToNotes(routeResult.path, mapData, { includeLegend, includeStats, summary: routeSummary, maxNoteLength: maxLen }, smartGateItemByPair, usedSmartGatePairs);
       setNotePages(notes);
       setSummary(routeSummary);
       setActiveNotePage(0);
@@ -370,7 +437,7 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
       setNotePages([]);
       setSummary(null);
     }
-  }, [routeResult, mapData, includeLegend, includeStats]);
+  }, [routeResult, mapData, includeLegend, includeStats, useEveMailPagination, smartGateItemByPair, usedSmartGatePairs]);
 
   const [localElapsedMs, setLocalElapsedMs] = useState(0);
   const [hasProgress, setHasProgress] = useState(false);
@@ -400,6 +467,8 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
       alert('Please enter a valid jump distance.');
       return;
     }
+    // Selection UI prevents this, but guard in case state was forced externally
+    if(smartGateMode==='authorized' && !isLoggedIn){ setSmartGateMode('public'); }
   onCalculateRoute(
     fromSystem,
     toSystem,
@@ -409,6 +478,7 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
     optimizeFor==='explore'?exploreOverhead:undefined,
     optimizeFor==='explore'?exploreCorridorPct:undefined,
     optimizeFor==='explore'?exploreProgressBiasPct:undefined,
+    smartGateMode,
   );
   // Force persistence even if user hasn't changed fields since mount
   if(onParamChange) onParamChange(distance, optimizeFor, algorithm);
@@ -509,8 +579,32 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
           {waypointBlock}
           {avoidBlock}
 
-          <div className="p2p-input-group">
-            <label htmlFor="to-system">To</label>
+          <div className="p2p-input-group" style={{ position:'relative' }}>
+            <label htmlFor="to-system" style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+              <span>To</span>
+              <button
+                type="button"
+                title="Swap From/To"
+                aria-label="Swap From and To"
+                onClick={()=>{ setFromSystem(prev=>{ const next=toSystem; setToSystem(prev); return next; }); }}
+                style={{
+                  marginLeft:8,
+                  padding:'2px 6px',
+                  border:'1px solid #333',
+                  background:'#141414',
+                  color:'#ddd',
+                  borderRadius:4,
+                  cursor:'pointer',
+                  display:'inline-flex',
+                  alignItems:'center',
+                  gap:4,
+                  fontSize:12
+                }}
+              >
+                <span style={{ lineHeight:1 }}>↑↓</span>
+                <span style={{ opacity:.8 }}>Swap</span>
+              </button>
+            </label>
             <AutoCompleteInput
               value={toSystem}
               onChange={setToSystem}
@@ -537,6 +631,21 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
                 }
               }}
               className="p2p-input"
+            />
+          </div>
+
+          <div className="p2p-input-group">
+            <label htmlFor="smart-gates-mode">Use Smart Gates</label>
+            <NeutralSelect
+              id="smart-gates-mode"
+              ariaLabel="Use Smart Gates"
+              value={smartGateMode}
+              onChange={(v)=> setSmartGateMode(v as 'none'|'public'|'authorized')}
+              options={[
+                { value: 'none', label: 'None' },
+                { value: 'public', label: 'Unrestricted only' },
+                { value: 'authorized', label: 'Unrestricted + restricted you can use', disabled: !isLoggedIn },
+              ]}
             />
           </div>
 
@@ -714,6 +823,7 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
             <div className="p2p-results">
                <div className="route-summary">
                 <p>Total Stargate Jumps: <span>{summary.stargateJumps}</span></p>
+                <p>Total Smart Gate Jumps: <span>{summary.smartGateJumps}</span></p>
                 <p>Total Ship Jumps: <span>{summary.shipJumps}</span></p>
                 <p>Total Distance: <span>{summary.totalDistance.toFixed(2)} LY</span></p>
                 <p>Ship Jump Distance: <span>{summary.shipJumpDistance.toFixed(2)} LY</span></p>
@@ -739,6 +849,9 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
                 </label>
                 <label className="route-note-option-label">
                   <input type="checkbox" checked={includeStats} onChange={e=> setIncludeStats(e.target.checked)} /> Include Route Statistics
+                </label>
+                <label className="route-note-option-label">
+                  <input type="checkbox" checked={useEveMailPagination} onChange={e=> setUseEveMailPagination(e.target.checked)} /> Truncate/Paginate for EVE-Mail (double page size)
                 </label>
               </div>
               <div className="p2p-copy-buttons">

@@ -108,6 +108,387 @@ const EVENT_MAP = {
   cpu_cores_bucket: { countersDynamic: (b)=> { const v=b.bucket; const allowed=['cores_1_2','cores_3_4','cores_5_8','cores_9_12','cores_13_16','cores_17_plus']; return allowed.includes(v)? [v]: []; } }
 };
 
+// ---- Auth helpers (SIWE-lite with HMAC; 7-day sliding window) ----
+const SESSION_COOKIE = 'EFSESS';
+const SLIDING_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+const REFRESH_EVERY_MS = 60 * 60 * 1000; // 1 hour refresh cadence (issue new cookie if older)
+
+function toB64Url(bytes){
+  let s = btoa(String.fromCharCode(...bytes));
+  return s.replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+}
+function fromB64Url(str){
+  const s = str.replace(/-/g,'+').replace(/_/g,'/');
+  const pad = s.length % 4 ? '='.repeat(4 - (s.length % 4)) : '';
+  const bin = atob(s + pad);
+  const out = new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+function encUtf8(s){ return new TextEncoder().encode(s); }
+async function importHmacKey(secret){
+  const raw = typeof secret === 'string' ? encUtf8(secret) : secret;
+  return crypto.subtle.importKey('raw', raw, { name:'HMAC', hash:'SHA-256' }, false, ['sign','verify']);
+}
+async function getAuthSecret(env, host){
+  // Prefer dedicated secret; fallback to INDEXER_ADMIN_TOKEN in preview; final fallback to ephemeral dev secret
+  const s = (env.SIWE_HMAC_SECRET || '').trim();
+  // Resolve gateId mapping from links snapshot
+  let linkMap = null; // Map key "from-to" -> gateId (string)
+  try {
+    const linksReq = new Request(new URL('/api/smart-gate-links', request.url).toString(), { headers:{ 'accept':'application/json' } });
+    const linksResp = await fetch(linksReq, { cf:{ cacheTtl:30, cacheEverything:false } });
+    if(linksResp.ok){
+      const lj = await linksResp.json().catch(()=>null);
+      if(lj && Array.isArray(lj.links)){
+        linkMap = new Map();
+        for(const L of lj.links){
+          const a = Number(L?.origin||0), b = Number(L?.destination||0);
+          if(a>0 && b>0 && typeof L?.gateId === 'string' && L.gateId){
+            linkMap.set(`${a}-${b}`, L.gateId);
+          }
+        }
+      }
+    }
+  } catch {}
+  if(s) return s;
+  const isPreview = (host||'').endsWith('.pages.dev');
+  if(isPreview && (env.INDEXER_ADMIN_TOKEN||'').trim()) return env.INDEXER_ADMIN_TOKEN.trim();
+  // ephemeral: OK for local/preview only
+  return 'dev-secret-not-for-prod';
+}
+async function hmacSignStr(secret, text){
+  const key = await importHmacKey(secret);
+  const sig = await crypto.subtle.sign('HMAC', key, encUtf8(text));
+  return toB64Url(new Uint8Array(sig));
+}
+async function hmacVerifyStr(secret, text, sigB64){
+  const key = await importHmacKey(secret);
+  const sig = fromB64Url(sigB64);
+  return crypto.subtle.verify('HMAC', key, sig, encUtf8(text));
+}
+function parseCookies(req){
+  const h = req.headers.get('cookie')||''; const out={};
+  h.split(';').forEach(p=>{ const i=p.indexOf('='); if(i>0){ const k=p.slice(0,i).trim(); const v=p.slice(i+1).trim(); out[k]=decodeURIComponent(v); } });
+  return out;
+}
+function setCookie(resHeaders, name, value, maxAgeMs){
+  const parts=[`${name}=${encodeURIComponent(value)}`,'Path=/','HttpOnly','SameSite=Lax'];
+  // Secure for non-localhost
+  parts.push('Secure');
+  if(maxAgeMs){ const maxAge = Math.floor(maxAgeMs/1000); parts.push(`Max-Age=${maxAge}`); const exp = new Date(Date.now()+maxAgeMs).toUTCString(); parts.push(`Expires=${exp}`); }
+  resHeaders.append('Set-Cookie', parts.join('; '));
+}
+function clearCookie(resHeaders, name){
+  resHeaders.append('Set-Cookie', `${name}=; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; SameSite=Lax; Secure`);
+}
+function safeJsonParse(text){ try { return JSON.parse(text); } catch { return null; } }
+
+function buildNoncePayload(){
+  // 6 random bytes -> 8 char b64url; include timestamp
+  const rand = crypto.getRandomValues(new Uint8Array(8));
+  const nonce = toB64Url(rand).replace(/[^A-Za-z0-9_-]/g,'').slice(0,12);
+  const now = Date.now();
+  const exp = now + 10*60*1000; // 10 minutes
+  return { nonce, iat: now, exp };
+}
+function makeToken(payload){
+  const body = toB64Url(encUtf8(JSON.stringify(payload)));
+  return body;
+}
+function readTokenBody(token){
+  const bytes = fromB64Url(token);
+  return safeJsonParse(new TextDecoder().decode(bytes));
+}
+
+async function handleAuthNonce(req, env){
+  // Returns { nonce, token, expiresIn }
+  const url = new URL(req.url);
+  const host = req.headers.get('host')||url.host||'';
+  const secret = await getAuthSecret(env, host);
+  const p = buildNoncePayload();
+  const body = makeToken(p);
+  const sig = await hmacSignStr(secret, body);
+  const token = body + '.' + sig;
+  return json({ nonce: p.nonce, token, expiresIn: Math.floor((p.exp - Date.now())/1000) });
+}
+
+// We avoid importing external libs except where needed for signature recovery
+// Lazy import viem to reduce cold-start weight if not used
+let viem_mod = null;
+async function getViem(){
+  if(!viem_mod){
+    // dynamic import should be supported by bundler; if fails, throw meaningful error
+    viem_mod = await import('viem');
+  }
+  return viem_mod;
+}
+
+async function handleAuthVerify(req, env){
+  if(req.method !== 'POST') return json({ error:'Method Not Allowed' },405);
+  let body={}; try { if(req.headers.get('content-type')?.includes('application/json')) body = await req.json(); } catch { return json({ error:'Invalid JSON' },400); }
+  const { address, message, signature, nonceToken } = body||{};
+  if(typeof address!=='string' || !address.trim()) return json({ error:'missing_address' },400);
+  if(typeof message!=='string' || !message.trim()) return json({ error:'missing_message' },400);
+  if(typeof signature!=='string' || !signature.trim()) return json({ error:'missing_signature' },400);
+  if(typeof nonceToken!=='string' || !nonceToken.includes('.')) return json({ error:'missing_nonce' },400);
+  const url = new URL(req.url);
+  const host = req.headers.get('host')||url.host||'';
+  const secret = await getAuthSecret(env, host);
+  const [tokBody, tokSig] = nonceToken.split('.',2);
+  const ok = await hmacVerifyStr(secret, tokBody, tokSig);
+  if(!ok) return json({ error:'invalid_nonce_token' },401);
+  const payload = readTokenBody(tokBody) || {};
+  if(!payload.nonce || !payload.exp || payload.exp < Date.now()) return json({ error:'nonce_expired' },401);
+  // Validate SIWE-like message includes the nonce value to bind signature to the challenge
+  const lower = message.toLowerCase();
+  if(!lower.includes(String(payload.nonce).toLowerCase())) return json({ error:'nonce_not_in_message' },400);
+  const { verifyMessage } = await getViem();
+  const addr = address.toLowerCase();
+  let verified=false; try {
+    verified = await verifyMessage({ address: addr, message, signature });
+  } catch(e){ return json({ error:'verify_failed', message:String(e) },400); }
+  if(!verified) return json({ error:'invalid_signature' },401);
+  // Create session token (7-day sliding). We'll refresh on /api/auth/session calls.
+  const now = Date.now();
+  const sess = { addr, iat: now, lat: now, exp: now + SLIDING_TTL_MS, v:1 };
+  const sessBody = makeToken(sess);
+  const sessSig = await hmacSignStr(secret, sessBody);
+  const sessTok = sessBody + '.' + sessSig;
+  const headers = new Headers({ 'Content-Type':'application/json','Cache-Control':'no-store' });
+  setCookie(headers, SESSION_COOKIE, sessTok, SLIDING_TTL_MS);
+  return new Response(JSON.stringify({ status:'ok', address: addr }), { status:200, headers });
+}
+
+async function parseAndVerifySession(req, env){
+  const url = new URL(req.url);
+  const host = req.headers.get('host')||url.host||'';
+  const secret = await getAuthSecret(env, host);
+  const cookies = parseCookies(req);
+  const tok = cookies[SESSION_COOKIE];
+  if(!tok || !tok.includes('.')) return { valid:false };
+  const [body, sig] = tok.split('.',2);
+  const ok = await hmacVerifyStr(secret, body, sig).catch(()=>false);
+  if(!ok) return { valid:false };
+  const payload = readTokenBody(body) || {};
+  if(!payload.addr || !payload.exp || payload.exp < Date.now()) return { valid:false };
+  return { valid:true, payload, secret };
+}
+
+async function handleAuthSession(req, env){
+  const ses = await parseAndVerifySession(req, env);
+  if(!ses.valid) return json({ authenticated:false },200);
+  const now = Date.now();
+  let refreshed=false; let newTok=null;
+  if((now - (ses.payload.lat||ses.payload.iat||0)) >= REFRESH_EVERY_MS || (ses.payload.exp - now) < (SLIDING_TTL_MS/2)){
+    // refresh last-activity & extend exp another 7 days from now
+    const p = { ...ses.payload, lat: now, exp: now + SLIDING_TTL_MS };
+    const body = makeToken(p);
+    const sig = await hmacSignStr(ses.secret, body);
+    newTok = body + '.' + sig;
+    refreshed = true;
+  }
+  const headers = new Headers({ 'Content-Type':'application/json','Cache-Control':'no-store' });
+  if(refreshed) setCookie(headers, SESSION_COOKIE, newTok, SLIDING_TTL_MS);
+  return new Response(JSON.stringify({ authenticated:true, address: ses.payload.addr, refreshed }), { status:200, headers });
+}
+
+async function handleAuthLogout(req, env){
+  const headers = new Headers({ 'Content-Type':'application/json','Cache-Control':'no-store' });
+  clearCookie(headers, SESSION_COOKIE);
+  return new Response(JSON.stringify({ status:'logged_out' }), { status:200, headers });
+}
+
+// Authorized gates – resolve per-character access for non-public gates using on-chain canJump checks
+async function handleAuthorizedGates(req, env){
+  const ses = await parseAndVerifySession(req, env);
+  const url = new URL(req.url);
+  const forceBypass = url.searchParams.get('force')==='1';
+  let mode='public'; let address=null;
+  if(ses.valid){ mode='session'; address = ses.payload.addr; }
+  // Fetch normalized ACL snapshot via internal endpoint to reuse normalization + ETag
+  let etagBase=''; let acl=null; let aclRules=[]; let aclSource='kv';
+  try {
+    const aclReq = new Request(new URL('/api/gate-access', url).toString(), { headers:{ 'accept':'application/json' } });
+    const aclResp = await fetch(aclReq, { cf:{ cacheTtl:30, cacheEverything:false } });
+    etagBase = aclResp.headers.get('ETag') || '';
+    try { acl = await aclResp.json(); } catch { acl = null; }
+    if(acl && Array.isArray(acl.rules)) aclRules = acl.rules;
+    aclSource = aclResp.headers.get('X-Gates-ACL-Source') || aclSource;
+  } catch {
+    // As a last resort, attempt direct KV read just for ETag base
+    try { const raw = await env.EF_SNAPSHOTS?.get('gate_access_snapshot_v1'); if(raw){ etagBase = await computeEtag(raw); } }
+    catch{ /* ignore */ }
+  }
+  const tagInput = JSON.stringify({ mode, address, etagBase });
+  const etag = await computeEtag(tagInput);
+  if(!forceBypass && req.headers.get('If-None-Match') === etag){ return new Response(null, { status:304, headers:{ 'ETag': etag } }); }
+
+  // Public chain defaults (not secrets) – enable without env bindings
+  const rpcUrl = (env.PYROPE_RPC||'https://rpc.pyropechain.com').trim();
+  const worldAddr = (env.WORLD_ADDRESS||'0x7085f3e652987f656fB8dEE5aA6592197Bb75de8').trim();
+  const chainId = parseInt(env.CHAIN_ID||'695569',10) || 695569;
+  const deployBlock = parseInt(env.DEPLOY_BLOCK||'7288348',10) || 7288348;
+  // Only require session/address and ACL snapshot; rpc/world use defaults
+  if(!ses.valid || !address || !aclRules.length){
+    const payload = { version:1, mode, address, policy:'public-only', allowPublic:true, updatedAt: new Date().toISOString() };
+    const headers = new Headers({ 'Content-Type':'application/json','Cache-Control': forceBypass ? 'no-store' : 'public, max-age=15','ETag': etag });
+    headers.set('X-Cache-Bypass', forceBypass ? '1' : '0');
+    headers.set('X-Authorized-Source', aclSource||'kv');
+    headers.set('X-Chain-Id', String(chainId));
+    headers.set('X-World-Address', worldAddr);
+    return new Response(JSON.stringify(payload), { status:200, headers });
+  }
+  // Resolve characterId via World API proxy
+  let characterId=null; let profileStatus=null; let profileSource='profile';
+  try {
+    // Cache-bust the internal call to avoid serving a recently cached 404/not_found from caches.default
+    const bust = Date.now().toString(36);
+    const profUrl = new URL('/api/player-profile', url);
+    profUrl.searchParams.set('b', bust);
+    const profReq = new Request(profUrl.toString(), req);
+    const profResp = await fetch(profReq, { cache:'reload' });
+    profileStatus = profResp.status;
+    if(profResp.ok){ const j = await profResp.json(); characterId = j?.characterId ?? null; }
+  } catch {/* ignore */}
+  // Fallback: if internal fetch failed (status null) or yielded no characterId, directly query World API
+  if(!characterId){
+    try {
+      const direct = await fetch(`${WORLD_API_BASE}/v2/smartcharacters/${address}`, { headers:{ 'accept':'application/json' } });
+      profileSource = 'worldapi';
+      profileStatus = direct.status;
+      if(direct.ok){ const j = await direct.json(); characterId = j?.characterId || j?.id || null; }
+    } catch {/* ignore */}
+  }
+  if(!characterId){
+    const payload = { version:1, mode, address, policy:'public-only', allowPublic:true, note:'no_character', updatedAt: new Date().toISOString() };
+    const headers = new Headers({ 'Content-Type':'application/json','Cache-Control': forceBypass ? 'no-store' : 'public, max-age=15','ETag': etag });
+    headers.set('X-Cache-Bypass', forceBypass ? '1' : '0');
+    headers.set('X-Authorized-Source', `${profileSource}:${profileStatus}`);
+    return new Response(JSON.stringify(payload), { status:200, headers });
+  }
+  // Build edge list: public edges allowed by default; non-public require canJump
+  const publicSet = new Set();
+  const privateEdges = [];
+  for(const r of aclRules){
+    if(!r) continue;
+    const from = Number(r.fromSystemId||r.origin_system_id||0);
+    const to = Number(r.toSystemId||r.destination_system_id||0);
+    if(!Number.isFinite(from) || !Number.isFinite(to)) continue;
+    if(r.isPublic){
+      publicSet.add(`${from}-${to}`);
+      publicSet.add(`${to}-${from}`); // public treated bidirectional
+    } else {
+      privateEdges.push({ from, to, gate_id: r.gate_id });
+    }
+  }
+  // Build directional link map (system pair -> gateId string) from smart-gate-links snapshot
+  let dirMap = new Map(); let linkMapSource=''; let mapPairs=0;
+  try {
+    const linksReq = new Request(new URL('/api/smart-gate-links', url).toString(), { headers:{ 'accept':'application/json' } });
+    const linksResp = await fetch(linksReq, { cf:{ cacheTtl:30, cacheEverything:false } });
+    linkMapSource = linksResp.headers.get('X-Links-Source')||'';
+    if(linksResp.ok){
+      const lj = await linksResp.json().catch(()=>null);
+      const arr = Array.isArray(lj?.links)? lj.links : [];
+      for(const L of arr){
+        const a = Number(L?.originSystemId||L?.origin||L?.from||0);
+        const b = Number(L?.destinationSystemId||L?.destination||L?.to||0);
+        const gid = (L?.gateId!=null)? String(L.gateId) : '';
+        if(a>0 && b>0 && gid){
+          // If multiple gates exist per pair, keep first seen; ACL.gate_id will still be preferred for source when present
+          const key = `${a}-${b}`;
+          if(!dirMap.has(key)) dirMap.set(key, gid);
+        }
+      }
+      mapPairs = dirMap.size;
+    }
+  } catch {/* ignore */}
+  function toBigIntId(v){
+    if(v==null) return null;
+    const s = String(v).trim();
+    try { return s.startsWith('0x')||s.startsWith('0X') ? BigInt(s) : BigInt(s); } catch { return null; }
+  }
+  // Prepare viem helpers
+  const { encodeFunctionData, decodeFunctionResult } = await getViem();
+  const WORLD_ABI_MIN = [
+    { name:'evefrontier__canJump', type:'function', stateMutability:'view', inputs:[{ name:'characterId', type:'uint256' }, { name:'source', type:'uint256' }, { name:'destination', type:'uint256' }], outputs:[{ type:'bool' }] },
+    { name:'batchCall', type:'function', stateMutability:'view', inputs:[{ name:'calls', type:'bytes[]' }], outputs:[{ type:'bytes[]' }] }
+  ];
+  async function rpc(method, params){
+    const id = Math.floor(Math.random()*1e6);
+    const r = await fetch(rpcUrl, { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ jsonrpc:'2.0', id, method, params }) });
+    if(!r.ok) throw new Error('rpc_http_'+r.status);
+    const j = await r.json(); if(j.error) throw new Error('rpc_'+(j.error.message||'error'));
+    return j.result;
+  }
+  // Encode calls (limit total to avoid oversized payloads)
+  // Prepare canJump checks using gate IDs (sourceGateId, destinationGateId)
+  let missingIds=0; const MAX_CHECKS = Math.min(privateEdges.length, 1200);
+  const checks = [];
+  for(const e of privateEdges.slice(0, MAX_CHECKS)){
+    // Prefer ACL gate_id for source, otherwise fall back to link map
+    const srcIdStr = (e.gate_id!=null && String(e.gate_id).trim()) ? String(e.gate_id) : (dirMap.get(`${e.from}-${e.to}`)||'');
+    const dstIdStr = dirMap.get(`${e.to}-${e.from}`)||'';
+    const srcId = toBigIntId(srcIdStr);
+    const dstId = toBigIntId(dstIdStr);
+    if(srcId==null || dstId==null){ missingIds++; continue; }
+    const data = encodeFunctionData({ abi: WORLD_ABI_MIN, functionName:'evefrontier__canJump', args:[ BigInt(characterId), srcId, dstId ] });
+    checks.push({ e, data });
+  }
+  let allowedSet = new Set(publicSet);
+  let methodUsed = 'batch'; let calls=0; let chunks=0;
+  try {
+    // Chunk into groups to stay under RPC size limits
+    const CHUNK = 300;
+    for(let i=0;i<checks.length;i+=CHUNK){
+      const slice = checks.slice(i, i+CHUNK);
+      const batchData = encodeFunctionData({ abi: WORLD_ABI_MIN, functionName:'batchCall', args:[ slice.map(x=> x.data) ] });
+      const callObj = { to: worldAddr, data: batchData };
+      const out = await rpc('eth_call', [ callObj, 'latest' ]);
+      const bytesArr = decodeFunctionResult({ abi: WORLD_ABI_MIN, functionName:'batchCall', data: out });
+      // bytesArr aligns with slice order
+      for(let k=0;k<bytesArr.length && k<slice.length;k++){
+        try {
+          const ok = decodeFunctionResult({ abi: WORLD_ABI_MIN, functionName:'evefrontier__canJump', data: bytesArr[k] });
+          if(ok){ const edge = slice[k].e; allowedSet.add(`${edge.from}-${edge.to}`); }
+        } catch { /* if decode fails, treat as false */ }
+      }
+      calls += slice.length; chunks++;
+    }
+  } catch(e){
+    // Fallback to single calls if batch fails
+    methodUsed = 'single';
+    for(const c of checks){
+      try {
+        const out = await rpc('eth_call', [ { to: worldAddr, data: c.data }, 'latest' ]);
+        const ok = decodeFunctionResult({ abi: WORLD_ABI_MIN, functionName:'evefrontier__canJump', data: out });
+        if(ok){ allowedSet.add(`${c.e.from}-${c.e.to}`); }
+        calls++;
+      } catch { /* skip on error */ }
+    }
+  }
+  // Build edge list from allowedSet limited to directed pairs present in ACL
+  const allowedEdges = [];
+  const aclEdgeKey = new Set(aclRules.map(r=> `${Number(r.fromSystemId||r.origin_system_id||0)}-${Number(r.toSystemId||r.destination_system_id||0)}`));
+  for(const key of allowedSet){
+    if(aclEdgeKey.has(key)){
+      const [fs, ts] = key.split('-');
+      allowedEdges.push({ fromSystemId: Number(fs), toSystemId: Number(ts) });
+    }
+  }
+  const payload = { version:1, mode:'session', address, characterId, policy:'authorized', allowPublic:true, edges: allowedEdges, stats:{ totalRules: aclRules.length, publicEdges: publicSet.size, privateChecked: checks.length, calls, chunks, method: methodUsed, truncated: privateEdges.length > MAX_CHECKS, missingIds, linkMapPairs: mapPairs }, updatedAt: new Date().toISOString() };
+  const headers = new Headers({ 'Content-Type':'application/json','Cache-Control': forceBypass ? 'no-store' : 'public, max-age=15','ETag': etag });
+  headers.set('X-Cache-Bypass', forceBypass ? '1' : '0');
+  headers.set('X-Authorized-Source', 'rpc:'+methodUsed);
+  headers.set('X-Gates-ACL-Source', aclSource||'kv');
+  if(linkMapSource) headers.set('X-Links-Source', linkMapSource);
+  headers.set('X-Authorized-MissingGateIds', String(missingIds));
+  headers.set('X-Chain-Id', String(chainId));
+  headers.set('X-World-Address', worldAddr);
+  return new Response(JSON.stringify(payload), { status:200, headers });
+}
+
 async function handleCreateShare(req, env){
   if(req.method !== 'POST') return json({ error:'Method Not Allowed' },405);
   if(!env.EF_SHARES) return json({ error:'EF_SHARES KV not bound' },500);
@@ -548,6 +929,315 @@ function upgradeSnapshot(s){
   }
 }
 
+// World API counts storage helpers (kept in EF_STATS KV)
+async function handleWorldApiStats(env, url){
+  try {
+    const key = 'worldapi/current.json';
+    const raw = await env.EF_STATS.get(key);
+    let current = raw ? JSON.parse(raw) : null;
+    // Optional: if not present, try to read scratch/world_api/meta.json from ASSETS (Pages deploy)
+    if(!current){
+      try {
+        const origin = url.origin || new URL('https://dummy.local/').origin; // url is URL instance
+        const metaResp = await env.ASSETS.fetch(origin + '/scratch/world_api/meta.json');
+        if(metaResp.ok){ current = await metaResp.json(); }
+      } catch { /* ignore */ }
+    }
+    if(!current) return json({ status:'empty' });
+    const totalRows = Object.values(current.counts||{}).reduce((a,b)=> a + (Number(b)||0), 0);
+    return json({ status:'ok', updatedAt: current.updatedAt||current.timestamp||null, base: current.base||null, counts: current.counts||{}, totalRows });
+  } catch(e){
+    return json({ status:'error', message:String(e) },500);
+  }
+}
+
+async function handleWorldApiUpdate(req, env){
+  if(req.method !== 'POST') return json({ error:'Method Not Allowed' },405);
+  // Admin token optional in preview, required otherwise (mirror pattern used elsewhere)
+  const token = req.headers.get('X-Indexer-Admin');
+  const expected = (env.INDEXER_ADMIN_TOKEN||'').trim();
+  const host = req.headers.get('host')||''; const isPreviewHost = host.endsWith('.pages.dev');
+  const u = new URL(req.url); const bypass = isPreviewHost && u.searchParams.get('openPreview')==='1' && (!expected || token?.trim()!==expected);
+  if(expected && token?.trim()!==expected && !bypass) return json({ error:'Unauthorized' },401);
+  let body={}; try { if(req.headers.get('content-type')?.includes('application/json')) body = await req.json(); } catch { return json({ error:'Invalid JSON' },400); }
+  // Expected shape: { counts: { table: number }, base?: string, updatedAt?: iso }
+  const counts = body && typeof body==='object' ? body.counts : null;
+  if(!counts || typeof counts!=='object') return json({ error:'Missing counts' },400);
+  const payload = { base: body.base||null, counts, updatedAt: body.updatedAt || new Date().toISOString(), version: 1 };
+  try {
+    await env.EF_STATS.put('worldapi/current.json', JSON.stringify(payload));
+    // Also store a daily snapshot for simple history
+    const day = new Date().toISOString().slice(0,10);
+    await env.EF_STATS.put('worldapi/daily/'+day+'.json', JSON.stringify(payload));
+  } catch(e){ return json({ error:'store_failed', message:String(e) },500); }
+  return json({ status:'stored' });
+}
+
+// Session-gated profile proxy – returns { address, name, avatarUrl, characterId }
+// GET /api/player-profile
+// Uses EFSESS to derive address; proxies World API v2/smartcharacters/{address}
+async function handlePlayerProfile(req, env){
+  // Validate session
+  const ses = await parseAndVerifySession(req, env);
+  if(!ses.valid) return json({ error:'unauthenticated' },401);
+  const addr = ses.payload.addr;
+  // Basic edge caching: vary by address; short TTL
+  const u = new URL(req.url);
+  const fresh = u.searchParams.get('fresh') === '1';
+  const cacheKey = new Request((fresh ? (u.origin + u.pathname) : req.url) + '#'+addr, req);
+  try {
+    if(!fresh){
+      const cache = caches.default;
+      const cached = await cache.match(cacheKey);
+      if(cached) return cached;
+    }
+  } catch {/* ignore cache errors */}
+  // Fetch World API
+  let raw=null; let status=0;
+  try {
+    const resp = await fetch(`${WORLD_API_BASE}/v2/smartcharacters/${addr}`, { headers:{ 'accept':'application/json' } });
+    status = resp.status;
+    if(!resp.ok){
+      // 404 -> empty profile with just address
+      if(status === 404){
+        const notFound = json({ address: addr, name: null, avatarUrl: null, characterId: null, status:'not_found' }, 200);
+        notFound.headers.set('Cache-Control','public, max-age=30');
+        try { await caches.default.put(cacheKey, notFound.clone()); } catch{}
+        return notFound;
+      }
+      return json({ error:'worldapi_failed', status }, 502);
+    }
+    raw = await resp.json();
+  } catch(e){
+    return json({ error:'worldapi_error', message:String(e) },502);
+  }
+  // Normalize fields
+  const name = raw?.name || raw?.characterName || null;
+  const avatarUrl = raw?.portraitPng || raw?.portraitUrl || raw?.image || null;
+  const characterId = raw?.characterId || raw?.id || null;
+  const payload = { address: addr, name, avatarUrl, characterId };
+  const res = new Response(JSON.stringify(payload), { status:200, headers:{ 'Content-Type':'application/json', 'Cache-Control':'public, max-age: 60' } });
+  try { if(!fresh){ await caches.default.put(cacheKey, res.clone()); } } catch {/* ignore */}
+  return res;
+}
+
+// Helper: compute ETag for a given string payload
+async function computeEtag(text){
+  try {
+    const data = new TextEncoder().encode(text);
+    const buf = await crypto.subtle.digest('SHA-256', data);
+    const arr = Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+    return 'W/"'+arr.slice(0,32)+'"'; // weak etag, shortened
+  } catch {
+    // Fallback: simple length-based tag (not strong, but avoids breaking caching entirely)
+    return 'W/"len-'+(text?.length||0)+'"';
+  }
+}
+
+// GET /api/smart-gate-links
+// Reads snapshot from KV key 'smart_gate_links_v1' from EF_SNAPSHOTS (preferred),
+// falls back to EF_STATS, then to asset '/snapshots/smart_gate_links_v1.json'
+async function handleSmartGateLinks(url, req, env){
+  const prefer = url.searchParams.get('source')||''; // debug: 'asset' to force asset path
+  const forceBypass = url.searchParams.get('force')==='1';
+  let bodyText=null; let source='kv';
+  if(prefer !== 'asset'){
+    // Prefer EF_SNAPSHOTS KV if bound; fallback to EF_STATS
+    try {
+      if(env.EF_SNAPSHOTS){ bodyText = await env.EF_SNAPSHOTS.get('smart_gate_links_v1'); source = 'kv:snapshots'; }
+    } catch{ bodyText=null; }
+    if(!bodyText){
+      try { if(env.EF_STATS){ bodyText = await env.EF_STATS.get('smart_gate_links_v1'); source = 'kv:stats'; } } catch{ bodyText=null; }
+    }
+  }
+  if(!bodyText){
+    try {
+      const origin = url.origin || new URL('https://dummy.local/').origin;
+      const resp = await env.ASSETS.fetch(origin + '/snapshots/smart_gate_links_v1.json');
+      if(resp.ok){ bodyText = await resp.text(); source='asset'; }
+    } catch{ /* ignore */ }
+  }
+  if(!bodyText){
+    const empty = JSON.stringify({ status:'empty' });
+    return new Response(empty, { status:200, headers:{ 'Content-Type':'application/json','Cache-Control':'no-store' } });
+  }
+  // Parse and (optionally) fill missing tribe fields using gateMeta.owner.tribeId only (no default fallback)
+  let payloadText = bodyText; let filled=0; let total=0; let parseOk=false;
+  try {
+    let text = bodyText; if(text.charCodeAt(0)===0xFEFF) text = text.slice(1);
+    const snapshot = JSON.parse(text);
+    const gm = snapshot && typeof snapshot.gateMeta==='object' ? snapshot.gateMeta : {};
+    if(snapshot && Array.isArray(snapshot.links)){
+      total = snapshot.links.length;
+      for(const l of snapshot.links){
+        if(!l) continue;
+        const hasTribe = (typeof l.tribeId==='string' && l.tribeId) || (Array.isArray(l.tribes) && l.tribes.length>0);
+        if(!hasTribe){
+          const gid = String(l.gateId||'');
+          const ownerTribe = (gm && gm[gid] && gm[gid].owner && typeof gm[gid].owner.tribeId==='string' && gm[gid].owner.tribeId) ? gm[gid].owner.tribeId : null;
+          if(ownerTribe){
+            l.tribeId = ownerTribe;
+            filled++;
+          }
+        }
+      }
+    }
+    payloadText = JSON.stringify(snapshot);
+    parseOk = true;
+  } catch { /* keep original bodyText on parse error */ }
+  const etag = await computeEtag(payloadText);
+  const inm = req.headers.get('If-None-Match');
+  if(!forceBypass && inm && inm === etag){ return new Response(null, { status:304, headers:{ 'ETag': etag } }); }
+  const hdrs = new Headers({ 'Content-Type':'application/json', 'ETag': etag, 'Cache-Control': forceBypass ? 'no-store' : 'public, max-age=30, s-maxage=60' });
+  hdrs.set('X-Cache-Bypass', forceBypass ? '1' : '0');
+  hdrs.set('X-Links-Source', source);
+  if(parseOk){ hdrs.set('X-Links-Filled-Tribes', String(filled)); hdrs.set('X-Links-Total', String(total)); }
+  return new Response(payloadText, { status:200, headers: hdrs });
+}
+
+// GET /api/gate-access
+// Minimal ACL snapshot for Smart Gates
+// Reads from EF_SNAPSHOTS (preferred) key 'gate_access_snapshot_v1',
+// falls back to EF_STATS, then to asset '/snapshots/gate_access_snapshot_v1.json'
+async function handleGateAccess(url, req, env){
+  const prefer = url.searchParams.get('source')||''; // debug: 'asset' to force asset path
+  const forceBypass = url.searchParams.get('force')==='1';
+  let bodyText=null; let source='kv';
+  if(prefer !== 'asset'){
+    try {
+      if(env.EF_SNAPSHOTS){ bodyText = await env.EF_SNAPSHOTS.get('gate_access_snapshot_v1'); source='kv:snapshots'; }
+    } catch{ bodyText=null; }
+    if(!bodyText){
+      try { if(env.EF_STATS){ bodyText = await env.EF_STATS.get('gate_access_snapshot_v1'); source='kv:stats'; } } catch{ bodyText=null; }
+    }
+  }
+  if(!bodyText){
+    try {
+      const origin = url.origin || new URL('https://dummy.local/').origin;
+      const resp = await env.ASSETS.fetch(origin + '/snapshots/gate_access_snapshot_v1.json');
+      if(resp.ok){ bodyText = await resp.text(); source='asset'; }
+    } catch{ /* ignore */ }
+  }
+  if(!bodyText){ return new Response(JSON.stringify({ status:'empty' }), { status:200, headers:{ 'Content-Type':'application/json','Cache-Control':'no-store' } }); }
+  // Normalize appliedSystemId encodings ("0x.." vs "\\x..").
+  // IMPORTANT: Only treat as public when an explicit zero value is present.
+  // If the field is missing or unparsable, do NOT assume public.
+  function normalizeHexId(val){
+    if(val === undefined || val === null) return { present: false, normalized: null, isZero: null };
+    let s = String(val).trim();
+    // Strip UTF-8 BOM if present on single value edge cases
+    if(s && s.charCodeAt(0) === 0xFEFF) s = s.slice(1);
+    let hex = '';
+    if(s.startsWith('0x') || s.startsWith('0X')){
+      hex = s.slice(2);
+    } else if(s.startsWith('\\x') || s.startsWith('\\X')){
+      hex = s.slice(2);
+    } else if(/^[0-9a-fA-F]+$/.test(s)){
+      // looks like raw hex without prefix
+      hex = s;
+    } else {
+      // last resort: try BigInt parse of decimal-like input
+      try { hex = BigInt(s).toString(16); }
+      catch { return { present: false, normalized: null, isZero: null }; }
+    }
+    hex = hex.toLowerCase().replace(/[^0-9a-f]/g,'');
+    if(hex.length === 0) return { present: true, normalized: '0x0', isZero: true };
+    if(hex.length % 2 === 1) hex = '0' + hex; // even-length for byte alignment
+    const isZero = /^0+$/.test(hex);
+    return { present: true, normalized: '0x' + hex, isZero };
+  }
+  let payloadText = bodyText;
+  let normalized = false; let publicCount = 0; let ruleCount = 0; let tribeFilled=0; let tribeTotal=0;
+  try {
+    let parsedText = bodyText;
+    if(parsedText.charCodeAt(0) === 0xFEFF) parsedText = parsedText.slice(1);
+    const snapshot = JSON.parse(parsedText);
+    if(snapshot && Array.isArray(snapshot.rules)){
+      for(const r of snapshot.rules){
+        const n = normalizeHexId(r.appliedSystemId);
+        // Persist normalized appliedSystemId only when present; otherwise leave as-is
+        if(n.present){ r.appliedSystemId = n.normalized; }
+        // Authoritative recompute ONLY when appliedSystemId is present
+        // Zero => public; non-zero => restricted; missing => do NOT assume public
+        if(n.present){ r.isPublic = !!n.isZero; }
+        else {
+          // If the producer didn't include a boolean isPublic, default to false for safety
+          if(typeof r.isPublic !== 'boolean') r.isPublic = false;
+        }
+        // Fill missing tribe info from gateMeta.owner.tribeId only (no default fallback)
+        const hasTribe = (typeof r.tribeId==='string' && r.tribeId) || (Array.isArray(r.tribes) && r.tribes.length>0);
+        if(!hasTribe){
+          const gid = String(r.gate_id||'');
+          const ownerTribe = snapshot && snapshot.gateMeta && snapshot.gateMeta[gid] && snapshot.gateMeta[gid].owner && snapshot.gateMeta[gid].owner.tribeId ? String(snapshot.gateMeta[gid].owner.tribeId) : null;
+          if(ownerTribe){
+            r.tribeId = ownerTribe;
+            tribeFilled++;
+          }
+        }
+        tribeTotal++;
+      }
+      ruleCount = snapshot.rules.length;
+      publicCount = snapshot.rules.reduce((a,r)=> a + (r.isPublic?1:0), 0);
+      normalized = true;
+    }
+    payloadText = JSON.stringify(snapshot);
+  } catch { /* keep original bodyText on parse error */ }
+  const etag = await computeEtag(payloadText);
+  if(!forceBypass && req.headers.get('If-None-Match') === etag){ return new Response(null, { status:304, headers:{ 'ETag': etag } }); }
+  const hdrs = new Headers({ 'Content-Type':'application/json','ETag': etag, 'Cache-Control': forceBypass ? 'no-store' : 'public, max-age=30, s-maxage=60' });
+  hdrs.set('X-Cache-Bypass', forceBypass ? '1' : '0');
+  hdrs.set('X-Gates-ACL-Source', source);
+  if(normalized){ hdrs.set('X-Gates-ACL-Normalized','1'); hdrs.set('X-Gates-ACL-Public', String(publicCount)); hdrs.set('X-Gates-ACL-Total', String(ruleCount)); hdrs.set('X-Gates-ACL-Filled-Tribes', String(tribeFilled)); hdrs.set('X-Gates-ACL-Tribe-Total', String(tribeTotal)); }
+  return new Response(payloadText, { status:200, headers: hdrs });
+}
+
+// GET /api/system-overlays?v=tribe|owner|structures
+// Reads snapshot from EF_SNAPSHOTS (preferred) key 'system_overlays_v1',
+// then EF_STATS, then asset '/snapshots/system_overlays_v1.json'; returns a compact vector based on v
+async function handleSystemOverlays(url, req, env){
+  const view = (url.searchParams.get('v')||'tribe').toLowerCase();
+  let text=null; let source='kv';
+  try {
+    if(env.EF_SNAPSHOTS){ text = await env.EF_SNAPSHOTS.get('system_overlays_v1'); source='kv:snapshots'; }
+  } catch{ text=null; }
+  if(!text){
+    try { if(env.EF_STATS){ text = await env.EF_STATS.get('system_overlays_v1'); source='kv:stats'; } } catch{ text=null; }
+  }
+  if(!text){
+    try {
+      const origin = url.origin || new URL('https://dummy.local/').origin;
+      const resp = await env.ASSETS.fetch(origin + '/snapshots/system_overlays_v1.json');
+      if(resp.ok){ text = await resp.text(); source='asset'; }
+    } catch{ /* ignore */ }
+  }
+  if(!text){ return new Response(JSON.stringify({ status:'empty' }), { status:200, headers:{ 'Content-Type':'application/json','Cache-Control':'no-store' } }); }
+  let parsed; try { parsed = JSON.parse(text); } catch{ return new Response(JSON.stringify({ error:'invalid_snapshot' }), { status:500, headers:{ 'Content-Type':'application/json' } }); }
+  const data = parsed || {};
+  const out = { version: 1, type: view, updatedAt: data.updatedAt || new Date().toISOString(), data: {} };
+  const overlays = data;
+  // overlays is expected as { [systemId]: { tribeId?, dominantOwner?, structureFlags? } }
+  for(const [sid, o] of Object.entries(overlays)){
+    if(view==='tribe'){
+      if(o && typeof o==='object') out.data[sid] = o.tribeId || null;
+    } else if(view==='owner'){
+      if(o && typeof o==='object') out.data[sid] = o.dominantOwner || null;
+    } else if(view==='structures'){
+      if(o && typeof o==='object'){
+        const f = o.structureFlags||{};
+        out.data[sid] = { r: !!f.hasRefinery, g: !!f.hasGate, m: !!f.hasMarket };
+      } else {
+        out.data[sid] = { r:false,g:false,m:false };
+      }
+    }
+  }
+  const payload = JSON.stringify(out);
+  const etag = await computeEtag(payload);
+  if(req.headers.get('If-None-Match') === etag){ return new Response(null, { status:304, headers:{ 'ETag': etag } }); }
+  const hdrs = new Headers({ 'Content-Type':'application/json','ETag': etag, 'Cache-Control':'public, max-age=60, s-maxage=120' });
+  hdrs.set('X-Overlays-Source', source);
+  return new Response(payload, { status:200, headers: hdrs });
+}
+
 async function loadSnapshot(kv, key){
   const raw = await kv.get(key);
   if(!raw){
@@ -572,7 +1262,6 @@ async function handleUsageEvent(req, env){
   let body={}; try { body = req.headers.get('content-type')?.includes('application/json') ? await req.json() : {}; } catch { return new Response('Invalid JSON',{ status:400 }); }
   const events = Array.isArray(body.events) ? body.events : (body.type ? [{ type: body.type, body: body.body || body }] : []);
   if(!events.length) return new Response('Missing events',{ status:400 });
-  const current = await loadSnapshot(env.EF_STATS, 'current'); upgradeSnapshot(current);
   const day = new Date().toISOString().slice(0,10);
   const dailyKey = 'daily/' + day + '.json';
   const daily = await loadSnapshot(env.EF_STATS, dailyKey); upgradeSnapshot(daily);
@@ -580,53 +1269,78 @@ async function handleUsageEvent(req, env){
   for(const evt of events){
     try {
       if(typeof evt.type !== 'string') continue; if(!EVENT_MAP[evt.type]) continue;
-      const ok1 = applyEvent(current, evt.type, evt.body||{});
       const ok2 = applyEvent(daily, evt.type, evt.body||{});
-      if(ok1 && ok2) appliedAny=true;
+      if(ok2) appliedAny=true;
     } catch(e){
-      try { applyEvent(current, 'ingestion_error', {}); applyEvent(daily, 'ingestion_error', {}); appliedAny=true; } catch{/* ignore */}
+      try { applyEvent(daily, 'ingestion_error', {}); appliedAny=true; } catch{/* ignore */}
     }
   }
-  if(appliedAny){ await env.EF_STATS.put('current', JSON.stringify(current)); await env.EF_STATS.put(dailyKey, JSON.stringify(daily)); }
+  if(appliedAny){ await env.EF_STATS.put(dailyKey, JSON.stringify(daily)); }
   return new Response(null,{ status:204 });
 }
 
 async function handleStats(url, env){
-  let raw = await env.EF_STATS.get('current');
-  if(!raw) raw = JSON.stringify({ version:1, updatedAt:new Date().toISOString(), counters:{}, sums:{} });
+  // Attempt to read legacy aggregate; if absent we'll synthesize from daily/*
+  let kvCurrentRaw = await env.EF_STATS.get('current');
   const histParam = url.searchParams.get('history');
   const debug = url.searchParams.get('debug')==='1';
   let history=[]; let histDays=0; if(histParam){ histDays = Math.min(120, Math.max(1, parseInt(histParam,10)||0)); }
+  // Always list daily keys once so we can both build history and synthesize current if needed
+  let allDailyKeys=[]; let listError=null; let listCursor=null;
+  try {
+    do {
+      const list = await env.EF_STATS.list({ prefix:'daily/', cursor: listCursor });
+      list.keys.forEach(k=>{ if(k.name.endsWith('.json')) allDailyKeys.push(k.name); });
+      listCursor = list.list_complete? null : list.cursor;
+    } while(listCursor);
+  } catch(e){ listError = String(e); }
+  allDailyKeys.sort();
+  const filteredAll = allDailyKeys.filter(k=>!k.endsWith('.json.json'));
+
+  // Build history slice if requested
   let foundKeys=[];
   if(histDays>0){
-    try {
-      let cursor=null; const all=[];
-      do {
-        const list = await env.EF_STATS.list({ prefix:'daily/', cursor });
-        list.keys.forEach(k=>{ if(k.name.endsWith('.json')) all.push(k.name); });
-        cursor = list.list_complete? null : list.cursor;
-      } while(cursor);
-  all.sort();
-  // Filter out accidental duplicate keys with double .json extension (daily/YYYY-MM-DD.json.json)
-  const filtered = all.filter(k=>!k.endsWith('.json.json'));
-  foundKeys = filtered.slice(-histDays);
-      for(const k of foundKeys){
-        const dr = await env.EF_STATS.get(k);
-        if(!dr) continue;
-        let text = dr;
-        if(text.charCodeAt(0) === 0xFEFF){ text = text.slice(1); }
-        try {
-          history.push(JSON.parse(text));
-        } catch(e){
-          if(debug){ history.push({ date:k.split('/').pop(), parse_error:true, message:String(e).slice(0,80), preview: text.slice(0,120) }); }
-        }
+    foundKeys = filteredAll.slice(-histDays);
+    for(const k of foundKeys){
+      const dr = await env.EF_STATS.get(k);
+      if(!dr) continue;
+      let text = dr; if(text.charCodeAt(0) === 0xFEFF){ text = text.slice(1); }
+      try { history.push(JSON.parse(text)); }
+      catch(e){ if(debug){ history.push({ date:k.split('/').pop(), parse_error:true, message:String(e).slice(0,80), preview: text.slice(0,120) }); } }
+    }
+  }
+
+  // Synthesize current by summing all daily snapshots when legacy current key is missing
+  let currentOut=null;
+  if(kvCurrentRaw){
+    try { currentOut = JSON.parse(kvCurrentRaw); }
+    catch { currentOut = { version:SCHEMA_VERSION, updatedAt:new Date().toISOString(), counters:{}, sums:{} }; }
+  } else {
+    const agg = { version: SCHEMA_VERSION, updatedAt: new Date().toISOString(), counters:{}, sums:{} };
+    let latestTs = 0;
+    for(const k of filteredAll){
+      const dr = await env.EF_STATS.get(k); if(!dr) continue;
+      let text = dr; if(text.charCodeAt(0)===0xFEFF) text = text.slice(1);
+      let snap; try { snap = JSON.parse(text); } catch{ continue; }
+      upgradeSnapshot(snap);
+      // merge counters
+      for(const [ck, cv] of Object.entries(snap.counters||{})){
+        const n = Number(cv); if(!isFinite(n)) continue; agg.counters[ck] = (agg.counters[ck]||0) + n;
       }
-    } catch(e){ if(debug){ history.push({ error:'list_failed', message:String(e) }); } }
+      // merge sums
+      for(const [sk, sv] of Object.entries(snap.sums||{})){
+        const n = Number(sv); if(!isFinite(n)) continue; agg.sums[sk] = (agg.sums[sk]||0) + n;
+      }
+      const ts = Date.parse(snap.updatedAt||''); if(!isNaN(ts)) latestTs = Math.max(latestTs, ts);
+    }
+    if(latestTs>0) agg.updatedAt = new Date(latestTs).toISOString();
+    currentOut = agg;
   }
+
   if(debug){
-    return json({ current: JSON.parse(raw), history, debug:{ mode:'list', requestedDays: histDays, foundDailyKeys: foundKeys } });
+    return json({ current: currentOut, history, debug:{ mode:'list', requestedDays: histDays, foundDailyKeys: filteredAll, listError } });
   }
-  return json({ current: JSON.parse(raw), history });
+  return json({ current: currentOut, history });
 }
 
 // Overlay endpoint: returns recent gate direction mutations and deletions (tombstones)
@@ -700,7 +1414,19 @@ export default {
   if(p === '/api/get-share') return handleGetShare(url, env);
   if(p === '/api/usage-event') return handleUsageEvent(req, env);
   if(p === '/api/stats') return handleStats(url, env);
+  if(p === '/api/worldapi-stats') return handleWorldApiStats(env, url);
+  if(p === '/api/worldapi-update') return handleWorldApiUpdate(req, env);
   if(p === '/api/indexer-health') return handleIndexerHealth(env, url);
+  if(p === '/api/smart-gate-links') return handleSmartGateLinks(url, req, env);
+  if(p === '/api/system-overlays') return handleSystemOverlays(url, req, env);
+  if(p === '/api/gate-access') return handleGateAccess(url, req, env);
+  if(p === '/api/player-profile') return handlePlayerProfile(req, env);
+  // Auth endpoints
+  if(p === '/api/auth/nonce') return handleAuthNonce(req, env);
+  if(p === '/api/auth/verify') return handleAuthVerify(req, env);
+  if(p === '/api/auth/session') return handleAuthSession(req, env);
+  if(p === '/api/auth/logout') return handleAuthLogout(req, env);
+  if(p === '/api/authorized-gates') return handleAuthorizedGates(req, env);
   if(p === '/api/indexer-migrate') return handleIndexerMigrate(req, env);
   if(p === '/api/indexer-bootstrap') return handleIndexerBootstrap(req, env);
   if(p === '/api/indexer-ingest') return handleIndexerIngest(req, env);
@@ -720,6 +1446,27 @@ export default {
       const recent = await env.INDEX_DB.prepare("SELECT id, run_started_at, run_finished_at, mode, notes FROM indexer_run ORDER BY id DESC LIMIT 10").all();
       return json({ unfinished: unfinished.results||[], recent: recent.results||[] });
     } catch(e){ return json({ error:'debug_runs_failed', message:String(e) },500); }
+  }
+  if(p === '/api/debug-snapshots'){
+    // Inspect EF_SNAPSHOTS binding directly to compare with exporter writes and /api outputs
+    if(!env.EF_SNAPSHOTS) return json({ error:'EF_SNAPSHOTS KV not bound' },500);
+    try {
+      const out = { keys: [], links: null, acl: null };
+      let cursor=null; do {
+        const list = await env.EF_SNAPSHOTS.list({ cursor });
+        out.keys.push(...(list.keys||[]).map(k=>({ name:k.name, expiration:k.expiration||null, metadata:k.metadata||null })));
+        cursor = list.list_complete? null : list.cursor;
+      } while(cursor);
+      // Fetch updatedAt fields for primary snapshots if present
+      const linksRaw = await env.EF_SNAPSHOTS.get('smart_gate_links_v1');
+      const aclRaw = await env.EF_SNAPSHOTS.get('gate_access_snapshot_v1');
+      function safeParse(text){ if(!text) return null; try { return JSON.parse(text.charCodeAt(0)===0xFEFF? text.slice(1): text); } catch { return null; } }
+      const linksJson = safeParse(linksRaw);
+      const aclJson = safeParse(aclRaw);
+      out.links = linksJson ? { updatedAt: linksJson.updatedAt||null, count: Array.isArray(linksJson.links)? linksJson.links.length:null } : null;
+      out.acl = aclJson ? { updatedAt: aclJson.updatedAt||null, count: Array.isArray(aclJson.rules)? aclJson.rules.length:null } : null;
+      return json(out);
+    } catch(e){ return json({ error:'debug_snapshots_failed', message:String(e) },500); }
   }
   if(p === '/api/admin-finalize-stale') {
     // Admin endpoint to force finalize dangling runs (older than ?minutes=, default 2). Auth required unless preview bypass.
@@ -775,22 +1522,6 @@ export default {
       await env.INDEX_DB.prepare("INSERT OR REPLACE INTO topic_map (abi_hash, json) VALUES (?, ?)").bind(abiHash, JSON.stringify(parsed)).run();
       return json({ status:'stored', abiHash });
     } catch(e){ return json({ error:'topic_map_store_failed', message:String(e) },500); }
-  }
-  if(p === '/api/indexer-decode-batch') {
-    if(req.method !== 'POST') return json({ error:'Method Not Allowed' },405);
-    if(!env.INDEX_DB) return json({ error:'INDEX_DB binding missing' },500);
-    // Auth parity with ingest
-    const token = req.headers.get('X-Indexer-Admin');
-    const expected = (env.INDEXER_ADMIN_TOKEN||'').trim();
-    const host = req.headers.get('host')||''; const isPreviewHost = host.endsWith('.pages.dev');
-    const urlObj = new URL(req.url); const bypass = isPreviewHost && urlObj.searchParams.get('openPreview')==='1' && (!expected || token?.trim()!==expected);
-    if(expected && token?.trim()!==expected && !bypass) return json({ error:'Unauthorized' },401);
-    // Skeleton: just report counts until decoder implemented
-    try {
-      const cur = await env.INDEX_DB.prepare("SELECT last_block, last_log_index FROM decoded_cursor WHERE id=1").all();
-      const cursor = cur.results?.[0] || { last_block:0, last_log_index:0 };
-      return json({ status:'noop', decoded:0, cursor });
-    } catch(e){ return json({ error:'decode_batch_failed', message:String(e) },500); }
   }
   if(p === '/api/indexer-wipe') {
     if(req.method !== 'POST') return json({ error:'Method Not Allowed' },405);

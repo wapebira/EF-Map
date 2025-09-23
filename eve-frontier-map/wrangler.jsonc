@@ -14,20 +14,13 @@
   // reuse by an external triggering mechanism.
   "kv_namespaces": [
   { "binding": "EF_SHARES", "id": "93333a061a734ceca8da9f055cf189d1" },
-  { "binding": "EF_STATS", "id": "cccc1a708dd74aa8aabd91c8bfc33c3f" }
+  { "binding": "EF_STATS", "id": "cccc1a708dd74aa8aabd91c8bfc33c3f" },
+  // New: Dedicated KV for data snapshots (gate links, overlays). Use a separate namespace to avoid
+  // operational coupling with EF_STATS. Replace the placeholder ID with the authoritative namespace.
+  { "binding": "EF_SNAPSHOTS", "id": "2af7298532dd4acfbda8bf06020981ba" }
   ],
-  "d1_databases": [
-    {
-      "binding": "INDEX_DB",
-      "database_name": "ef_index",
-      "database_id": "cfc8fecb-9fe1-4ad0-98ed-525772d13ff0" // provisioned 2025-09-07 (feature/indexer)
-    },
-    {
-      "binding": "INDEX_DB_A1",
-      "database_name": "ef_index_archive_1",
-  "database_id": "d06e2eef-a125-4d9d-9d27-4116ef87d42e" // provisioned 2025-09-10
-    }
-  ],
+  // D1 databases intentionally unbound (databases removed). Indexer endpoints will return
+  // clear "binding missing" errors until D1 recreated and bindings restored.
   // Chain ingestion required vars (bound at build to ensure runtime availability). Secrets with sensitive values
   // should still be set via `wrangler pages secret put`, these placeholders document expected keys.
   // PYROPE_RPC: Public/read RPC endpoint (non-auth); WORLD_ADDRESS: world contract; DEPLOY_BLOCK: deployment block
@@ -37,12 +30,12 @@
     "WORLD_ADDRESS": "0x7085f3e652987f656fB8dEE5aA6592197Bb75de8",
     "DEPLOY_BLOCK": "7288348",
   "CONFIRM_DEPTH": "8",
-  "INDEXER_CRON_ENABLED": "1",
+  "INDEXER_CRON_ENABLED": "0",
   // Increase first-pass window to speed up backfill; monitor for RPC caps and revert if needed
   "INDEXER_CRON_MAX_BLOCKS": "10000",
-  "INDEXER_CRON_SEGMENT_BLOCKS": "400",
+  "INDEXER_CRON_SEGMENT_BLOCKS": "325",
   "INDEXER_CRON_ROW_CAP": "100000"
-  ,"INDEXER_AUTH_DISABLED": "1"
+  ,"INDEXER_AUTH_DISABLED": "0"
   ,"INDEXER_TABLE_ALLOWLIST": "1"
   }
 }

@@ -12,13 +12,15 @@ interface PlanetLegendPanelProps {
   resetToken?: number;
   isMinimized?: boolean;
   onToggleMinimize?: ()=>void;
+  basePos?: { x:number; y:number };
 }
 
 // Small secondary panel that visually matches the main drawer styling.
-const PlanetLegendPanel: React.FC<PlanetLegendPanelProps> = ({ children, onClose, anchoredBelowDrawer, scale=1, zIndex=1425, onActivate, resetToken, isMinimized=false, onToggleMinimize }) => {
+const PlanetLegendPanel: React.FC<PlanetLegendPanelProps> = ({ children, onClose, anchoredBelowDrawer, scale=1, zIndex=1425, onActivate, resetToken, isMinimized=false, onToggleMinimize, basePos }) => {
   // Base position: when not cascading below a drawer we align with y=70 like drawers.
   // anchoredBelowDrawer only applies when legend is the sole panel with drawers closed.
-  const base = { x: 140, y: anchoredBelowDrawer ? 70 + 340 : 70 };
+  const defaultBase = basePos || { x: 128, y: 84 };
+  const base = { x: defaultBase.x, y: anchoredBelowDrawer ? defaultBase.y + 340 : defaultBase.y };
   const drag = useDraggable('planet-legend', base);
   const lastResetRef = React.useRef(resetToken);
   React.useEffect(()=>{

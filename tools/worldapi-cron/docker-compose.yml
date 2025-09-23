@@ -1,0 +1,420 @@
+services:
+  # Shared image build once
+  base-image:
+    build:
+      context: ../..
+      dockerfile: tools/worldapi-cron/Dockerfile
+    image: ef-worldapi-cron:local
+    networks:
+      - indexer-network
+
+  # Snapshot exporter: publishes smart_gate_links_v1 to Cloudflare KV from local Postgres
+  snapshot-exporter:
+    build:
+      context: ../..
+      dockerfile: tools/snapshot-exporter/Dockerfile
+    image: ef-snapshot-exporter:local
+    restart: unless-stopped
+    environment:
+      # Postgres (Primordium reader)
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGDATABASE: postgres
+      PGUSER: user
+      PGPASSWORD: password
+      # Cloudflare (provide actual values via env or Docker secrets at runtime)
+      CF_ACCOUNT_ID: ${CF_ACCOUNT_ID}
+      CF_API_TOKEN: ${CF_API_TOKEN}
+      KV_NAMESPACE_ID: ${EF_SNAPSHOTS_NAMESPACE_ID}
+      # Behavior
+      ONLY_ONLINE: "1"
+      DRY_RUN: ${SNAPSHOT_DRY_RUN:-0}
+      LOG_JSON: "1"
+      # Ensure remote writes (Cloudflare API) rather than local: set FORCE_REMOTE=1
+      FORCE_REMOTE: "1"
+    networks:
+      - indexer-network
+    healthcheck:
+      test: ["CMD-SHELL", "wrangler --version >/dev/null 2>&1 || exit 1"]
+      interval: 1m
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Killmails: 1-2 min tail-only
+  worldapi-cron-killmails:
+    image: ef-worldapi-cron:local
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: postgres
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      DESTINATION__POSTGRES__CREDENTIALS__HOST: postgres
+      DESTINATION__POSTGRES__CREDENTIALS__PORT: "5432"
+      DESTINATION__POSTGRES__CREDENTIALS__DATABASE: postgres
+      DESTINATION__POSTGRES__CREDENTIALS__USERNAME: user
+      DESTINATION__POSTGRES__CREDENTIALS__PASSWORD: password
+      BASE_URL: https://world-api-stillness.live.tech.evefrontier.com
+      TZ: UTC
+      DLT_DATA_DIR: /app/.dlt-killmails
+      PIPELINE_NAME: worldapi_pipeline_killmails
+      DATASET_NAME: world_api_dlt
+      FORCE_ALLOW_RESOURCES: get_v_2_killmails
+      KILLMAILS_INTERVAL_MIN: "1"
+      KILLMAILS_OFFSET_MIN: "0"
+      KILLMAILS_PAGE_SIZE: "10"
+      KILLMAILS_MAX_OLD_PAGES: "60"
+      KILLMAILS_BACKFILL: "0"
+      KILLMAILS_BACKFILL_MAX_PAGES: "1000"
+      # Disable forced resets now that initial backfill ran
+      KILLMAILS_FORCE_RESET: "0"
+      # Disable others explicitly
+      SMARTASSEMBLIES_FLAT_INTERVAL_MIN: "0"
+      SMARTASSEMBLIES_DETAILS_INTERVAL_MIN: "0"
+      SMARTCHARACTERS_INTERVAL_MIN: "0"
+      SMARTCHARACTERS_DETAILS_INTERVAL_MIN: "0"
+      TRIBES_INTERVAL_MIN: "0"
+      TRIBES_DETAILS_INTERVAL_MIN: "0"
+      TYPES_INTERVAL_MIN: "0"
+      SOLARSYSTEMS_INTERVAL_MIN: "0"
+      SOLARSYSTEMS_DETAILS_INTERVAL_MIN: "0"
+    volumes:
+      - worldapi_dlt_state_killmails:/app/.dlt-killmails
+    networks:
+      - indexer-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h $$POSTGRES_HOST -p $$POSTGRES_PORT -U $$POSTGRES_USER || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # Smartassemblies flat list: fast (2m)
+  # worldapi-cron-smartassemblies-flat: DISABLED (duplicate of chain indexer)
+  # image: ef-worldapi-cron:local
+  # restart: unless-stopped
+  # environment:
+  #   ... disabled ...
+  # volumes:
+  #   - worldapi_dlt_state_ssa_flat:/app/.dlt-ssa-flat
+  # networks:
+  #   - indexer-network
+  # healthcheck:
+  #   test: ["CMD-SHELL", "pg_isready -h $$POSTGRES_HOST -p $$POSTGRES_PORT -U $$POSTGRES_USER || exit 1"]
+  #   interval: 30s
+  #   timeout: 5s
+  #   retries: 5
+  #   start_period: 10s
+
+  # Smartassemblies details: medium (5m). Requires parent cadence due.
+  # worldapi-cron-smartassemblies-details: DISABLED (duplicate of chain indexer)
+  # image: ef-worldapi-cron:local
+  # restart: unless-stopped
+  # environment:
+  #   ... disabled ...
+  # volumes:
+  #   - worldapi_dlt_state_ssa_details:/app/.dlt-ssa-details
+  # networks:
+  #   - indexer-network
+  # healthcheck:
+  #   test: ["CMD-SHELL", "pg_isready -h $$POSTGRES_HOST -p $$POSTGRES_PORT -U $$POSTGRES_USER || exit 1"]
+  #   interval: 30s
+  #   timeout: 5s
+  #   retries: 5
+  #   start_period: 10s
+
+  # Smartcharacters list: fast
+  worldapi-cron-smartcharacters:
+    image: ef-worldapi-cron:local
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: postgres
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      DESTINATION__POSTGRES__CREDENTIALS__HOST: postgres
+      DESTINATION__POSTGRES__CREDENTIALS__PORT: "5432"
+      DESTINATION__POSTGRES__CREDENTIALS__DATABASE: postgres
+      DESTINATION__POSTGRES__CREDENTIALS__USERNAME: user
+      DESTINATION__POSTGRES__CREDENTIALS__PASSWORD: password
+      BASE_URL: https://world-api-stillness.live.tech.evefrontier.com
+      TZ: UTC
+      DLT_DATA_DIR: /app/.dlt-smartcharacters
+      PIPELINE_NAME: worldapi_pipeline_smartcharacters
+      DATASET_NAME: world_api_dlt
+      FORCE_ALLOW_RESOURCES: get_v_2_smartcharacters
+      # New characters appear multiple times per hour – poll every minute
+      SMARTCHARACTERS_INTERVAL_MIN: "1"
+      SMARTCHARACTERS_DETAILS_INTERVAL_MIN: "0"
+      SMARTASSEMBLIES_FLAT_INTERVAL_MIN: "0"
+      SMARTASSEMBLIES_DETAILS_INTERVAL_MIN: "0"
+      TRIBES_INTERVAL_MIN: "0"
+      TRIBES_DETAILS_INTERVAL_MIN: "0"
+      TYPES_INTERVAL_MIN: "0"
+      SOLARSYSTEMS_INTERVAL_MIN: "0"
+      SOLARSYSTEMS_DETAILS_INTERVAL_MIN: "0"
+      KILLMAILS_INTERVAL_MIN: "0"
+    volumes:
+      - worldapi_dlt_state_sch:/app/.dlt-smartcharacters
+    networks:
+      - indexer-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h $$POSTGRES_HOST -p $$POSTGRES_PORT -U $$POSTGRES_USER || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # worldapi-cron-smartcharacters-details: DISABLED (not required for name mapping)
+  # image: ef-worldapi-cron:local
+  # restart: unless-stopped
+  # environment:
+  #   ... disabled ...
+  # volumes:
+  #   - worldapi_dlt_state_sch_details:/app/.dlt-smartcharacters-details
+  # networks:
+  #   - indexer-network
+  # healthcheck:
+  #   test: ["CMD-SHELL", "pg_isready -h $$POSTGRES_HOST -p $$POSTGRES_PORT -U $$POSTGRES_USER || exit 1"]
+  #   interval: 30s
+  #   timeout: 5s
+  #   retries: 5
+  #   start_period: 10s
+
+  # Tribes list & details: moderate (optional; enable if needed)
+  worldapi-cron-tribes:
+    image: ef-worldapi-cron:local
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: postgres
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      DESTINATION__POSTGRES__CREDENTIALS__HOST: postgres
+      DESTINATION__POSTGRES__CREDENTIALS__PORT: "5432"
+      DESTINATION__POSTGRES__CREDENTIALS__DATABASE: postgres
+      DESTINATION__POSTGRES__CREDENTIALS__USERNAME: user
+      DESTINATION__POSTGRES__CREDENTIALS__PASSWORD: password
+      BASE_URL: https://world-api-stillness.live.tech.evefrontier.com
+      TZ: UTC
+      DLT_DATA_DIR: /app/.dlt-tribes
+      PIPELINE_NAME: worldapi_pipeline_tribes
+      DATASET_NAME: world_api_dlt
+      FORCE_ALLOW_RESOURCES: get_v_2_tribes
+      # New tribes / membership churn; update roughly every 30 minutes
+      TRIBES_INTERVAL_MIN: "30"
+      TRIBES_DETAILS_INTERVAL_MIN: "0"
+      SMARTASSEMBLIES_FLAT_INTERVAL_MIN: "0"
+      SMARTASSEMBLIES_DETAILS_INTERVAL_MIN: "0"
+      SMARTCHARACTERS_INTERVAL_MIN: "0"
+      SMARTCHARACTERS_DETAILS_INTERVAL_MIN: "0"
+      TYPES_INTERVAL_MIN: "0"
+      SOLARSYSTEMS_INTERVAL_MIN: "0"
+      SOLARSYSTEMS_DETAILS_INTERVAL_MIN: "0"
+      KILLMAILS_INTERVAL_MIN: "0"
+    volumes:
+      - worldapi_dlt_state_tribes:/app/.dlt-tribes
+    networks:
+      - indexer-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h $$POSTGRES_HOST -p $$POSTGRES_PORT -U $$POSTGRES_USER || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  worldapi-cron-tribes-details:
+    image: ef-worldapi-cron:local
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: postgres
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      DESTINATION__POSTGRES__CREDENTIALS__HOST: postgres
+      DESTINATION__POSTGRES__CREDENTIALS__PORT: "5432"
+      DESTINATION__POSTGRES__CREDENTIALS__DATABASE: postgres
+      DESTINATION__POSTGRES__CREDENTIALS__USERNAME: user
+      DESTINATION__POSTGRES__CREDENTIALS__PASSWORD: password
+      BASE_URL: https://world-api-stillness.live.tech.evefrontier.com
+      TZ: UTC
+      DLT_DATA_DIR: /app/.dlt-tribes-details
+      PIPELINE_NAME: worldapi_pipeline_tribes_details
+      DATASET_NAME: world_api_dlt
+      FORCE_ALLOW_RESOURCES: "get_v_2_tribes_details_batch"
+      # Refresh tribe details on the same cadence
+      TRIBES_DETAILS_INTERVAL_MIN: "30"
+      TRIBES_BATCH_SIZE: "200"
+      TRIBES_DETAILS_DELAY_MS: "50"
+      TRIBES_INTERVAL_MIN: "0"
+      SMARTASSEMBLIES_FLAT_INTERVAL_MIN: "0"
+      SMARTASSEMBLIES_DETAILS_INTERVAL_MIN: "0"
+      SMARTCHARACTERS_INTERVAL_MIN: "0"
+      SMARTCHARACTERS_DETAILS_INTERVAL_MIN: "0"
+      TYPES_INTERVAL_MIN: "0"
+      SOLARSYSTEMS_INTERVAL_MIN: "0"
+      SOLARSYSTEMS_DETAILS_INTERVAL_MIN: "0"
+      KILLMAILS_INTERVAL_MIN: "0"
+    volumes:
+      - worldapi_dlt_state_tribes_details:/app/.dlt-tribes-details
+    networks:
+      - indexer-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h $$POSTGRES_HOST -p $$POSTGRES_PORT -U $$POSTGRES_USER || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  worldapi-cron-tribe-members:
+    image: ef-worldapi-cron:local
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: postgres
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      DESTINATION__POSTGRES__CREDENTIALS__HOST: postgres
+      DESTINATION__POSTGRES__CREDENTIALS__PORT: "5432"
+      DESTINATION__POSTGRES__CREDENTIALS__DATABASE: postgres
+      DESTINATION__POSTGRES__CREDENTIALS__USERNAME: user
+      DESTINATION__POSTGRES__CREDENTIALS__PASSWORD: password
+      BASE_URL: https://world-api-stillness.live.tech.evefrontier.com
+      TZ: UTC
+      DLT_DATA_DIR: /app/.dlt-tribe-members
+      PIPELINE_NAME: worldapi_pipeline_tribe_members
+      DATASET_NAME: world_api_dlt
+      FORCE_ALLOW_RESOURCES: "get_v_2_tribe_members_batch"
+      # Align with tribe details cadence
+      TRIBES_DETAILS_INTERVAL_MIN: "30"
+      TRIBES_BATCH_SIZE: "200"
+      TRIBES_DETAILS_DELAY_MS: "50"
+      TRIBES_INTERVAL_MIN: "0"
+      SMARTASSEMBLIES_FLAT_INTERVAL_MIN: "0"
+      SMARTASSEMBLIES_DETAILS_INTERVAL_MIN: "0"
+      SMARTCHARACTERS_INTERVAL_MIN: "0"
+      SMARTCHARACTERS_DETAILS_INTERVAL_MIN: "0"
+      TYPES_INTERVAL_MIN: "0"
+      SOLARSYSTEMS_INTERVAL_MIN: "0"
+      SOLARSYSTEMS_DETAILS_INTERVAL_MIN: "0"
+      KILLMAILS_INTERVAL_MIN: "0"
+    volumes:
+      - worldapi_dlt_state_tribe_members:/app/.dlt-tribe-members
+    networks:
+      - indexer-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h $$POSTGRES_HOST -p $$POSTGRES_PORT -U $$POSTGRES_USER || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # worldapi-cron-solarsystems: DISABLED (not needed)
+  # image: ef-worldapi-cron:local
+  # restart: unless-stopped
+  # environment:
+  #   ... disabled ...
+  # volumes:
+  #   - worldapi_dlt_state_solarsystems:/app/.dlt-solarsystems
+  # networks:
+  #   - indexer-network
+  # healthcheck:
+  #   test: ["CMD-SHELL", "pg_isready -h $$POSTGRES_HOST -p $$POSTGRES_PORT -U $$POSTGRES_USER || exit 1"]
+  #   interval: 30s
+  #   timeout: 5s
+  #   retries: 5
+  #   start_period: 10s
+
+  # worldapi-cron-solarsystems-details: DISABLED (not needed)
+  # image: ef-worldapi-cron:local
+  # restart: unless-stopped
+  # environment:
+  #   ... disabled ...
+  # volumes:
+  #   - worldapi_dlt_state_solarsystems_details:/app/.dlt-solarsystems-details
+  # networks:
+  #   - indexer-network
+  # healthcheck:
+  #   test: ["CMD-SHELL", "pg_isready -h $$POSTGRES_HOST -p $$POSTGRES_PORT -U $$POSTGRES_USER || exit 1"]
+  #   interval: 30s
+  #   timeout: 5s
+  #   retries: 5
+  #   start_period: 10s
+
+  # Daily slow-moving (types only)
+  worldapi-cron-daily:
+    image: ef-worldapi-cron:local
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: postgres
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      DESTINATION__POSTGRES__CREDENTIALS__HOST: postgres
+      DESTINATION__POSTGRES__CREDENTIALS__PORT: "5432"
+      DESTINATION__POSTGRES__CREDENTIALS__DATABASE: postgres
+      DESTINATION__POSTGRES__CREDENTIALS__USERNAME: user
+      DESTINATION__POSTGRES__CREDENTIALS__PASSWORD: password
+      BASE_URL: https://world-api-stillness.live.tech.evefrontier.com
+      TZ: UTC
+      DLT_DATA_DIR: /app/.dlt-daily
+      PIPELINE_NAME: worldapi_pipeline_daily
+      DATASET_NAME: world_api_dlt
+      FORCE_ALLOW_RESOURCES: get_v_2_types
+      TYPES_INTERVAL_MIN: "1440"
+      # Disable others
+      SMARTASSEMBLIES_FLAT_INTERVAL_MIN: "0"
+      SMARTASSEMBLIES_DETAILS_INTERVAL_MIN: "0"
+      SMARTCHARACTERS_INTERVAL_MIN: "0"
+      SMARTCHARACTERS_DETAILS_INTERVAL_MIN: "0"
+      TRIBES_INTERVAL_MIN: "0"
+      TRIBES_DETAILS_INTERVAL_MIN: "0"
+      SOLARSYSTEMS_INTERVAL_MIN: "0"
+      SOLARSYSTEMS_DETAILS_INTERVAL_MIN: "0"
+      KILLMAILS_INTERVAL_MIN: "0"
+    volumes:
+      - worldapi_dlt_state_daily:/app/.dlt-daily
+    networks:
+      - indexer-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h $$POSTGRES_HOST -p $$POSTGRES_PORT -U $$POSTGRES_USER || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+networks:
+  indexer-network:
+    external: true
+    name: pg-indexer-reader_indexer-network
+
+volumes:
+  worldapi_dlt_state_killmails:
+    driver: local
+  worldapi_dlt_state_ssa_flat:
+    driver: local
+  worldapi_dlt_state_ssa_details:
+    driver: local
+  worldapi_dlt_state_sch:
+    driver: local
+  worldapi_dlt_state_sch_details:
+    driver: local
+  worldapi_dlt_state_tribes:
+    driver: local
+  worldapi_dlt_state_tribes_details:
+    driver: local
+  worldapi_dlt_state_tribe_members:
+    driver: local
+  worldapi_dlt_state_daily:
+    driver: local
+  worldapi_dlt_state_solarsystems:
+    driver: local
+  worldapi_dlt_state_solarsystems_details:
+    driver: local

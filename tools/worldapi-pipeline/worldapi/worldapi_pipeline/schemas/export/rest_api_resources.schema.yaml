@@ -1,0 +1,434 @@
+version: 8
+version_hash: XE6UIIwDDUaf6CDIH8uEwdyyz7QAy1dwkTCmg6scF/c=
+engine_version: 9
+name: rest_api_resources
+tables:
+  _dlt_version:
+    columns:
+      version:
+        data_type: bigint
+        nullable: false
+      engine_version:
+        data_type: bigint
+        nullable: false
+      inserted_at:
+        data_type: timestamp
+        nullable: false
+      schema_name:
+        data_type: text
+        nullable: false
+      version_hash:
+        data_type: text
+        nullable: false
+      schema:
+        data_type: text
+        nullable: false
+    write_disposition: skip
+    description: Created by DLT. Tracks schema updates
+  _dlt_loads:
+    columns:
+      load_id:
+        data_type: text
+        nullable: false
+      schema_name:
+        data_type: text
+        nullable: true
+      status:
+        data_type: bigint
+        nullable: false
+      inserted_at:
+        data_type: timestamp
+        nullable: false
+      schema_version_hash:
+        data_type: text
+        nullable: true
+    write_disposition: skip
+    description: Created by DLT. Tracks completed loads
+  health:
+    columns:
+      ok:
+        data_type: bool
+        nullable: true
+      _dlt_load_id:
+        data_type: text
+        nullable: false
+      _dlt_id:
+        data_type: text
+        nullable: false
+        unique: true
+    write_disposition: replace
+    resource: get_health
+    x-normalizer:
+      seen-data: true
+  solarsystem:
+    columns:
+      location__x:
+        data_type: decimal
+        precision: 38
+        scale: 0
+      location__y:
+        data_type: decimal
+        precision: 38
+        scale: 0
+      location__z:
+        data_type: decimal
+        precision: 38
+        scale: 0
+      id:
+        nullable: false
+        primary_key: true
+        data_type: bigint
+      name:
+        data_type: text
+        nullable: true
+      constellation_id:
+        data_type: bigint
+        nullable: true
+      region_id:
+        data_type: bigint
+        nullable: true
+      _dlt_load_id:
+        data_type: text
+        nullable: false
+      _dlt_id:
+        data_type: text
+        nullable: false
+        unique: true
+    write_disposition: merge
+    resource: get_v_2_solarsystems
+    x-merge-strategy: delete-insert
+    x-normalizer:
+      seen-data: true
+  _dlt_pipeline_state:
+    columns:
+      version:
+        data_type: bigint
+        nullable: false
+      engine_version:
+        data_type: bigint
+        nullable: false
+      pipeline_name:
+        data_type: text
+        nullable: false
+      state:
+        data_type: text
+        nullable: false
+      created_at:
+        data_type: timestamp
+        nullable: false
+      version_hash:
+        data_type: text
+        nullable: true
+      _dlt_load_id:
+        data_type: text
+        nullable: false
+      _dlt_id:
+        data_type: text
+        nullable: false
+        unique: true
+    write_disposition: append
+    file_format: preferred
+    x-normalizer:
+      seen-data: true
+  type:
+    columns:
+      id:
+        nullable: false
+        primary_key: true
+        data_type: bigint
+      name:
+        data_type: text
+        nullable: true
+      description:
+        data_type: text
+        nullable: true
+      mass:
+        data_type: double
+        nullable: true
+      radius:
+        data_type: bigint
+        nullable: true
+      volume:
+        data_type: double
+        nullable: true
+      portion_size:
+        data_type: bigint
+        nullable: true
+      group_name:
+        data_type: text
+        nullable: true
+      group_id:
+        data_type: bigint
+        nullable: true
+      category_name:
+        data_type: text
+        nullable: true
+      category_id:
+        data_type: bigint
+        nullable: true
+      icon_url:
+        data_type: text
+        nullable: true
+      _dlt_load_id:
+        data_type: text
+        nullable: false
+      _dlt_id:
+        data_type: text
+        nullable: false
+        unique: true
+      radius__v_double:
+        data_type: double
+        nullable: true
+        variant: true
+    write_disposition: merge
+    resource: get_v_2_types
+    x-merge-strategy: delete-insert
+    x-normalizer:
+      seen-data: true
+  tribe:
+    columns:
+      id:
+        nullable: false
+        primary_key: true
+        data_type: bigint
+      name:
+        data_type: text
+        nullable: true
+      name_short:
+        data_type: text
+        nullable: true
+      description:
+        data_type: text
+        nullable: true
+      member_count:
+        data_type: bigint
+        nullable: true
+      tax_rate:
+        data_type: bigint
+        nullable: true
+      tribe_url:
+        data_type: text
+        nullable: true
+      founded_at:
+        data_type: timestamp
+        nullable: true
+      _dlt_load_id:
+        data_type: text
+        nullable: false
+      _dlt_id:
+        data_type: text
+        nullable: false
+        unique: true
+      tax_rate__v_double:
+        data_type: double
+        nullable: true
+        variant: true
+    write_disposition: merge
+    resource: get_v_2_tribes
+    x-merge-strategy: delete-insert
+    x-normalizer:
+      seen-data: true
+  smartcharacter:
+    columns:
+      address:
+        data_type: text
+        nullable: true
+      name:
+        data_type: text
+        nullable: true
+      id:
+        nullable: false
+        primary_key: true
+        data_type: text
+      _dlt_load_id:
+        data_type: text
+        nullable: false
+      _dlt_id:
+        data_type: text
+        nullable: false
+        unique: true
+    write_disposition: merge
+    resource: get_v_2_smartcharacters
+    x-merge-strategy: delete-insert
+    x-normalizer:
+      seen-data: true
+  smartassembly:
+    columns:
+      id:
+        nullable: false
+        primary_key: true
+        data_type: text
+      type:
+        data_type: text
+        nullable: true
+      name:
+        data_type: text
+        nullable: true
+      state:
+        data_type: text
+        nullable: true
+      solar_system__id:
+        data_type: bigint
+        nullable: true
+      solar_system__name:
+        data_type: text
+        nullable: true
+      solar_system__constellation_id:
+        data_type: bigint
+        nullable: true
+      solar_system__region_id:
+        data_type: bigint
+        nullable: true
+      solar_system__location__x:
+        data_type: bigint
+        nullable: true
+      solar_system__location__y:
+        data_type: bigint
+        nullable: true
+      solar_system__location__z:
+        data_type: bigint
+        nullable: true
+      owner__address:
+        data_type: text
+        nullable: true
+      owner__name:
+        data_type: text
+        nullable: true
+      owner__id:
+        data_type: text
+        nullable: true
+      energy_usage:
+        data_type: bigint
+        nullable: true
+      type_id:
+        data_type: bigint
+        nullable: true
+      _dlt_load_id:
+        data_type: text
+        nullable: false
+      _dlt_id:
+        data_type: text
+        nullable: false
+        unique: true
+    write_disposition: merge
+    resource: get_v_2_smartassemblies
+    x-merge-strategy: delete-insert
+    x-normalizer:
+      seen-data: true
+  smartassembly_flat:
+    columns:
+      id:
+        data_type: text
+        primary_key: true
+        nullable: false
+      energy_usage:
+        data_type: bigint
+      type_id:
+        data_type: bigint
+      type:
+        data_type: text
+        nullable: true
+      name:
+        data_type: text
+        nullable: true
+      state:
+        data_type: text
+        nullable: true
+      _dlt_load_id:
+        data_type: text
+        nullable: false
+      _dlt_id:
+        data_type: text
+        nullable: false
+        unique: true
+    write_disposition: replace
+    resource: get_v_2_smartassemblies_flat
+    x-normalizer:
+      seen-data: true
+  killmails:
+    columns:
+      id:
+        nullable: false
+        primary_key: true
+        data_type: bigint
+      victim__address:
+        data_type: text
+        nullable: true
+      victim__name:
+        data_type: text
+        nullable: true
+      victim__id:
+        data_type: text
+        nullable: true
+      killer__address:
+        data_type: text
+        nullable: true
+      killer__name:
+        data_type: text
+        nullable: true
+      killer__id:
+        data_type: text
+        nullable: true
+      solar_system_id:
+        data_type: bigint
+        nullable: true
+      time:
+        data_type: timestamp
+        nullable: true
+      _dlt_load_id:
+        data_type: text
+        nullable: false
+      _dlt_id:
+        data_type: text
+        nullable: false
+        unique: true
+    write_disposition: merge
+    resource: get_v_2_killmails
+    x-merge-strategy: delete-insert
+    x-normalizer:
+      seen-data: true
+settings:
+  detections:
+  - iso_timestamp
+  default_hints:
+    not_null:
+    - _dlt_id
+    - _dlt_root_id
+    - _dlt_parent_id
+    - _dlt_list_idx
+    - _dlt_load_id
+    foreign_key:
+    - _dlt_parent_id
+    root_key:
+    - _dlt_root_id
+    unique:
+    - _dlt_id
+normalizers:
+  names: snake_case
+  json:
+    module: dlt.common.normalizers.json.relational
+    config:
+      max_nesting: 1
+      propagation:
+        tables:
+          solarsystem:
+            _dlt_id: _dlt_root_id
+          type:
+            _dlt_id: _dlt_root_id
+          tribe:
+            _dlt_id: _dlt_root_id
+          smartcharacter:
+            _dlt_id: _dlt_root_id
+          smartassembly:
+            _dlt_id: _dlt_root_id
+          killmails:
+            _dlt_id: _dlt_root_id
+previous_hashes:
+- vhqkV39tgxZALBsnFDtGwAYHHiK+lFQzrABjp0aMe1k=
+- YLGX1/rL25u9yvvBtoLnDfnW1xoIB1XgsDduehaILrY=
+- lg+ZIh2oxqvjKsl6+iZtrVz+laYx+QXK8dlry086YLE=
+- ESZud4VQhyWLvdABu4HzTNSkyl8ta8LVLatGy4Sf13s=
+- YsjFI9625jzW/6oKJrwM45R9fcjzn/DKg1sbYJBqBtk=
+- ZCGOnvEMyhRoebik06f9ffKoGkf7hr8RLoT34suy9+w=
+- /rByzV+5xJXUGtss1fn2SuO4B1Gihv1CDTBF57jo9YE=
+- 9/J00j/4G4+kH4vyaTkWHuzwfyAmV3ljb308Ig30ykc=

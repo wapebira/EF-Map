@@ -6,5 +6,22 @@
         "**/.DS_Store": true,
         "**/Thumbs.db": true,
         ".yoyo": true
-    }
+    },
+
+    // VS Code 1.104 – leverage agent features
+    "chat.useAgentsMdFile": true,
+
+    // Do not auto-approve terminal commands by default
+    "chat.tools.terminal.enableAutoApprove": false,
+
+    // Suggest our custom prompt files in the Chat welcome view
+    "chat.promptFilesRecommendations": {
+        "plan": true,
+        "ops-cleanup": true
+    },
+
+    // Chat / UI ergonomics
+    "workbench.secondarySideBar.defaultVisibility": "visible",
+    "chat.math.enabled": true,
+    "chat.agent.maxRequests": 100
 }

@@ -1,0 +1,1 @@
+﻿{"status":"ok","mode":"stub","cursor":{"id":1,"last_block_number":8021082,"last_log_index":0,"updated_at":"2025-09-11 04:42:53"},"run":{"id":1421,"run_started_at":"2025-09-11 04:42:53","run_finished_at":"2025-09-11 04:42:53","mode":"stub","run_duration_ms":0,"assemblies_scanned":2,"rows_added":2,"rows_updated":0,"rows_removed":0,"gate_edges_rebuilt":1,"error_count":0}}

@@ -14,6 +14,7 @@ interface RoutingPanelProps {
     overheadPct?: number,
     exploreCorridorPct?: number,
     exploreProgressBiasPct?: number,
+    smartGateMode?: 'none' | 'public' | 'authorized',
   ) => void;
   onStopCalculation?: () => void;
   isCalculating: boolean;
@@ -43,6 +44,10 @@ interface RoutingPanelProps {
   initialOptimizeFor?: 'fuel' | 'jumps' | 'explore';
   initialAlgorithm?: 'astar' | 'dijkstra';
   onRoutingParamChange?:(jump:number,opt:'fuel'|'jumps'|'explore',algo:'astar'|'dijkstra')=>void;
+  // Smart Gate route notes helper map (fromSystemId-toSystemId -> itemId)
+  smartGateItemByPair?: Record<string, number> | null;
+  usedSmartGatePairs?: Set<string> | null;
+  isLoggedIn?: boolean;
   // Planet legend filtering props
   planetBinsActive?: boolean[];
   minPlanets?: number;
@@ -87,6 +92,9 @@ const RoutingPanel: React.FC<RoutingPanelProps> = (props) => {
           routeResult={props.routeResult}
           mapData={props.mapData}
           systemNames={props.systemNames}
+          smartGateItemByPair={props.smartGateItemByPair||null}
+          usedSmartGatePairs={props.usedSmartGatePairs||null}
+          isLoggedIn={!!props.isLoggedIn}
           progress={props.progress}
           routeCalcTimeMs={props.routeCalcTimeMs}
           resetToken={props.resetToken}

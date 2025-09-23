@@ -300,6 +300,21 @@ button:focus-visible,
 .share-route-btn:disabled { opacity: .45; cursor: not-allowed; filter:none; }
 .share-feedback { font-size:11px; position:absolute; bottom:-16px; left:0; right:0; text-align:center; color:#fff; opacity:.85; pointer-events:none; }
 
+/* Identity / Connect panel subtle hover styles (mirror PanelRail vibe) */
+.ef-identity-panel { transition: background .25s ease, border-color .25s ease, box-shadow .25s ease; }
+/* Copy the subtle lighten-on-hover used by .ef-rail-btn (feature bar) */
+.ef-identity-panel:hover {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.14), rgba(255,255,255,0.04)),
+    linear-gradient(180deg, rgba(30,30,32,0.78) 0%, rgba(18,18,20,0.78) 55%, rgba(12,12,14,0.78) 100%);
+}
+.ef-identity-btn { transition: background .25s ease, border-color .25s ease, color .25s ease, filter .2s ease, transform .15s ease; }
+.ef-identity-btn:hover { filter: brightness(1.06); }
+.ef-identity-btn:active { transform: translateY(1px); }
+.ef-connect-btn { transition: filter .2s ease, transform .15s ease, background .25s ease; }
+.ef-connect-btn:hover:not(:disabled) { filter: brightness(1.08); }
+.ef-connect-btn:active:not(:disabled) { transform: translateY(1px); }
+
 @media (max-width: 1200px){ :root.help-open .ef-toolbar-shifting { transform: translateX(calc(-1 * ((var(--help-panel-width, 40vw) - var(--help-toggle-width, 0px)) + 8px))); } }
 @media (max-width: 1200px){ :root.help-open .ef-top-toolbar { padding-left: calc(12px + (var(--help-panel-width, 40vw) - var(--help-toggle-width, 0px)) + 8px); } }
 @media (max-width: 900px){ :root.help-open .ef-toolbar-shifting { transform: translateX(calc(-1 * ((var(--help-panel-width, 50vw) - var(--help-toggle-width, 0px)) + 8px))); } }

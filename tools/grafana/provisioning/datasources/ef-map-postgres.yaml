@@ -1,0 +1,20 @@
+apiVersion: 1
+
+datasources:
+  - name: EF Postgres
+    uid: ef-postgres
+    type: postgres
+    isDefault: false
+    access: proxy
+    url: pg-indexer-reader-postgres-1:5432
+    user: user
+    secureJsonData:
+      password: password
+    jsonData:
+      database: postgres
+      sslmode: disable
+      maxOpenConns: 5
+      maxIdleConns: 2
+      connMaxLifetime: 14400
+      postgresVersion: 1600
+      timescaledb: false

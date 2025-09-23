@@ -23,11 +23,44 @@ tmp_*
 *.log
 *.bak
 
+# Ad-hoc corruption markers created by external tools
+True.corrupt.*
+
 # Ad-hoc JSON/TXT snapshots
 *.json.tmp
 tmp_*.json
 tmp_*.txt
 eve-frontier-map/tmp_*.json
 
+# Portable Node runtime (large binaries; keep out of Git)
+tools/node-portable/
+
+# Safety: if we flatten a nested git repo, we may temporarily back up its .git dir
+eve-frontier-map/.git_nested_backup/
+
 # Accidental nested copy
 eve-frontier-map/eve-frontier-map/
+
+# Local indexer artifacts
+data/
+!data/.gitkeep
+eve-frontier-map/public/data/index-latest/*.json
+
+# Python virtual environments & caches (prevent massive untracked file sets)
+**/.venv*/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+
+# dlt runtime artifacts (generated load packages & exported schemas)
+**/.dlt/*/load_packages/**
+**/.dlt/schemas/export/**
+
+# Local DuckDB files created by smoke tests
+**/*.duckdb
+
+# Cloudflare exporter local env (contains secrets; do not commit)
+tools/worldapi-cron/.env*

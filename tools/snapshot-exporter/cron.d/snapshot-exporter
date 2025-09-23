@@ -1,0 +1,2 @@
+# Run every 2 minutes by default; adjust via container environment if using another scheduler
+*/2 * * * * /usr/local/bin/node /app/exporter.js >> /proc/1/fd/1 2>> /proc/1/fd/2

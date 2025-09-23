@@ -28,6 +28,8 @@ import RoutingPanel from './components/Routing/RoutingPanel';
 import CinematicPanel from './components/Cinematic/CinematicPanel';
 import PlanetLegendPanel from './components/Planets/PlanetLegendPanel';
 import './components/layout/panelLayout.css';
+// Bring neutral input/select styles used by Routing to Smart Gates panel
+import './components/P2PRouting/P2PRouting.css';
 import AutoCompleteInput from './components/AutoCompleteInput/AutoCompleteInput';
 import HelpPanel from './components/HelpPanel/HelpPanel';
 import { loadPrefs, setAccent, setOpenPanels as persistOpenPanels, setRoutingPrefs, fullReset, getPrefs, softReset, setUiScale as persistUiScale, setShowStations as persistShowStations } from './utils/prefs';
@@ -35,6 +37,7 @@ import { track } from './utils/usage';
 import { encodeShare, decodeShare } from './utils/share';
 import { createShortShare, fetchShortShare, buildShortRedirectUrl } from './utils/shortShare';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
+// FXAA removed; keep cinematic pipeline only
 import DonateCryptoModal from './components/DonateCryptoModal';
 import { Suspense, lazy } from 'react';
 import TransmissionPanel from './components/Transmission/TransmissionPanel';
@@ -44,6 +47,7 @@ import IndexerStatusBadge from './components/Indexer/IndexerStatusBadge';
 // Station icon (ensure file added at assets/icons/station.png)
 // Will be lazy loaded via TextureLoader when toggle active
 import stationIconUrl from './assets/icons/station.png';
+// Smart Gates: lightweight panel inlined below; no separate component to minimize diff
 
 // Small referral badge component with copy-to-clipboard
 const ReferralBadge: React.FC = () => {
@@ -179,6 +183,7 @@ function App() {
   const initialPrefsRef = useRef(getPrefs());
   // Accent color (persisted)
   const [accentIsBlue, setAccentIsBlue] = useState(initialPrefsRef.current.accent === 'blue');
+  // FXAA removed (toggle and runtime flag deleted)
   // Theme usage tracking
   useEffect(()=>{ try { (window as any).__efSetThemeAccent && (window as any).__efSetThemeAccent(accentIsBlue ? 'blue':'orange'); } catch { /* ignore */ } }, [accentIsBlue]);
   const [loadingProgress, setLoadingProgress] = useState(0);
@@ -203,7 +208,12 @@ function App() {
   const [layoutResetToken, setLayoutResetToken] = useState(0); // layout-only reset for panel positions
   // UI visibility + scaling
   const [hideUI, setHideUI] = useState(false);
-  const [showTransmission, setShowTransmission] = useState(()=>{ try { return !(getPrefs() as any).transmissionSeen; } catch { return true; } });
+  // Feature flag: allow hiding the promotional Transmission UI while retaining code for future use
+  const TRANSMISSION_ENABLED = false; // flip to true to re-enable promotional transmission UI
+  const [showTransmission, setShowTransmission] = useState(()=>{
+    if(!TRANSMISSION_ENABLED) return false;
+    try { return !(getPrefs() as any).transmissionSeen; } catch { return true; }
+  });
   const [transmissionWidth, setTransmissionWidth] = useState<number|undefined>(undefined);
   const [transmissionBg, setTransmissionBg] = useState<string|undefined>(undefined);
   // Replay pill now derives from persisted prefs.transmissionSeen (always available after first complete or dismissal)
@@ -610,7 +620,7 @@ function App() {
   // State for P2P Routing
   const routingWorkerRef = useRef<Worker | null>(null);
   const [isCalculatingRoute, setIsCalculatingRoute] = useState(false);
-  const [routeResult, setRouteResult] = useState<{ path: string[] | null; error?: string; minRequiredShipRange?: number; meta?: { baselineCost?: number; finalCost?: number; baselineNodes?: number; finalNodes?: number } } | null>(null);
+  const [routeResult, setRouteResult] = useState<{ path: string[] | null; error?: string; minRequiredShipRange?: number; meta?: { baselineCost?: number; finalCost?: number; baselineNodes?: number; finalNodes?: number }; usedSmartGatePairs?: string[] } | null>(null);
   const [scoutRouteResult, setScoutRouteResult] = useState<{ path: string[] | null } | null>(null);
   const [scoutInvalidateToken, setScoutInvalidateToken] = useState(0);
   const [routeProgress, setRouteProgress] = useState<{ explored: number; frontier: number; elapsedMs: number; message: string } | null>(null);
@@ -639,6 +649,7 @@ function App() {
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+  // FXAA composer removed
   const controlsRef = useRef<OrbitControls | null>(null);
   const starFieldRef = useRef<THREE.Points | null>(null);
   const overlayRingsRef = useRef<UserOverlayRings | null>(null); // persistent user overlay halos
@@ -649,6 +660,48 @@ function App() {
   }, [mapData]);
   const hoverPointRef = useRef<THREE.Points | null>(null);
   const stargateLinesRef = useRef<THREE.LineSegments | null>(null);
+  // Smart Gate overlay
+  const smartGateLinesRef = useRef<THREE.LineSegments | null>(null);
+  const [showSmartGates, setShowSmartGates] = useState<boolean>(()=>{ try { return localStorage.getItem('efmap:smartgates:show') === '1'; } catch { return false; } });
+  // Phase 0: UI state for Smart Gates – color mode and viewing mode
+  const [smartGateColorMode, setSmartGateColorMode] = useState<'accent'|'opposite'|'tribe'>(()=>{
+    try {
+      const raw = String(localStorage.getItem('efmap:smartgates:colormode')||'accent');
+      // Migrate legacy values: 'static' -> 'accent', 'owner' -> 'accent'
+      if(raw === 'static' || raw === 'owner') return 'accent';
+      if(raw === 'accent' || raw === 'opposite' || raw === 'tribe') return raw as any;
+      return 'accent';
+    } catch { return 'accent'; }
+  });
+  const [smartGateViewMode, setSmartGateViewMode] = useState<'all'|'public'|'authorized'>(()=>{
+    try {
+      const raw = (localStorage.getItem('efmap:smartgates:viewmode')||'all').toString();
+      // Back-compat: map legacy 'traversable' to new 'authorized' label
+      if(raw === 'traversable') return 'authorized';
+      if(raw === 'public' || raw === 'authorized' || raw === 'all') return raw as any;
+      return 'all';
+    } catch { return 'all'; }
+  });
+  const [smartGateSnapshot, setSmartGateSnapshot] = useState<{ updatedAt?: string; links?: { origin:number; destination:number; linked?:boolean; online?:boolean; cost?:number; gateId?:number; tribeId?:string; tribes?:string[] }[] } | null>(null);
+  const [smartGateErr, setSmartGateErr] = useState<string|null>(null);
+  const [smartGateRefreshBusy, setSmartGateRefreshBusy] = useState(false);
+  // Gate access snapshot (rules with isPublic)
+  const [gateAccessSnapshot, setGateAccessSnapshot] = useState<{ updatedAt?: string; rules?: { gate_id?:number; fromSystemId:number; toSystemId:number; appliedSystemId?:number; isPublic?:boolean }[] } | null>(null);
+  // Auth/session state (SIWE-lite): address if logged-in; authorized gates policy payload
+  const [sessionAddress, setSessionAddress] = useState<string|null>(null);
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authError, setAuthError] = useState<string>('');
+  const [authorizedPolicy, setAuthorizedPolicy] = useState<{ version:number; mode:string; address?:string; policy:string; allowPublic?:boolean; updatedAt?:string }|null>(null);
+  // Player profile (name + avatar) fetched from session-gated /api/player-profile
+  const [playerProfile, setPlayerProfile] = useState<{ address:string; name:string|null; avatarUrl:string|null }|null>(null);
+  const [showLogoutMenu, setShowLogoutMenu] = useState(false);
+  const profileMenuRef = useRef<HTMLDivElement|null>(null);
+  // Wallet providers (EIP-1193) detection and selection
+  type Eip6963ProviderDetail = { info?: { uuid?: string; name?: string; icon?: string; rdns?: string }; provider: any };
+  const [detectedWallets, setDetectedWallets] = useState<Eip6963ProviderDetail[]>([]);
+  // Retry token to attempt building Smart Gate lines after scene mounts (addresses first-load race)
+  const [smartGateBuildRetry, setSmartGateBuildRetry] = useState(0);
+  // (Glow pass removed) – no secondary Smart Gate effect state
   // Glow pass removed; no secondary line material
   const routeLinesRef = useRef<THREE.Group | null>(null); // New ref for route lines
   const cinematicModeRef = useRef(false);
@@ -778,6 +831,646 @@ function App() {
     return mat;
   }, []);
 
+  // Smart Gate material: preserve hue by using normal blending and overlay draw (no depth test)
+  const smartGateMaterial = useMemo(() => {
+    const clone = stargateMaterial.clone();
+    clone.blending = THREE.NormalBlending; // preserve hue (avoid additive yellowing)
+    clone.depthWrite = false;
+    clone.depthTest = false; // always overlay stars
+    clone.transparent = true;
+    // Slightly lower brightness and raise opacity for comparable presence
+    try {
+      const u: any = (clone as any).uniforms;
+      if (u?.uMinBright) u.uMinBright.value = 1.25;
+      if (u?.uMaxBright) u.uMaxBright.value = 1.55;
+      if (u?.uOpacityNear) u.uOpacityNear.value = 0.85;
+      if (u?.uOpacityFar) u.uOpacityFar.value = 0.85;
+    } catch { /* ignore */ }
+    return clone;
+  }, [stargateMaterial]);
+
+  // Glow pass removed – no glow persistence or live updates
+
+  // Persist Smart Gates toggle
+  useEffect(()=>{ try { localStorage.setItem('efmap:smartgates:show', showSmartGates ? '1':'0'); } catch {} }, [showSmartGates]);
+  // Persist Phase 0 Smart Gates UI preferences
+  useEffect(()=>{ try { localStorage.setItem('efmap:smartgates:colormode', smartGateColorMode); } catch {} }, [smartGateColorMode]);
+  useEffect(()=>{ try { localStorage.setItem('efmap:smartgates:viewmode', smartGateViewMode); } catch {} }, [smartGateViewMode]);
+  // (Temporary) persist glow slider value handled separately above
+
+  // Masked bloom overlay removed
+
+  // Fetch Smart Gate links snapshot once (unconditionally so routing can use it even if overlay is off)
+  useEffect(()=>{
+    if(smartGateSnapshot) return;
+    let aborted = false;
+    (async()=>{
+      try {
+        setSmartGateErr(null);
+  const resp = await fetch(`/api/smart-gate-links?ts=${Date.now()}` , { cache:'no-store' });
+        if(!resp.ok){ throw new Error(`HTTP ${resp.status}`); }
+        const json = await resp.json();
+        if(!aborted){ setSmartGateSnapshot(json); }
+      } catch(e:any){ if(!aborted){ setSmartGateErr(String(e?.message||e||'Failed to load smart gates')); } }
+    })();
+    return ()=>{ aborted = true; };
+  }, [smartGateSnapshot]);
+
+  // Fetch Gate Access snapshot (isPublic rules) once (unconditionally for routing)
+  useEffect(()=>{
+    if(gateAccessSnapshot) return;
+    let aborted = false;
+    (async()=>{
+      try {
+        const resp = await fetch(`/api/gate-access?ts=${Date.now()}`, { cache:'no-store' });
+        if(!resp.ok){ throw new Error(`HTTP ${resp.status}`); }
+        const json = await resp.json();
+        if(!aborted){ setGateAccessSnapshot(json); }
+      } catch(e){ /* silent; UI operates without ACL present */ }
+    })();
+    return ()=>{ aborted = true; };
+  }, [gateAccessSnapshot]);
+
+  // Public edge set derived from access snapshot (directional a->b)
+  const publicEdgeSet = useMemo(()=>{
+    const set = new Set<string>();
+    const rules = gateAccessSnapshot?.rules || [];
+    for(const r of rules){
+      if(r && r.isPublic){
+        // Directional only: include exactly the allowed direction.
+        // Do NOT add the reverse; reverse may be restricted.
+        set.add(`${r.fromSystemId}-${r.toSystemId}`);
+      }
+    }
+    return set;
+  }, [gateAccessSnapshot]);
+
+  // Traversable edge set (per-user) from authorized policy.
+  const traversableEdgeSet = useMemo(()=>{
+    if(!authorizedPolicy) return null;
+    if(authorizedPolicy.policy === 'public-only') return publicEdgeSet;
+    if(authorizedPolicy.policy === 'authorized'){
+      const set = new Set<string>();
+      if(authorizedPolicy.allowPublic) for(const k of publicEdgeSet) set.add(k);
+      const edges = Array.isArray((authorizedPolicy as any).edges) ? (authorizedPolicy as any).edges : [];
+      for(const e of edges){
+        const fs = Number(e?.fromSystemId ?? e?.from ?? 0);
+        const ts = Number(e?.toSystemId ?? e?.to ?? 0);
+        if(Number.isFinite(fs) && Number.isFinite(ts)) set.add(`${fs}-${ts}`);
+      }
+      return set;
+    }
+    return publicEdgeSet;
+  }, [authorizedPolicy, publicEdgeSet]);
+
+  // Build a map from systemId-pair to Smart Gate itemId for hyperlinking in route notes
+  const smartGateItemByPair = useMemo(() => {
+    const map: Record<string, number> = {};
+    const links = smartGateSnapshot?.links || [];
+    const gateMeta: any = (smartGateSnapshot as any)?.gateMeta || null;
+    for (const l of links) {
+      if (!l) continue;
+      const a = Number((l as any).origin);
+      const b = Number((l as any).destination);
+      // Prefer the short in-game itemId from gateMeta[gateId].entity.itemId
+      let itemIdNum: number | null = null;
+      try {
+        const gid = String((l as any).gateId ?? '');
+        const meta = gid && gateMeta ? gateMeta[gid] : undefined;
+        const rawItem = meta?.entity?.itemId ?? (l as any).itemId ?? null;
+        if (rawItem != null) {
+          const n = Number(rawItem);
+          if (Number.isFinite(n)) itemIdNum = Math.trunc(n);
+        }
+      } catch {
+        // ignore lookup/parse errors and skip this link if itemId missing
+      }
+      if (Number.isFinite(a) && Number.isFinite(b) && itemIdNum != null) {
+        // Directional mapping: the itemId corresponds to the gate located in the ORIGIN system
+        // Do not populate the reverse pair; the reverse hop should have its own distinct itemId
+        map[`${a}-${b}`] = itemIdNum;
+      }
+    }
+    return Object.keys(map).length ? map : null;
+  }, [smartGateSnapshot]);
+
+  // Version bump for smart gate edges so the worker can invalidate caches
+  const smartGateEdgesVersionRef = useRef<number>(0);
+  useEffect(()=>{ smartGateEdgesVersionRef.current++; }, [publicEdgeSet, traversableEdgeSet]);
+
+  // Legend state for tribe-based colouring (top-10 + Other bucket)
+  const [smartGateTribeLegend, setSmartGateTribeLegend] = useState<Array<{ tribeId: string; color: number; count: number }>>([]);
+  const [smartGateTribeFilter, setSmartGateTribeFilter] = useState<string|null>(null); // tribeId or 'other'
+  const [tribeNames, setTribeNames] = useState<Record<string,string>>({});
+
+  // Helper to compute a tribe -> color mapping and legend from visible links (top-10 + Other)
+  const buildTribeColorMap = useCallback((links: { tribeId?: string; tribes?: string[] }[]) => {
+    const counts = new Map<string, number>();
+    for (const l of links) {
+      // Normalize tribe id (handle numbers and strings), prefer explicit tribeId then first in tribes[]
+      const norm = (v:any) => {
+        if(v==null) return '';
+        try { return String(v).trim(); } catch { return ''; }
+      };
+      let tid = norm((l as any).tribeId);
+      if (!tid) {
+        const arr = Array.isArray(l.tribes) ? l.tribes : [];
+        tid = norm(arr[0]);
+      }
+      if (!tid) tid = 'other';
+      counts.set(tid, (counts.get(tid) || 0) + 1);
+    }
+    // Sort by descending count, but exclude 'other' from top-N selection to avoid consuming a slot
+    const sorted = Array.from(counts.entries()).sort((a,b)=> b[1]-a[1]);
+    const top = sorted.filter(([tid])=> tid !== 'other').slice(0, 10);
+    const topSet = new Set(top.map(([k])=> k));
+    // 10 visually distinct colors (good on dark):
+    // Note: positions 8 and 9 adjusted for visibility (hotpink, lime)
+    const palette = [
+      0xe6194b, // 1
+      0x3cb44b, // 2
+      0x0082c8, // 3
+      0xf58231, // 4
+      0x911eb4, // 5
+      0x46f0f0, // 6
+      0xf032e6, // 7
+      0xff69b4, // 8 (hot pink)
+      0x00ff00, // 9 (lime)
+      0xff3b30  // 10 (bright red variant for dark bg)
+    ];
+    const colorMap = new Map<string, number>();
+    top.forEach(([tid], idx)=> colorMap.set(tid, palette[idx % palette.length]));
+  const legend: Array<{ tribeId: string; color: number; count: number }> = top.map(([tid, cnt])=> ({ tribeId: tid || 'other', color: colorMap.get(tid)!, count: Math.round(cnt/2) }));
+    // Compute 'Other' as everything not in topSet (including any explicit 'other' bucket if present)
+  const otherCount = Array.from(counts.entries()).filter(([tid])=> !topSet.has(tid)).reduce((sum, [,c])=> sum + c, 0);
+  // Use a distinct amber for 'Other' so it doesn't blend with stargate grey
+  const otherColor = 0xffb000;
+  if (otherCount > 0) { legend.push({ tribeId: 'other', color: otherColor, count: Math.round(otherCount/2) }); colorMap.set('other', otherColor); }
+    const resolveColor = (tidIn?: string, tribesIn?: string[]) => {
+      const norm = (v:any) => { try { return String(v).trim(); } catch { return ''; } };
+      let tid = norm(tidIn);
+      if (!tid) tid = norm((Array.isArray(tribesIn) && tribesIn[0]) || '');
+      if (!tid) tid = 'other';
+      return colorMap.get(tid) || otherColor;
+    };
+    const getBucketId = (l:{ tribeId?:string; tribes?:string[] }) => {
+      const norm = (v:any) => { try { return String(v).trim(); } catch { return ''; } };
+      let tid = norm((l as any).tribeId);
+      if (!tid && Array.isArray(l.tribes)) tid = norm(l.tribes[0] || '');
+      if (!tid) return 'other';
+      return topSet.has(tid) ? tid : 'other';
+    };
+    return { legend, resolveColor, getBucketId, topIds: Array.from(topSet) };
+  }, []);
+
+  // Fetch tribe names for legend labels (use 'name' field)
+  useEffect(()=>{
+    if(!showSmartGates) return;
+    if(smartGateColorMode !== 'tribe') return;
+    if(Object.keys(tribeNames).length > 0) return;
+    let aborted = false;
+    (async()=>{
+      try {
+        const resp = await fetch('https://world-api-stillness.live.tech.evefrontier.com/v2/tribes', { cache: 'no-store' });
+        if(!resp.ok) return;
+        const json = await resp.json();
+        const list:any[] = Array.isArray(json) ? json : (Array.isArray(json?.data) ? json.data : []);
+        const map: Record<string,string> = {};
+        for(const t of list){
+          const id = String((t?.id ?? t?.tribeId ?? '').toString());
+          const nm = (t?.name ?? t?.name_full ?? t?.nameFull ?? '').toString().trim();
+          if(id && nm) map[id] = nm;
+        }
+        if(!aborted) setTribeNames(map);
+      } catch { /* ignore network/CORS errors; fall back to ids */ }
+    })();
+    return ()=>{ aborted = true; };
+  }, [showSmartGates, smartGateColorMode, tribeNames]);
+
+  // Session bootstrap: check existing cookie and refresh if needed
+  useEffect(()=>{
+    let aborted=false;
+    (async()=>{
+      try {
+        const resp = await fetch('/api/auth/session', { cache:'no-store' });
+        if(!resp.ok) return;
+        const j = await resp.json();
+        if(!aborted && j && j.authenticated){ setSessionAddress(String(j.address||'').toLowerCase()); }
+      } catch {/* ignore */}
+    })();
+    return ()=>{ aborted=true; };
+  }, []);
+
+  // Fetch authorized-gates when authenticated (and occasionally when view switches to traversable)
+  useEffect(()=>{
+    if(!sessionAddress) { setAuthorizedPolicy(null); return; }
+    let aborted=false;
+    (async()=>{
+      try {
+        const resp = await fetch('/api/authorized-gates', { cache:'no-store' });
+        if(!resp.ok) return;
+        const j = await resp.json();
+        if(!aborted){ setAuthorizedPolicy(j); }
+      } catch {/* ignore */}
+    })();
+    return ()=>{ aborted=true; };
+  }, [sessionAddress, smartGateViewMode]);
+
+  // Connect wallet + SIWE-lite sign
+  const connectAndSign = useCallback(async ()=>{
+    if(authBusy) return;
+    setAuthError(''); setAuthBusy(true);
+    try {
+      // Build an ordered provider list with EVE Vault priority, then OneKey, then MetaMask, then others
+      const getName = (p:any)=> ((p?.providerInfo?.name) || (p?.info?.name) || '').toString().toLowerCase();
+      const getRdns = (p:any)=> ((p?.providerInfo?.rdns) || (p?.info?.rdns) || '').toString().toLowerCase();
+      const isVault = (p:any)=> !!(p?.isEVEVault || p?.isEvolt || (getName(p).includes('eve') && getName(p).includes('vault')) || (getRdns(p).includes('eve') && getRdns(p).includes('vault')));
+      const isOneKey = (p:any)=> !!(p?.isOneKey || getName(p).includes('onekey') || getRdns(p).includes('onekey'));
+      const isMetaMask = (p:any)=> !!(p?.isMetaMask || getName(p).includes('metamask'));
+      const isRabby = (p:any)=> !!(p?.isRabby || getName(p).includes('rabby'));
+      const isCoinbase = (p:any)=> !!(p?.isCoinbaseWallet || getName(p).includes('coinbase'));
+      const isBrave = (p:any)=> !!(p?.isBraveWallet || getName(p).includes('brave'));
+      const isOKX = (p:any)=> !!(p?.isOKExWallet || p?.isOKXWallet || getName(p).includes('okx'));
+      const isTrust = (p:any)=> !!(p?.isTrust || getName(p).includes('trust'));
+      const w:any = window as any;
+      let providers: any[] = [];
+      if(detectedWallets.length>0){ providers = detectedWallets.map(d=> d.provider); }
+      else if(w.ethereum && Array.isArray(w.ethereum.providers)) providers = w.ethereum.providers.slice();
+      else if(w.ethereum) providers = [w.ethereum];
+      // Deduplicate
+      const uniq: any[] = [];
+      for(const p of providers){ if(p && !uniq.includes(p)) uniq.push(p); }
+      // Sort by priority
+      const score = (p:any)=> (isVault(p)?1000:0)+(isOneKey(p)?900:0)+(isMetaMask(p)?800:0)+(isRabby(p)?700:0)+(isCoinbase(p)?600:0)+(isBrave(p)?500:0)+(isOKX(p)?400:0)+(isTrust(p)?300:0);
+      uniq.sort((a,b)=> score(b)-score(a));
+      if(uniq.length===0){ setAuthError('No wallet found (EIP-1193). Ensure your wallet extension is enabled.'); return; }
+      // Try providers sequentially until one returns accounts
+      let eth:any = null; let accounts:string[] = [];
+      for(const p of uniq){
+        try {
+          const acc = await p.request({ method:'eth_requestAccounts' });
+          if(Array.isArray(acc) && acc.length>0){ eth = p; accounts = acc; break; }
+        } catch(e){ /* try next */ }
+      }
+      if(!eth){ setAuthError('No wallet responded. Check extension is enabled and unlocked.'); return; }
+      const addr = (accounts?.[0]||'').toLowerCase();
+      if(!addr){ setAuthError('No account returned by wallet'); return; }
+      const nonceResp = await fetch('/api/auth/nonce', { cache:'no-store' });
+      if(!nonceResp.ok){ setAuthError('Failed to fetch nonce'); return; }
+      const { nonce, token } = await nonceResp.json();
+      // Build an EIP-4361 SIWE message for broader wallet compatibility
+      // <domain> wants you to sign in with your Ethereum account:\n<address>\n\n<statement>\n\nURI: <uri>\nVersion: 1\nChain ID: <id>\nNonce: <nonce>\nIssued At: <iso>
+      const nowIso = new Date().toISOString();
+      const loc = window.location;
+      const domain = loc.host;
+      const uri = loc.origin;
+      let chainIdStr = '';
+      try {
+        const cidHex = await eth.request({ method:'eth_chainId' });
+        if(typeof cidHex === 'string') chainIdStr = String(parseInt(cidHex, 16));
+      } catch { /* optional */ }
+      const siweLines = [
+        `${domain} wants you to sign in with your Ethereum account:`,
+        addr,
+        '',
+        'Sign in to EF Map with your wallet',
+        '',
+        `URI: ${uri}`,
+        'Version: 1',
+        `Chain ID: ${chainIdStr || '1'}`,
+        `Nonce: ${nonce}`,
+        `Issued At: ${nowIso}`
+      ];
+      const message = siweLines.join('\n');
+      let signature:string='';
+      try {
+        signature = await eth.request({ method:'personal_sign', params:[message, addr] });
+      } catch {
+        // Some providers reverse the params
+        signature = await eth.request({ method:'personal_sign', params:[addr, message] });
+      }
+      if(!signature){ setAuthError('User rejected signature'); return; }
+  const verifyResp = await fetch('/api/auth/verify', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify({ address: addr, message, signature, nonceToken: token }) });
+  if(!verifyResp.ok){ const j = await verifyResp.json().catch(()=>({error:'verify_failed'})); setAuthError(`Verify failed: ${j?.error||verifyResp.status}${j?.message? ' – '+j.message : ''}`); return; }
+      const ok = await verifyResp.json();
+      if(ok && ok.address){ setSessionAddress(String(ok.address).toLowerCase()); setAuthorizedPolicy(null); }
+    } catch(e:any){ setAuthError(String(e?.message||e||'Auth error')); }
+    finally { setAuthBusy(false); }
+  }, [authBusy, detectedWallets]);
+
+  const logout = useCallback(async ()=>{
+    try { await fetch('/api/auth/logout', { method:'POST' }); } catch {/* ignore */}
+    setSessionAddress(null); setAuthorizedPolicy(null); setPlayerProfile(null); setShowLogoutMenu(false);
+  }, []);
+
+  // Fetch player profile when authenticated
+  useEffect(()=>{
+    let aborted=false;
+    (async()=>{
+      if(!sessionAddress){ setPlayerProfile(null); return; }
+      try {
+        const resp = await fetch('/api/player-profile', { cache:'no-store' });
+        if(!resp.ok){ if(!aborted) setPlayerProfile({ address: sessionAddress, name: null, avatarUrl: null }); return; }
+        const j = await resp.json();
+        if(!aborted) setPlayerProfile({ address: j.address||sessionAddress, name: j.name||null, avatarUrl: j.avatarUrl||null });
+      } catch { if(!aborted) setPlayerProfile({ address: sessionAddress, name: null, avatarUrl: null }); }
+    })();
+    return ()=>{ aborted=true; };
+  }, [sessionAddress]);
+
+  // Dismiss logout menu on outside click / escape
+  useEffect(()=>{
+    function onDoc(e: MouseEvent){
+      if(!showLogoutMenu) return;
+      const el = profileMenuRef.current; if(!el) return;
+      if(e.target instanceof Node && !el.contains(e.target)) setShowLogoutMenu(false);
+    }
+    function onKey(e: KeyboardEvent){ if(e.key==='Escape') setShowLogoutMenu(false); }
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return ()=>{ document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onKey); };
+  }, [showLogoutMenu]);
+
+  // Detect multi-injected providers (EIP-6963) and window.ethereum.providers
+  useEffect(()=>{
+    const found: Eip6963ProviderDetail[] = [];
+    const onAnnounce = ((e: any)=>{
+      if(!e || !e.detail) return;
+      const det = e.detail as { info?: any; provider: any };
+      if(!det || !det.provider) return;
+      // De-duplicate by reference
+      if(found.some(x=> x.provider === det.provider)) return;
+      found.push({ info: det.info||{}, provider: det.provider });
+      setDetectedWallets([...found]);
+    }) as EventListener;
+    try { window.addEventListener('eip6963:announceProvider', onAnnounce); } catch {}
+    try {
+      // Request announcements per EIP-6963
+      const ev = new Event('eip6963:requestProvider');
+      window.dispatchEvent(ev);
+    } catch {}
+    // Also scan legacy window.ethereum.providers
+    try {
+      const w:any = window as any;
+      if(w.ethereum && Array.isArray(w.ethereum.providers)){
+        for(const p of w.ethereum.providers){
+          if(!found.some(x=> x.provider === p)){
+            const info = (p && (p as any).providerInfo) ? (p as any).providerInfo : undefined;
+            found.push({ info, provider: p });
+          }
+        }
+        setDetectedWallets([...found]);
+      } else if(w.ethereum) {
+        // Single provider, wrap
+        if(!found.some(x=> x.provider === w.ethereum)){
+          const info = (w.ethereum as any).providerInfo || undefined;
+          found.push({ info, provider: w.ethereum });
+          setDetectedWallets([...found]);
+        }
+      }
+    } catch {}
+    return ()=>{ try { window.removeEventListener('eip6963:announceProvider', onAnnounce); } catch {} };
+  }, []);
+
+  // No manual picker; we select automatically during connect by priority
+
+  // Build/teardown Smart Gate lines in scene
+  useEffect(()=>{
+    // If scene not ready yet but data/toggles indicate we should render, schedule a short retry
+    if(!sceneRef.current){
+      if(showSmartGates && mapData && smartGateSnapshot?.links && smartGateBuildRetry < 5){
+        const t = setTimeout(()=> setSmartGateBuildRetry(v=> v+1), 80);
+        return ()=> clearTimeout(t);
+      }
+      return;
+    }
+    // Tear down if toggled off or no data
+    if(!showSmartGates || !mapData || !smartGateSnapshot || !smartGateSnapshot.links || smartGateSnapshot.links.length===0){
+      if(smartGateLinesRef.current){
+        try {
+          // Remove base lines and dispose geometry/material
+          sceneRef.current.remove(smartGateLinesRef.current);
+          smartGateLinesRef.current.geometry.dispose();
+          (smartGateLinesRef.current.material as THREE.Material).dispose?.();
+          // No secondary bloom duplicate
+        } catch {}
+        smartGateLinesRef.current = null;
+      }
+      // Reset retry counter on teardown to keep future attempts bounded
+      if(smartGateBuildRetry !== 0) setSmartGateBuildRetry(0);
+      return;
+    }
+    // Already present -> update colors if theme changed below (separate effect)
+    if(smartGateLinesRef.current) return;
+    try {
+      const allLinks = smartGateSnapshot.links.filter(l=> l && (l.online !== false) && (l.linked !== false));
+      // Determine filtering set based on Viewing mode
+      let links = allLinks;
+      if(smartGateViewMode === 'authorized'){
+        // Use per-user traversable set; if not ready yet, keep existing lines until it arrives
+        if(traversableEdgeSet){ links = allLinks.filter(l=> traversableEdgeSet.has(`${l.origin}-${l.destination}`)); }
+      } else if(smartGateViewMode === 'public'){
+        links = allLinks.filter(l=> publicEdgeSet.has(`${l.origin}-${l.destination}`));
+      }
+  const positions:number[]=[]; const colors:number[]=[]; const mids:number[]=[]; const sel:number[]=[];
+  // Determine base colour or tribe-mapped colours
+  let baseCol: THREE.Color | null = null;
+  let tribeColorResolver: ((tid?:string, tribes?:string[])=> number) | null = null;
+  if(smartGateColorMode === 'tribe'){
+  const { legend, resolveColor, getBucketId } = buildTribeColorMap(links);
+  setSmartGateTribeLegend(legend);
+    tribeColorResolver = resolveColor;
+    // Apply optional tribe filter: reduce visible links to the selected tribe bucket
+    if(smartGateTribeFilter){
+      links = links.filter(l => getBucketId(l) === smartGateTribeFilter);
+    }
+  } else {
+    const themeAccentHex = accentIsBlue ? 0x00aaff : 0xff4c26;
+    const oppositeAccentHex = accentIsBlue ? 0xff4c26 : 0x00aaff;
+    const baseHex = (smartGateColorMode === 'opposite') ? oppositeAccentHex : themeAccentHex;
+    baseCol = new THREE.Color(baseHex);
+    setSmartGateTribeLegend([]);
+  }
+      const tx = (p:{x:number;y:number;z:number})=>({ x:p.x, y:p.z, z:p.y*-1 });
+      for(const l of links){
+        const a = (mapData.solar_systems as any)[String(l.origin)];
+        const b = (mapData.solar_systems as any)[String(l.destination)];
+        if(!a || !b || a.hidden || b.hidden) continue;
+        const p1 = tx(a.position); const p2 = tx(b.position);
+        positions.push(p1.x,p1.y,p1.z, p2.x,p2.y,p2.z);
+        const midx=(p1.x+p2.x)/2, midy=(p1.y+p2.y)/2, midz=(p1.z+p2.z)/2;
+        mids.push(midx,midy,midz, midx,midy,midz);
+  if(tribeColorResolver){
+    const hex = tribeColorResolver(l.tribeId, l.tribes);
+    const c = new THREE.Color(hex);
+    colors.push(c.r,c.g,c.b, c.r,c.g,c.b);
+  } else if(baseCol){
+    colors.push(baseCol.r,baseCol.g,baseCol.b, baseCol.r,baseCol.g,baseCol.b);
+  }
+        sel.push(0,0);
+      }
+      if(positions.length===0){
+        // No segments under current filter – keep ref null; reset retry counter
+        if(smartGateBuildRetry !== 0) setSmartGateBuildRetry(0);
+        return;
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(positions,3));
+      geo.setAttribute('color', new THREE.Float32BufferAttribute(colors,3));
+      geo.setAttribute('mid', new THREE.Float32BufferAttribute(mids,3));
+      geo.setAttribute('sel', new THREE.Float32BufferAttribute(sel,1));
+      const lines = new THREE.LineSegments(geo, smartGateMaterial);
+      lines.visible = !cinematicMode; // honor cinematic
+      lines.renderOrder = (stargateLinesRef.current?.renderOrder ?? 0) + 1; // draw above base gates
+      sceneRef.current.add(lines);
+      smartGateLinesRef.current = lines;
+      if(smartGateBuildRetry !== 0) setSmartGateBuildRetry(0);
+      // No bloom duplicate created
+    } catch {/* ignore build errors */}
+  }, [showSmartGates, smartGateSnapshot, mapData, stargateMaterial, smartGateMaterial, accentIsBlue, cinematicMode, publicEdgeSet, smartGateBuildRetry, gateAccessSnapshot, smartGateViewMode, traversableEdgeSet, smartGateColorMode]);
+
+  // (Removed) separate public-only geometry rebuild; covered by unified view mode changes
+
+  // Rebuild geometry when viewing mode or authorized policy changes
+  useEffect(()=>{
+    if(!smartGateLinesRef.current) return;
+  // If authorized view selected but policy not yet loaded, keep current until ready
+  if(smartGateViewMode==='authorized' && !traversableEdgeSet) return;
+    try {
+      sceneRef.current?.remove(smartGateLinesRef.current);
+      smartGateLinesRef.current.geometry.dispose();
+      (smartGateLinesRef.current.material as THREE.Material).dispose?.();
+    } catch { /* ignore */ }
+    smartGateLinesRef.current = null;
+    setSmartGateBuildRetry(v=> v+1);
+  }, [smartGateViewMode, traversableEdgeSet]);
+
+  // Recolor/Rebuild Smart Gate lines when theme accent, mode, or tribe filter changes
+  useEffect(()=>{
+    if(smartGateColorMode === 'tribe'){
+      if(!smartGateLinesRef.current) return;
+      try {
+        sceneRef.current?.remove(smartGateLinesRef.current);
+        smartGateLinesRef.current.geometry.dispose();
+        (smartGateLinesRef.current.material as THREE.Material).dispose?.();
+      } catch { /* ignore */ }
+      smartGateLinesRef.current = null;
+      setSmartGateBuildRetry(v=> v+1);
+      return;
+    }
+    if(!smartGateLinesRef.current) return;
+    try {
+      const attr = (smartGateLinesRef.current.geometry as THREE.BufferGeometry).getAttribute('color') as THREE.BufferAttribute;
+      if(!attr) return;
+      const themeAccentHex = accentIsBlue ? 0x00aaff : 0xff4c26;
+      const oppositeAccentHex = accentIsBlue ? 0xff4c26 : 0x00aaff;
+      const newHex = (smartGateColorMode === 'opposite') ? oppositeAccentHex : themeAccentHex;
+      const c = new THREE.Color(newHex);
+      for(let i=0;i<attr.count;i++){ attr.setXYZ(i, c.r, c.g, c.b); }
+      attr.needsUpdate = true;
+      setSmartGateTribeLegend([]);
+    } catch {/* ignore */}
+  }, [accentIsBlue, smartGateColorMode, smartGateTribeFilter]);
+
+  // Manual refresh handler for Smart Gates snapshots (links + ACL)
+  const refreshSmartGates = useCallback(async (alsoAcl:boolean = true) => {
+    if(!showSmartGates || smartGateRefreshBusy) return;
+    setSmartGateRefreshBusy(true);
+    try {
+      setSmartGateErr(null);
+      // Always bypass caches; server honors force=1 and ts to avoid ETag hits
+      const linksResp = await fetch(`/api/smart-gate-links?force=1&ts=${Date.now()}`, { cache:'no-store' });
+      if(!linksResp.ok){ throw new Error(`HTTP ${linksResp.status} on links`); }
+      const linksJson = await linksResp.json();
+      setSmartGateSnapshot(linksJson);
+      // ACL optional refresh
+      if(alsoAcl){
+        try {
+          const aclResp = await fetch(`/api/gate-access?force=1&ts=${Date.now()}`, { cache:'no-store' });
+          if(aclResp.ok){
+            const aclJson = await aclResp.json();
+            setGateAccessSnapshot(aclJson);
+          }
+        } catch {/* ignore ACL refresh errors */}
+      }
+      // Rebuild and swap geometry atomically to avoid flicker
+      try {
+        if(sceneRef.current && mapData && linksJson && Array.isArray(linksJson.links)){
+          const allLinks = linksJson.links.filter((l:any)=> l && (l.online !== false) && (l.linked !== false));
+          let links = allLinks as { origin:number; destination:number; linked?:boolean; online?:boolean }[];
+          if(smartGateViewMode === 'authorized'){
+            if(traversableEdgeSet){ links = allLinks.filter((l:{origin:number;destination:number})=> traversableEdgeSet.has(`${l.origin}-${l.destination}`)); }
+            // If not ready, keep existing lines (no swap)
+            else { /* skip rebuild until traversable ready */ }
+          } else if(smartGateViewMode === 'public'){
+            links = allLinks.filter((l:{origin:number;destination:number})=> publicEdgeSet.has(`${l.origin}-${l.destination}`));
+          }
+          if(links && links.length>0){
+            const positions:number[]=[]; const colors:number[]=[]; const mids:number[]=[]; const sel:number[]=[];
+            let baseCol: THREE.Color | null = null;
+            let tribeColorResolver: ((tid?:string, tribes?:string[])=> number) | null = null;
+            if(smartGateColorMode === 'tribe'){
+              const { legend, resolveColor, getBucketId } = buildTribeColorMap(links as any);
+              setSmartGateTribeLegend(legend);
+              tribeColorResolver = resolveColor;
+              if(smartGateTribeFilter){
+                links = (links as any).filter((l:any) => getBucketId(l) === smartGateTribeFilter);
+              }
+            } else {
+              const themeAccentHex = accentIsBlue ? 0x00aaff : 0xff4c26;
+              const oppositeAccentHex = accentIsBlue ? 0xff4c26 : 0x00aaff;
+              const baseHex = (smartGateColorMode === 'opposite') ? oppositeAccentHex : themeAccentHex;
+              baseCol = new THREE.Color(baseHex);
+              setSmartGateTribeLegend([]);
+            }
+            const tx = (p:{x:number;y:number;z:number})=>({ x:p.x, y:p.z, z:p.y*-1 });
+            for(const l of links){
+              const a = (mapData.solar_systems as any)[String(l.origin)];
+              const b = (mapData.solar_systems as any)[String(l.destination)];
+              if(!a || !b || a.hidden || b.hidden) continue;
+              const p1 = tx(a.position); const p2 = tx(b.position);
+              positions.push(p1.x,p1.y,p1.z, p2.x,p2.y,p2.z);
+              const midx=(p1.x+p2.x)/2, midy=(p1.y+p2.y)/2, midz=(p1.z+p2.z)/2;
+              mids.push(midx,midy,midz, midx,midy,midz);
+              if(tribeColorResolver){
+                const hex = tribeColorResolver((l as any).tribeId, (l as any).tribes);
+                const c = new THREE.Color(hex);
+                colors.push(c.r,c.g,c.b, c.r,c.g,c.b);
+              } else if(baseCol){
+                colors.push(baseCol.r,baseCol.g,baseCol.b, baseCol.r,baseCol.g,baseCol.b);
+              }
+              sel.push(0,0);
+            }
+            if(positions.length>0){
+              const geo = new THREE.BufferGeometry();
+              geo.setAttribute('position', new THREE.Float32BufferAttribute(positions,3));
+              geo.setAttribute('color', new THREE.Float32BufferAttribute(colors,3));
+              geo.setAttribute('mid', new THREE.Float32BufferAttribute(mids,3));
+              geo.setAttribute('sel', new THREE.Float32BufferAttribute(sel,1));
+              const lines = new THREE.LineSegments(geo, smartGateMaterial);
+              lines.visible = !cinematicMode;
+              lines.renderOrder = (stargateLinesRef.current?.renderOrder ?? 0) + 1;
+              // Swap
+              if(sceneRef.current){ sceneRef.current.add(lines); }
+              if(smartGateLinesRef.current && sceneRef.current){
+                sceneRef.current.remove(smartGateLinesRef.current);
+                try { smartGateLinesRef.current.geometry.dispose(); (smartGateLinesRef.current.material as THREE.Material).dispose?.(); } catch {}
+              }
+              smartGateLinesRef.current = lines;
+            }
+          }
+        } else {
+          // Fallback: trigger rebuild effect
+          setSmartGateBuildRetry(v=> v+1);
+        }
+      } catch {/* ignore rebuild errors */}
+    } catch(e:any){
+      setSmartGateErr(String(e?.message||e||'Refresh failed'));
+    } finally {
+      setSmartGateRefreshBusy(false);
+    }
+  }, [showSmartGates, smartGateRefreshBusy]);
+
   // Listen for display settings updates (accent span etc.)
   useEffect(() => {
     const handler = (e: any) => {
@@ -808,6 +1501,10 @@ function App() {
       if(e?.detail?.routeThickness != null){
         try { (window as any).__efRouteThickness = Math.max(0.5, Math.min(2.0, e.detail.routeThickness)); } catch {/* ignore */}
       }
+      if(e?.detail?.showSmartGateChevrons != null){
+        (window as any).__efShowSmartGateChevrons = !!e.detail.showSmartGateChevrons;
+      }
+      // FXAA removed: ignore legacy event field if present
       // Apply star size scaling immediately if star field material exists
       try {
         if((window as any).__efStarSizeScale != null && starFieldRef.current){
@@ -828,6 +1525,7 @@ function App() {
       } else {
         (window as any).__efRouteThickness = 1.0;
       }
+      (window as any).__efShowSmartGateChevrons = prefs.showSmartGateChevrons !== false; // default true
     } catch { (window as any).__efShowShipDash = true; }
     window.addEventListener('ef-display-settings-changed', handler as any);
     return () => window.removeEventListener('ef-display-settings-changed', handler as any);
@@ -1233,7 +1931,11 @@ function App() {
       try {
         const loader = new THREE.TextureLoader();
         stationIconTexRef.current = loader.load(stationIconUrl + '?v=3', (tex)=>{
-          try { const srgb = (THREE as any).SRGBColorSpace || (THREE as any).sRGBEncoding; (tex as any).colorSpace = srgb; tex.needsUpdate = true; } catch {/* ignore */}
+          try {
+            // Use modern three.js color space; avoid referencing removed sRGBEncoding export
+            const srgb = (THREE as any).SRGBColorSpace;
+            if (srgb) { (tex as any).colorSpace = srgb; tex.needsUpdate = true; }
+          } catch { /* ignore */ }
         });
       } catch {/* ignore */}
     }
@@ -1761,6 +2463,12 @@ function App() {
     setPanelZ(prev=> { const next={...prev}; topZRef.current +=1; next[id]= topZRef.current; return next; });
   };
   const [returnToStart, setReturnToStart] = useState(false);
+  // Unified baseline for panel alignment (persisted once discovered)
+  const [alignedBase, setAlignedBase] = useState<{ x:number; y:number }>(()=>{
+    if(typeof window==='undefined') return { x:128, y:84 };
+    try { const raw = localStorage.getItem('efmap:baselinePos'); if(raw){ const v = JSON.parse(raw); if(typeof v?.x==='number' && typeof v?.y==='number') return v; } } catch {/* ignore */}
+    return { x:128, y:84 };
+  });
   // One-time hash import ref
   const initialHashAppliedRef = useRef(false);
 
@@ -1811,6 +2519,7 @@ function App() {
   const regionCompareDrawerRef = useRef<PanelDrawerHandle|null>(null);
   const userOverlayDrawerRef = useRef<PanelDrawerHandle|null>(null);
   const displaySettingsDrawerRef = useRef<PanelDrawerHandle|null>(null);
+  const smartGatesDrawerRef = useRef<PanelDrawerHandle|null>(null);
   // Maintain legend in open order when toggled
   useEffect(()=>{
     setOpenPanelOrder(prev=>{
@@ -1833,8 +2542,8 @@ function App() {
   // Incremental cascade (append on open, compact on close) preserving existing positions.
   const autoOrderRef = useRef<string[]>([]); // current left-to-right order of auto-managed panels
   useLayoutEffect(()=>{
-    const BASE_X = 140, BASE_Y = 70, GAP_X = 24;
-  const managed = (id:string)=> id==='routing' || id==='cinematic' || id==='planet-legend' || id==='region-stats' || id==='region-compare' || id==='user-overlay' || id==='display-settings';
+    const BASE_X = alignedBase.x, BASE_Y = alignedBase.y, GAP_X = 24;
+  const managed = (id:string)=> id==='routing' || id==='cinematic' || id==='planet-legend' || id==='region-stats' || id==='region-compare' || id==='user-overlay' || id==='display-settings' || id==='smart-gates';
     const active = openPanelOrder.filter(id=> managed(id) && (id==='planet-legend'? isPlanetCountActive : openPanels.has(id)));
     const prevOrder = autoOrderRef.current;
     // Remove any that are no longer active
@@ -1856,6 +2565,7 @@ function App() {
   else if(id==='region-compare' && regionCompareDrawerRef.current) regionCompareDrawerRef.current.autoPosition(target);
   else if(id==='user-overlay' && userOverlayDrawerRef.current) userOverlayDrawerRef.current.autoPosition(target);
   else if(id==='display-settings' && displaySettingsDrawerRef.current) displaySettingsDrawerRef.current.autoPosition(target);
+    else if(id==='smart-gates' && smartGatesDrawerRef.current) smartGatesDrawerRef.current.autoPosition(target);
   else if(id==='planet-legend') { try { window.dispatchEvent(new CustomEvent('ef:auto-pos', { detail:{ id, target, cascade:true } })); } catch {/* ignore */} }
     };
     const compactAll = () => {
@@ -1900,29 +2610,34 @@ function App() {
           if(el){ const l=parseFloat(el.style.left||'0'); if(lefts.some(v=> Math.abs(v-l)<2)) overlap=true; lefts.push(l); }
         });
         if(overlap){ requestAnimationFrame(compactAll); }
+        // Detect the final left/top of the leftmost managed drawer and persist as the baseline if it differs
+        try {
+          const els = Array.from(document.querySelectorAll('.ef-drawer')) as HTMLElement[];
+          if(els.length){
+            let leftmost:HTMLElement|undefined; let minLeft=Infinity;
+            els.forEach(el=>{ const l=parseFloat(el.style.left||'0'); if(!isNaN(l) && l<minLeft){ minLeft=l; leftmost=el; } });
+            if(leftmost){
+              const lx = parseFloat(leftmost.style.left||'0');
+              const ty = parseFloat(leftmost.style.top||'0');
+              if(Number.isFinite(lx) && Number.isFinite(ty)){
+                if(Math.abs(lx-BASE_X)>1 || Math.abs(ty-BASE_Y)>1){
+                  const next = { x: Math.round(lx), y: Math.round(ty) };
+                  setAlignedBase(next);
+                  try { localStorage.setItem('efmap:baselinePos', JSON.stringify(next)); } catch {/* ignore */}
+                }
+              }
+            }
+          }
+        } catch {/* ignore */}
       });
     };
     // Two-frame defer to let new panel DOM mount & width settle
     requestAnimationFrame(()=> requestAnimationFrame(run));
-  }, [openPanels, openPanelOrder, isPlanetCountActive, uiScale]);
+  }, [openPanels, openPanelOrder, isPlanetCountActive, uiScale, alignedBase.x, alignedBase.y]);
 
-  // Specific nudge: if user-overlay is the ONLY managed panel opened first, re-run cascade after content paint to ensure same offset adjustments.
-  useEffect(()=>{
-  const managedIds = ['routing','cinematic','planet-legend','region-stats','region-compare','user-overlay','display-settings'];
-    const activeManaged = Array.from(openPanels).filter(id=> managedIds.includes(id) || (id==='planet-legend' && isPlanetCountActive));
-    if(activeManaged.length===1 && activeManaged[0]==='user-overlay'){
-      // skip if user has a stored position already
-      if(localStorage.getItem('panel-pos:drawer-user-overlay')) return;
-      // Trigger a tiny deferred alignment (will be no-op if already aligned)
-      requestAnimationFrame(()=>{
-        try {
-          if(userOverlayDrawerRef.current){
-            userOverlayDrawerRef.current.autoPosition({ x:140, y:70 });
-          }
-        } catch {/* ignore */}
-      });
-    }
-  }, [openPanels, isPlanetCountActive]);
+  // Removed all per-panel nudges: every drawer opens at the unified baseline via defaultPos/alignedBase and cascade.
+
+  // Smart Gates specific nudge removed; unified base defaults and cascade baseline now handle aligned initial position.
   // Optional debug toggle (open console and set window.DEBUG_PREFS=true)
   ;(window as any).DEBUG_PREFS = (window as any).DEBUG_PREFS || false;
 
@@ -2091,7 +2806,7 @@ function App() {
     };
   }, [mapData, selectSystem]);
 
-  const calculateRoute = useCallback((fromSystemName: string, toSystemName: string, maxJumpDistance: number, optimizeFor: 'fuel' | 'jumps' | 'explore', algorithm: 'astar' | 'dijkstra', overheadPct?: number, exploreCorridorPct?: number, exploreProgressBiasPct?: number) => {
+  const calculateRoute = useCallback((fromSystemName: string, toSystemName: string, maxJumpDistance: number, optimizeFor: 'fuel' | 'jumps' | 'explore', algorithm: 'astar' | 'dijkstra', overheadPct?: number, exploreCorridorPct?: number, exploreProgressBiasPct?: number, smartGateMode?: 'none'|'public'|'authorized') => {
   try { (window as any).__efMarkFirstRouteStarted && (window as any).__efMarkFirstRouteStarted(); } catch {}
     try { (lastP2PParamsRef as any).current = { jump:maxJumpDistance, optimize:optimizeFor, algo:algorithm, from:fromSystemName, to:toSystemName }; } catch(e) { /* ignore */ }
     if (!mapData) { alert('Map data is not loaded yet.'); return; }
@@ -2140,9 +2855,53 @@ function App() {
     for(let i=0;i<chain.length-1;i++){ segments.push([chain[i], chain[i+1]]); }
     if(segments.length === 0){ alert('Nothing to route.'); return; }
 
+    // Determine Smart Gate edges to use for this request
+    let smartGateEdges: string[] | undefined = undefined;
+    if (smartGateMode && smartGateMode !== 'none') {
+      const chosen = smartGateMode === 'authorized' ? traversableEdgeSet : publicEdgeSet;
+      if (smartGateMode === 'authorized' && !chosen) {
+        alert('Checking your restricted Smart Gate access… please try again in a moment.');
+        return;
+      }
+      if (chosen && chosen.size) {
+        // Belt-and-suspenders: intersect with live Smart Gate snapshot (linked + online) so no phantom/restricted edges leak in
+        let filtered: string[] = Array.from(chosen);
+        try {
+          const available = new Set<string>();
+          const links = smartGateSnapshot?.links || [];
+          for (const l of links) {
+            if (!l) continue;
+            if (l.linked === false) continue;
+            if (l.online === false) continue;
+            const a = Number((l as any).origin);
+            const b = Number((l as any).destination);
+            if (Number.isFinite(a) && Number.isFinite(b)) available.add(`${a}-${b}`);
+          }
+          if (available.size > 0) {
+            filtered = filtered.filter(k => available.has(k));
+          }
+          // If intersection removes everything (e.g., snapshot pending), fall back to chosen set to avoid blocking routing
+          if (filtered.length === 0 && chosen.size > 0 && (!smartGateSnapshot || (smartGateSnapshot.links||[]).length === 0)) {
+            filtered = Array.from(chosen);
+          }
+          smartGateEdges = filtered;
+          // Lightweight debug to verify Smart Gate edges are being passed to the worker
+          if ((window as any).console) {
+            // removed unused debug variables after log suppression
+            // eslint-disable-next-line no-console
+            // removed noisy debug log
+          }
+        } catch {
+          // On any error, proceed with raw chosen set
+          smartGateEdges = Array.from(chosen);
+        }
+      }
+    }
+
     setIsCalculatingRoute(true); setRouteResult(null); setRouteCalcTimeMs(null); routeCalcStartRef.current = Date.now();
   const cancelRef = { value:false }; (calculateRoute as any)._cancelRef = cancelRef;
   const fullPath: string[] = []; let segIndex = 0;
+  const usedSmartGatePairsGlobal: Set<string> = new Set();
   const segmentMetas: Array<{ baselineCost:number; finalCost:number; baselineNodes:number; finalNodes:number } | null> = [];
     const runNext = () => {
       if(cancelRef.value){ setIsCalculatingRoute(false); setRouteProgress(null); return; }
@@ -2160,7 +2919,7 @@ function App() {
             combinedMeta = { baselineCost: bCost, finalCost: fCost, baselineNodes: Math.max(0, bNodes - junctions), finalNodes: Math.max(0, fNodes - junctions) };
           }
         }
-        setRouteResult({ path: fullPath, ...(combinedMeta ? { meta: combinedMeta } : {}) });
+  setRouteResult({ path: fullPath, ...(combinedMeta ? { meta: combinedMeta } : {}), ...(usedSmartGatePairsGlobal.size ? { usedSmartGatePairs: Array.from(usedSmartGatePairsGlobal) } : {}) } as any);
         try {
           const elapsed = routeCalcStartRef.current ? Date.now() - routeCalcStartRef.current : undefined;
           track({ type:'p2p_route' });
@@ -2189,11 +2948,103 @@ function App() {
       routingWorkerRef.current = new Worker(new URL('./utils/routing_worker.ts', import.meta.url), { type:'module' });
       routingWorkerRef.current.onmessage = (e) => {
         const data = e.data;
-        if(data && data.type==='progress') { setRouteProgress(p=> ({ ...(p||{}), ...data })); return; }
+        // Stream worker progress to UI state and console for easier debugging
+        if (data && data.type === 'progress') {
+          setRouteProgress(p => ({ ...(p || {}), ...data }));
+          try {
+            if (data?.message) {
+              // eslint-disable-next-line no-console
+              // removed noisy worker progress message logging
+            }
+          } catch { /* ignore logging errors */ }
+          return;
+        }
   const { path, error, minRequiredShipRange, meta } = data;
         if(error || !path){
           setIsCalculatingRoute(false); setRouteProgress(null); setRouteResult({ path:null, error: error || `No path for segment ${segFrom} → ${segTo}` , minRequiredShipRange }); return;
         }
+        // After a successful segment, emit a Smart Gate usage audit to the console.
+        // Revised classification avoids false positives by distinguishing gate vs ship vs SG hops.
+        try {
+          const sysNameToId = systemNameToIdRef.current;
+          const allowedSet = new Set<string>(smartGateEdges || []);
+          const stargateSet = new Set<string>();
+          try {
+            // Build bidirectional stargate edge set for quick checks
+            for (const g of Object.values(mapData.stargates)) {
+              const a = Number(g.source_system_id), b = Number(g.destination_system_id);
+              if (Number.isFinite(a) && Number.isFinite(b)) {
+                stargateSet.add(`${a}-${b}`);
+                stargateSet.add(`${b}-${a}`);
+              }
+            }
+          } catch { /* ignore */ }
+
+          const jump = (lastP2PParamsRef.current?.jump ?? 0) as number;
+          const usedPairs: Array<{ pair: string; kind: 'gate'|'ship'|'sg'; allowed?: boolean }> = [];
+
+          for (let i = 0; i < (path?.length || 0) - 1; i++) {
+            const aName = path[i];
+            const bName = path[i + 1];
+            const aId = sysNameToId?.get(aName) ?? sysNameToId?.get(aName.toLowerCase());
+            const bId = sysNameToId?.get(bName) ?? sysNameToId?.get(bName.toLowerCase());
+            if (typeof aId !== 'number' || typeof bId !== 'number') continue;
+            const key = `${aId}-${bId}`;
+
+            // Gate edge takes precedence
+            if (stargateSet.has(key)) {
+              usedPairs.push({ pair: key, kind: 'gate' });
+              continue;
+            }
+
+            // If this pair is allowed as a smart gate for this request, treat as SG
+            if (allowedSet.has(key)) {
+              usedPairs.push({ pair: key, kind: 'sg', allowed: true });
+              continue;
+            }
+
+            // Otherwise determine if it is a ship jump (within jump range)
+            const aSys = mapData.solar_systems[aId];
+            const bSys = mapData.solar_systems[bId];
+            if (aSys && bSys) {
+              const dx = aSys.position.x - bSys.position.x;
+              const dy = aSys.position.y - bSys.position.y;
+              const dz = aSys.position.z - bSys.position.z;
+              const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+              if (dist <= jump + 1e-6) {
+                usedPairs.push({ pair: key, kind: 'ship' });
+                continue;
+              }
+            }
+
+            // If distance exceeds jump and it's not a stargate, but we know a Smart Gate item exists, then it's an SG hop.
+            // Classify it as denied if not present in the allowed set used for routing.
+            if (smartGateItemByPair && smartGateItemByPair[key]) {
+              usedPairs.push({ pair: key, kind: 'sg', allowed: false });
+            } else {
+              // Unknown long hop (shouldn't happen); classify conservatively as ship to avoid false positives
+              usedPairs.push({ pair: key, kind: 'ship' });
+            }
+          }
+
+          const sgOnly = usedPairs.filter(u => u.kind === 'sg');
+          if (sgOnly.length) {
+            const denied = sgOnly.filter(u => u.allowed === false);
+            // eslint-disable-next-line no-console
+            // removed [SG-AUDIT] summary log
+            if (denied.length) {
+              // eslint-disable-next-line no-console
+              // removed [SG-AUDIT] denied pairs warning log
+              (window as any).__efLastSgDenied = denied.map(d => d.pair);
+            }
+            (window as any).__efLastSgUsed = sgOnly.map(u => ({ pair: u.pair, allowed: !!u.allowed }));
+            // Accumulate actually-used SG pairs globally for this multi-segment route
+            try { sgOnly.forEach(u => usedSmartGatePairsGlobal.add(u.pair)); } catch {}
+          } else {
+            // eslint-disable-next-line no-console
+            // removed [SG-AUDIT] no-hops log
+          }
+        } catch { /* non-fatal debug */ }
         // capture per-segment meta (Explore mode)
         segmentMetas[segIndex] = (meta && (lastP2PParamsRef.current?.optimize === 'explore')) ? {
           baselineCost: meta.baselineCost ?? 0,
@@ -2220,10 +3071,19 @@ function App() {
         exploreCorridorPct: optimizeFor==='explore' ? (typeof exploreCorridorPct==='number' ? exploreCorridorPct : undefined) : undefined,
         exploreProgressBiasPct: optimizeFor==='explore' ? (typeof exploreProgressBiasPct==='number' ? exploreProgressBiasPct : undefined) : undefined,
         avoidSystemNames: avoidSystems.filter(a=> a!==segFrom && a!==segTo && !orderedWaypoints.includes(a)),
+        smartGateEdges,
+        smartGateVersion: smartGateEdges ? smartGateEdgesVersionRef.current : undefined,
+        debugSmartGate: true,
       });
+      try {
+        if ((window as any).console) {
+          // eslint-disable-next-line no-console
+          // removed noisy per-segment post log
+        }
+      } catch { /* ignore */ }
     };
   runNext();
-  }, [mapData, scoutRouteResult, clearCurrentRoute, waypoints, avoidSystems, waypointOptimize, selectSystem]);
+  }, [mapData, scoutRouteResult, clearCurrentRoute, waypoints, avoidSystems, waypointOptimize, selectSystem, publicEdgeSet, traversableEdgeSet]);
 
   // Helper to get planet count color
   const getPlanetCountColor = useCallback((planets: number, minPlanets: number, maxPlanets: number): THREE.Color => {
@@ -2519,9 +3379,14 @@ function App() {
       color: accentIsBlue ? 0x00aaff : 0xff4c26,
       transparent: true,
       alphaTest: 0.5,
+      depthTest: false,     // draw on top regardless of background depth
+      depthWrite: false,    // don't affect depth buffer so stars/gates are unchanged
+      blending: THREE.NormalBlending, // preserve flat theme color
     });
   hoverPointRef.current = new THREE.Points(hoverGeometry, hoverMaterial);
       hoverPointRef.current.visible = false;
+        // Ensure the hover ring draws above everything for consistent flat color
+        hoverPointRef.current.renderOrder = 9999;
         sceneRef.current.add(hoverPointRef.current);
 
   // (Legacy prompt-based overlay add removed; custom context menu + modal now handles Add Mark.)
@@ -2568,6 +3433,7 @@ function App() {
          // Star field now static: guard in case legacy uniform lingers
          if(starFieldRef.current){ const mat:any = starFieldRef.current.material; const sh = mat.userData?.shader; if(sh && sh.uniforms.uTime){ sh.uniforms.uTime.value = tNow; } }
          if(stargateLinesRef.current && cameraRef.current){ const m:any = stargateLinesRef.current.material; if(m.uniforms?.uCamPos){ m.uniforms.uCamPos.value.copy(cameraRef.current.position); } }
+           if(smartGateLinesRef.current && cameraRef.current){ const m2:any = smartGateLinesRef.current.material; if(m2.uniforms?.uCamPos){ m2.uniforms.uCamPos.value.copy(cameraRef.current.position); } }
           // Removed glow material camera uniform update (glow pass removed)
           // Removed dynamic distance-based brightness adaptation; static brightness now
           try {
@@ -2856,9 +3722,15 @@ function App() {
          }
          if(advancedPassRef.current){ advancedPassRef.current.uniforms.uTime.value = performance.now()/1000; }
          // (Station icon scaling moved to dedicated RAF effect below for reliability)
-         composerRef.current ? composerRef.current.render() : rendererRef.current?.render(sceneRef.current!, cameraRef.current!);
+         if(composerRef.current){
+           composerRef.current.render();
+         } else {
+           rendererRef.current?.render(sceneRef.current!, cameraRef.current!);
+         }
+         // Smart Gate halo (masked bloom) removed
        } else {
         rendererRef.current?.render(sceneRef.current!, cameraRef.current!);
+        // Smart Gate halo (masked bloom) removed
        }
        labelRenderer.render(sceneRef.current!, cameraRef.current!); // Render CSS2DRenderer
      };
@@ -2885,6 +3757,7 @@ function App() {
        currentMount.removeChild(labelRenderer.domElement); // New: Clean up label renderer DOM
     };
   }, [isLoaded, ringTexture, cinematicMode]);
+  // FXAA pipeline removed
 
   // Create and update starfield and stargates
   useEffect(() => {
@@ -3007,6 +3880,7 @@ function App() {
   // Apply star palette immediately on enable (even if mode already set to default)
   try { applyStarPalette(starColorMode); requestAnimationFrame(()=>{ applyStarPalette(starColorMode); }); } catch(e){ /* ignore */ }
       if(stargateLinesRef.current) stargateLinesRef.current.visible = false;
+  if(smartGateLinesRef.current) smartGateLinesRef.current.visible = false;
       // Dust
       const count=1000; const pos=new Float32Array(count*3); const col=new Float32Array(count*3);
   for(let i=0;i<count;i++){ const r=22000*Math.cbrt(Math.random()); const th=Math.random()*Math.PI*2; const ph=Math.acos(2*Math.random()-1); pos[i*3]=r*Math.sin(ph)*Math.cos(th); pos[i*3+1]=r*Math.sin(ph)*Math.sin(th); pos[i*3+2]=r*Math.cos(ph); const tint=new THREE.Color().setHSL(0.76+Math.random()*0.1,0.45,0.55+Math.random()*0.15); col[i*3]=tint.r; col[i*3+1]=tint.g; col[i*3+2]=tint.b; }
@@ -3125,6 +3999,7 @@ function App() {
     const disable = () => {
       if(starFieldRef.current && originalStarMaterialRef.current) starFieldRef.current.material = originalStarMaterialRef.current;
       if(stargateLinesRef.current) stargateLinesRef.current.visible = true;
+  if(smartGateLinesRef.current) smartGateLinesRef.current.visible = true;
     if(backgroundMeshRef.current){
       try {
         sceneRef.current?.remove(backgroundMeshRef.current);
@@ -3670,6 +4545,13 @@ function App() {
     // Build ribbon route instead of tube meshes
     routeSourceRef.current = scoutRouteResult?.path ? 'scout' : 'p2p';
     const accentHex = accentIsBlue ? 0x00aaff : 0xff4c26;
+    // Build set of actually used Smart Gate pairs for this route (directional)
+    const usedSmartGatePairsSet: Set<string> | null = (() => {
+      const arr = routeResult?.usedSmartGatePairs;
+      if (Array.isArray(arr) && arr.length) return new Set(arr);
+      return null;
+    })();
+
     const group = createRouteRibbon({
       pathSystems,
       mapData: mapData as any,
@@ -3677,10 +4559,15 @@ function App() {
       getTransformedPosition,
   cameraRef,
       rendererRef,
-      animUpdatersRef: routeAnimUpdatersRef as any
+      animUpdatersRef: routeAnimUpdatersRef as any,
+      usedSmartGatePairs: usedSmartGatePairsSet || null
     });
     if (group) {
       routeLinesRef.current = group;
+      try {
+        const base = smartGateLinesRef.current?.renderOrder ?? stargateLinesRef.current?.renderOrder ?? 0;
+        group.renderOrder = base + 5; // keep route clearly above smart gate lines
+      } catch {/* ignore */}
       sceneRef.current.add(group);
     }
 
@@ -3828,8 +4715,8 @@ function App() {
         // Force consistent hover color (orange accent) regardless of underlying overlay mark color
         try {
           const hoverMat = hoverPoint.material as THREE.PointsMaterial;
-          // Use orange hex directly for clarity; could derive from accent palette if needed
-          hoverMat.color.set('#ff8a2b');
+          const colorHex = accentIsBlue ? '#00aaff' : '#ff8a2b';
+          hoverMat.color.set(colorHex);
         } catch {/* ignore */}
 
   hoverPoint.visible = true;
@@ -4254,6 +5141,24 @@ function App() {
         optionsWrap.appendChild(markItem);
       }
 
+      // View on Datacore item (external link)
+      {
+        const viewItem = document.createElement('div');
+        viewItem.className = 'context-menu-item';
+        viewItem.textContent = 'View on Datacore';
+        viewItem.addEventListener('mousedown', e=> { e.stopPropagation(); e.preventDefault(); });
+        viewItem.addEventListener('click', e => {
+          e.stopPropagation();
+          const sys = contextMenuSystemRef.current;
+          if(sys && typeof (sys as any).id === 'number'){
+            const url = `https://evedataco.re/explore/solarsystems/${(sys as any).id}`;
+            try { window.open(url, '_blank', 'noopener'); } catch {/* ignore */}
+          }
+          closeMenu();
+        });
+        optionsWrap.appendChild(viewItem);
+      }
+
       inner.appendChild(optionsWrap);
       el.appendChild(inner);
       const menuObj = new CSS2DObject(el);
@@ -4424,6 +5329,7 @@ function App() {
           ref={regionStatsDrawerRef}
           id="region-stats"
           title={activeRegionName + (regionStatsLoading && !activeRegionStats ? ' (loading)' : '') + ' Stats'}
+          defaultPos={alignedBase}
           scale={uiScale}
           zIndex={panelZ['region-stats']||1450}
           onActivate={bringToFront}
@@ -4440,6 +5346,7 @@ function App() {
           ref={regionCompareDrawerRef}
           id="region-compare"
           title={'Compare Regions'}
+          defaultPos={alignedBase}
           scale={uiScale}
           zIndex={panelZ['region-compare']||1450}
           onActivate={bringToFront}
@@ -4536,6 +5443,7 @@ function App() {
           ref={userOverlayDrawerRef}
           id="user-overlay"
           title={'User Overlay (Marks)'}
+          defaultPos={alignedBase}
           scale={uiScale}
           zIndex={panelZ['user-overlay']||1450}
           onActivate={bringToFront}
@@ -4656,11 +5564,12 @@ function App() {
         </button>
         <ReferralBadge />
       </div>
+      {/* Session badge removed from far-right; identity moved next to search */}
       {/* HelpPanel (toggle + sliding panel) kept outside shifting group so only three buttons move left */}
       <HelpPanel accentIsBlue={accentIsBlue} supportExpandRequestId={supportExpandRequestId} supportContent={supportContent} />
     </div>
   </div>
-  {showTransmission && !hideUI && (
+  {TRANSMISSION_ENABLED && showTransmission && !hideUI && (
     <TransmissionPanel
       key={replayCounter}
       tribeName="WOLF"
@@ -4679,7 +5588,7 @@ function App() {
       }}
     />
   )}
-  {!showTransmission && hasSeenTransmission && !hideUI && (
+  {TRANSMISSION_ENABLED && !showTransmission && hasSeenTransmission && !hideUI && (
     <button
       className="tx-replay-pill"
       style={{ position:'fixed', top: (10 + 70 + 8)+'px', right:10, zIndex:3191, background:'rgba(0,0,0,0.55)', border:'1px solid rgba(255,255,255,0.25)', color:'#fff', padding:'6px 10px', borderRadius:20, fontSize:12, cursor:'pointer', backdropFilter:'blur(6px) saturate(150%)', letterSpacing:'.5px', transition:'right .28s ease' }}
@@ -4696,9 +5605,12 @@ function App() {
       aria-label="Replay transmission"
     >Replay Transmission</button>
   )}
-  {/* Search panel (separate bounding box) */}
-  <div className="ef-left-cluster ef-search-panel" style={hideUI?{display:'none'}:{ position: 'absolute', top: 10, left: 10, zIndex: 1405, color: 'white', padding: '10px 12px 12px', borderRadius: '14px', border:'1px solid rgba(255,255,255,0.22)', background: 'linear-gradient(180deg, rgba(30,30,32,0.78) 0%, rgba(18,18,20,0.78) 55%, rgba(12,12,14,0.78) 100%)', backdropFilter:'blur(9px) saturate(140%)', boxShadow:'0 6px 24px -6px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.05) inset' }}>
-        <div style={{ display:'flex', alignItems:'stretch', gap:'6px', minWidth:340 }}>
+  {/* Top-left controls row: Search box + Identity box side-by-side */}
+  {!hideUI && (
+    <div style={{ position:'absolute', top:10, left:10, zIndex:1405, display:'flex', gap:4, alignItems:'stretch', transform:`scale(${uiScale})`, transformOrigin:'top left' }}>
+  {/* Search panel (left) */}
+  <div className="ef-search-panel" style={{ color: 'white', padding: '10px 12px 12px', borderRadius: '14px', border:'1px solid rgba(255,255,255,0.22)', background: 'linear-gradient(180deg, rgba(30,30,32,0.78) 0%, rgba(18,18,20,0.78) 55%, rgba(12,12,14,0.78) 100%)', backdropFilter:'blur(9px) saturate(140%)', boxShadow:'0 6px 24px -6px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.05) inset' }}>
+        <div style={{ display:'flex', alignItems:'center', gap:'6px', minWidth:340 }}>
           <div style={{ flex:1 }}>
             <AutoCompleteInput
               placeholder="Search for a system..."
@@ -4716,20 +5628,19 @@ function App() {
               background: 'var(--accent)',
               color: '#fff',
               border: 'none',
-              padding: '6px 12px',
+              padding: '10px 12px',
               fontSize: '13px',
-              lineHeight: '1.3',
+              lineHeight: '1.2',
               fontWeight: 600,
               cursor: 'pointer',
               borderRadius: '6px',
-              alignSelf:'stretch',
-              display:'flex',
+              display:'inline-flex',
               alignItems:'center',
               boxShadow:'0 2px 6px rgba(0,0,0,0.45)'
             }}
             onClick={()=>{
               // Soft reset: clear inputs & routes but KEEP panel positions
-              softReset(); // resets prefs (jump distance etc.) but not panel-pos:* keys
+              softReset();
               setRouteResult(null);
               setScoutRouteResult(null);
               setScoutInvalidateToken(t=> t+1);
@@ -4738,15 +5649,65 @@ function App() {
               setWaypoints([]);
               setAvoidSystems([]);
               setWaypointOptimize(false);
-              setResetToken(t=> t+1); // signal input-bearing panels to clear their internal state
+              setResetToken(t=> t+1);
             }}
             aria-label="Reset all inputs"
           >Reset</button>
         </div>
-        {/* Rail now separate panel below (not inside this search panel) */}
-  {/* ...existing controls... (accent toggle removed from here) */}
-  {/* Planet legend relocated to floating overlay to avoid being obscured by rail */}
       </div>
+  {/* Identity / Connect panel (right) */}
+  <div className="ef-identity-panel" style={{ color: 'white', padding: '10px 12px 12px', borderRadius: '14px', border:'1px solid rgba(255,255,255,0.22)', background: 'linear-gradient(180deg, rgba(30,30,32,0.78) 0%, rgba(18,18,20,0.78) 55%, rgba(12,12,14,0.78) 100%)', backdropFilter:'blur(9px) saturate(140%)', boxShadow:'0 6px 24px -6px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.05) inset', display:'flex', alignItems:'center' }}>
+        {!sessionAddress ? (
+          <button
+            onClick={connectAndSign}
+            disabled={authBusy}
+            className="ef-connect-btn"
+            style={{
+              background:'var(--accent)', color:'#fff', border:'none', padding:'10px 12px',
+              fontSize:'13px', lineHeight:'1.2', fontWeight:700, cursor:'pointer',
+              borderRadius:'6px', display:'inline-flex', alignItems:'center',
+              boxShadow:'0 2px 6px rgba(0,0,0,0.45)'
+            }}
+            aria-label="Connect and sign in"
+          >{authBusy? 'Connecting…' : 'Connect'}</button>
+        ) : (
+          <div style={{ position:'relative' }} ref={profileMenuRef}>
+            <button
+              onClick={()=> setShowLogoutMenu(v=> !v)}
+              className="ef-identity-btn"
+              style={{ display:'flex', alignItems:'center', gap:8, background:'transparent', border:'none', color:'#ddd', cursor:'pointer', padding:0, outline:'none' }}
+              aria-label="Profile menu"
+              title={playerProfile?.name || playerProfile?.address}
+            >
+              {/* Avatar */}
+              <div style={{ width:34, height:34, borderRadius:8, overflow:'hidden', border:'1px solid rgba(255,255,255,0.25)' }}>
+                {playerProfile?.avatarUrl ? (
+                  <img src={playerProfile.avatarUrl} alt="avatar" style={{ width:'100%', height:'100%', objectFit:'cover' }} />
+                ) : (
+                  <div style={{ width:'100%', height:'100%', background:'rgba(255,255,255,0.12)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:10 }}>?
+                  </div>
+                )}
+              </div>
+              {/* Name with theme-aware color (use theme variables for exact match) */}
+              <span style={{
+                fontSize:14, fontWeight:700,
+                color: accentIsBlue ? 'var(--selection-blue)' : 'var(--selection-orange)',
+                maxWidth:160, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'
+              }}>{playerProfile?.name || `${sessionAddress.slice(0,6)}…${sessionAddress.slice(-4)}`}</span>
+            </button>
+            {showLogoutMenu && (
+              <div style={{ position:'absolute', top:34, right:0, background:'rgba(12,12,14,0.95)', border:'1px solid rgba(255,255,255,0.2)', borderRadius:6, boxShadow:'0 8px 24px rgba(0,0,0,0.5)', padding:'6px 8px', zIndex:3200, whiteSpace:'nowrap', minWidth:90 }}>
+                <button onClick={logout} style={{ background:'transparent', border:'none', color:'#eee', fontSize:13, cursor:'pointer', whiteSpace:'nowrap' }}>Log out</button>
+              </div>
+            )}
+          </div>
+        )}
+        {!!authError && !sessionAddress && (
+          <span style={{ color:'#ff6b5b', fontSize:12, whiteSpace:'nowrap', marginLeft:8 }} title={authError}>Auth error</span>
+        )}
+      </div>
+    </div>
+  )}
       {/* Feature rail bounding box */}
       {!hideUI && (
         <div className="ef-rail-wrapper" style={{ position:'absolute', top: 82, left:10, zIndex:1405, transform:`scale(${uiScale})`, transformOrigin:'top left' }}>
@@ -4756,6 +5717,7 @@ function App() {
               { id:'cinematic', type:'panel', label:'Cinematic Mode', display:(<>Cinematic<br/>Mode</>), icon:null, active:openPanels.has('cinematic'), onSelect:()=> { if(openPanels.has('cinematic')) { setCinematicMode(false); } else { setCinematicMode(true); } togglePanel('cinematic'); } },
               { id:'region', type:'toggle', label:'Highlight Region', display:(<>Highlight<br/>Region</>), icon:null, active:isRegionHighlighterActive, onToggle:()=> setIsRegionHighlighterActive(v=> !v) },
               { id:'planets', type:'toggle', label:'Display Planet Counts', display:(<>Planet<br/>Counts</>), icon:null, active:isPlanetCountActive, onToggle:()=> setIsPlanetCountActive(v=> !v) },
+              { id:'smart-gates', type:'panel', label:'Smart Gates', display:(<>Smart<br/>Gates</>), icon:null, active:openPanels.has('smart-gates'), onSelect:()=> togglePanel('smart-gates') },
               { id:'stations', type:'toggle', label:'Show Stations', display:(<>Show<br/>Stations</>), icon:null, active:showStations, onToggle:()=> setShowStations(v=> { const next=!v; try { persistShowStations(next); } catch {}; try { if(next) track({ type:'show_stations' }); } catch {}; return next; }) },
               { id:'distance', type:'toggle', label:'Show Distance', display:(<>Show<br/>Distance</>), icon:null, active:showDistance, onToggle:()=> setShowDistance(v=> !v) },
               { id:'region-compare', type:'panel', label:'Compare Regions', display:(<>Compare<br/>Regions</>), icon:null, active:openPanels.has('region-compare'), onSelect:()=> togglePanel('region-compare') },
@@ -4769,7 +5731,7 @@ function App() {
       {!hideUI && (
         <>
           {openPanels.has('routing') && (
-            <PanelDrawer ref={routingDrawerRef} id="routing" title="Routing" scale={uiScale} zIndex={panelZ['routing']||1450} onActivate={bringToFront} onClose={(id)=> setOpenPanels(p=> { const n=new Set(p); n.delete(id); return n; })} resetToken={layoutResetToken} isMinimized={minimizedPanels.has('routing')} onToggleMinimize={toggleMinimize}>
+            <PanelDrawer ref={routingDrawerRef} id="routing" title="Routing" defaultPos={alignedBase} scale={uiScale} zIndex={panelZ['routing']||1450} onActivate={bringToFront} onClose={(id)=> setOpenPanels(p=> { const n=new Set(p); n.delete(id); return n; })} resetToken={layoutResetToken} isMinimized={minimizedPanels.has('routing')} onToggleMinimize={toggleMinimize}>
               <RoutingPanel
                 onCalculateRoute={calculateRoute}
                 onStopCalculation={stopCalculation}
@@ -4788,6 +5750,9 @@ function App() {
                 onRemoveAvoidSystem={removeAvoidSystem}
                 waypointOptimize={waypointOptimize}
                 onWaypointOptimizeChange={setWaypointOptimize}
+                smartGateItemByPair={smartGateItemByPair}
+                usedSmartGatePairs={routeResult?.usedSmartGatePairs ? new Set(routeResult.usedSmartGatePairs) : null}
+                isLoggedIn={!!sessionAddress}
                 returnToStart={returnToStart}
                 onReturnToStartChange={setReturnToStart}
                 scoutInvalidateToken={scoutInvalidateToken}
@@ -4839,7 +5804,7 @@ function App() {
             </PanelDrawer>
           )}
           {openPanels.has('cinematic') && (
-            <PanelDrawer ref={cinematicDrawerRef} id="cinematic" title="Cinematic Mode" scale={uiScale} zIndex={panelZ['cinematic']||1450} onActivate={bringToFront} onClose={(id)=> { setOpenPanels(p=> { const n=new Set(p); n.delete(id); return n; }); setCinematicMode(false); }} resetToken={layoutResetToken} isMinimized={minimizedPanels.has('cinematic')} onToggleMinimize={toggleMinimize}>
+            <PanelDrawer ref={cinematicDrawerRef} id="cinematic" title="Cinematic Mode" defaultPos={alignedBase} scale={uiScale} zIndex={panelZ['cinematic']||1450} onActivate={bringToFront} onClose={(id)=> { setOpenPanels(p=> { const n=new Set(p); n.delete(id); return n; }); setCinematicMode(false); }} resetToken={layoutResetToken} isMinimized={minimizedPanels.has('cinematic')} onToggleMinimize={toggleMinimize}>
               <CinematicPanel
                 starColorMode={starColorMode}
                 setStarColorMode={setStarColorMode as any}
@@ -4872,12 +5837,161 @@ function App() {
               />
             </PanelDrawer>
           )}
+          {openPanels.has('smart-gates') && (
+            <PanelDrawer ref={smartGatesDrawerRef} id="smart-gates" title="Smart Gates" defaultPos={alignedBase} scale={uiScale} zIndex={panelZ['smart-gates']||1450} onActivate={bringToFront} onClose={(id)=> setOpenPanels(p=> { const n=new Set(p); n.delete(id); return n; })} resetToken={layoutResetToken} isMinimized={minimizedPanels.has('smart-gates')} onToggleMinimize={toggleMinimize}>
+              <div style={{ padding:'8px 10px', color:'#ddd', fontSize:13, display:'flex', flexDirection:'column', gap:8 }}>
+                <label style={{ display:'flex', alignItems:'center', gap:8 }}>
+                  <input type="checkbox" checked={showSmartGates} onChange={(e)=> setShowSmartGates(e.target.checked)} />
+                  <span>Show Smart Gates</span>
+                </label>
+                {showSmartGates && (
+                  <div style={{ fontSize:12, opacity:0.8, display:'flex', alignItems:'center', gap:8, whiteSpace:'nowrap' }}>
+                    {smartGateErr ? (
+                      <span style={{ color:'#ff6b5b' }}>Error: {smartGateErr}</span>
+                    ) : smartGateSnapshot ? (
+                      <>
+                        <span>
+                          Loaded {Math.round((smartGateSnapshot.links?.length ?? 0)/2)} links
+                          {smartGateSnapshot.updatedAt ? ` • updated ${new Date(smartGateSnapshot.updatedAt).toLocaleString()}`: ''}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={()=> refreshSmartGates(true)}
+                          disabled={smartGateRefreshBusy}
+                          title={smartGateRefreshBusy? 'Refreshing…' : 'Refresh Smart Gates now'}
+                          aria-label="Refresh Smart Gates"
+                          style={{
+                            cursor: smartGateRefreshBusy? 'default':'pointer',
+                            border:'none', background:'transparent', padding:0, margin:0,
+                            display:'inline-flex', alignItems:'center', justifyContent:'center'
+                          }}
+                        >
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ marginLeft:6, opacity: smartGateRefreshBusy? 0.5: 0.9 }}>
+                            <path d="M21 12a9 9 0 1 1-2.64-6.36" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                            <path d="M21 3v6h-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                          </svg>
+                        </button>
+                      </>
+                    ) : (
+                      <span>Loading links…</span>
+                    )}
+                  </div>
+                )}
+                {showSmartGates && (
+                  <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+                    <label style={{ display:'flex', alignItems:'center', gap:8 }}>
+                      <span style={{ width:80, opacity:0.85 }}>Colour</span>
+                      <select
+                        value={smartGateColorMode}
+                        onChange={(e)=> setSmartGateColorMode(e.target.value as any)}
+                        style={{ flex:1, minWidth:0 }}
+                        className="p2p-input"
+                      >
+                        <option value="accent">Theme accent</option>
+                        <option value="opposite">Opposite of theme</option>
+                        <option value="tribe">By tribe</option>
+                      </select>
+                    </label>
+                    <label style={{ display:'flex', alignItems:'center', gap:8 }}>
+                      <span style={{ width:80, opacity:0.85 }}>Viewing</span>
+                      <select
+                        value={smartGateViewMode}
+                        onChange={(e)=> setSmartGateViewMode(e.target.value as any)}
+                        style={{ flex:1, minWidth:0 }}
+                        className="p2p-input"
+                        disabled={false}
+                        title={'Choose which Smart Gates to show'}
+                      >
+                        <option value="all">All gates</option>
+                        <option value="public">Unrestricted only</option>
+                        <option value="authorized" disabled={!sessionAddress}>Unrestricted + restricted you can use</option>
+                      </select>
+                    </label>
+                    {/* Explanatory text removed per request */}
+                  </div>
+                )}
+                {showSmartGates && smartGateColorMode==='tribe' && smartGateTribeLegend.length>0 && (
+                  <div style={{ marginTop: 4 }}>
+                    <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:6 }}>
+                      <div style={{ fontSize:12, opacity:0.85 }}>Legend</div>
+                      {smartGateTribeFilter && (
+                        <button
+                          type="button"
+                          onClick={()=> setSmartGateTribeFilter(null)}
+                          aria-label="Clear tribe filter"
+                          style={{
+                            flex:'0 0 auto',
+                            padding:'2px 6px',
+                            fontSize:12,
+                            lineHeight:1,
+                            height:'auto',
+                            background:'transparent',
+                            border:'1px solid #333',
+                            borderRadius:4,
+                            color:'#ddd',
+                            cursor:'pointer'
+                          }}
+                          title="Show all tribes"
+                        >
+                          Clear filter
+                        </button>
+                      )}
+                    </div>
+                    <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+                      {smartGateTribeLegend.map((it)=> {
+                        const label = tribeNames[it.tribeId] || (it.tribeId === 'other' ? 'Other' : it.tribeId);
+                        const isActive = smartGateTribeFilter === it.tribeId;
+                        return (
+                          <button
+                            key={`legend-${it.tribeId}`}
+                            onClick={()=> setSmartGateTribeFilter(isActive ? null : it.tribeId)}
+                            style={{ display:'flex', alignItems:'center', gap:8, background:'transparent', border:'1px solid #333', borderRadius:4, padding:'4px 6px', cursor:'pointer', opacity: isActive? 1 : 0.9 }}
+                            title={isActive? 'Showing only this tribe' : 'Click to filter to this tribe'}
+                          >
+                            <span style={{ width:14, height:14, borderRadius:2, backgroundColor: new THREE.Color(it.color).getStyle(), border:'1px solid #444' }} aria-hidden="true" />
+                            <span style={{ fontSize:12, color:'#ddd', fontWeight: isActive? 700 : 500 }}>{label}</span>
+                            <span style={{ fontSize:12, opacity:0.7 }}>({it.count})</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+                {showSmartGates && smartGateSnapshot?.links && (
+                  <div style={{ fontSize:12, opacity:0.85, marginTop:4 }}>
+                    Visible: {
+                      (()=>{
+                        // Apply base filters (online/linked), then view filter, then optional tribe filter (tribe mode)
+                        const all = smartGateSnapshot.links.filter(l=> l && (l.online !== false) && (l.linked !== false));
+                        let total = Math.round(all.length/2);
+                        let set = all;
+                        if(smartGateViewMode==='authorized' && traversableEdgeSet){
+                          set = all.filter(l=> traversableEdgeSet.has(`${l.origin}-${l.destination}`));
+                        } else if(smartGateViewMode==='public'){
+                          set = all.filter(l=> publicEdgeSet.has(`${l.origin}-${l.destination}`));
+                        }
+                        if(smartGateColorMode==='tribe' && smartGateTribeFilter){
+                          // Reuse a lightweight bucket decider mirroring buildTribeColorMap
+                          const pickTid = (l:any)=> (String(l.tribeId||'').trim() || (Array.isArray(l.tribes)? String(l.tribes[0]||'').trim():'')) || 'other';
+                          set = set.filter(l=> pickTid(l) === smartGateTribeFilter);
+                          total = Math.round(set.length/2);
+                          return `${total}`;
+                        }
+                        return `${Math.round(set.length/2)}/${Math.round(all.length/2)}`;
+                      })()
+                    }
+                  </div>
+                )}
+              </div>
+            </PanelDrawer>
+          )}
           {/* Floating planet legend (appears when planet coloring active). Separate from drawer so toggle works independently. */}
           {isPlanetCountActive && (
             <PlanetLegendPanel
               scale={uiScale}
               anchoredBelowDrawer={openPanels.size>0}
               zIndex={panelZ['planetLegend']||1425}
+              basePos={alignedBase}
               onActivate={()=> bringToFront('planetLegend')}
               onClose={()=> setIsPlanetCountActive(false)}
               resetToken={layoutResetToken}
@@ -4888,7 +6002,7 @@ function App() {
             </PlanetLegendPanel>
           )}
           {openPanels.has('display-settings') && (
-            <PanelDrawer ref={displaySettingsDrawerRef} id="display-settings" title="Display Settings" scale={uiScale} zIndex={panelZ['display-settings']||1450} onActivate={bringToFront} onClose={(id)=> setOpenPanels(p=> { const n=new Set(p); n.delete(id); return n; })} isMinimized={minimizedPanels.has('display-settings')} onToggleMinimize={toggleMinimize}>
+            <PanelDrawer ref={displaySettingsDrawerRef} id="display-settings" title="Display Settings" defaultPos={alignedBase} scale={uiScale} zIndex={panelZ['display-settings']||1450} onActivate={bringToFront} onClose={(id)=> setOpenPanels(p=> { const n=new Set(p); n.delete(id); return n; })} isMinimized={minimizedPanels.has('display-settings')} onToggleMinimize={toggleMinimize}>
               <DisplaySettingsPanel onLayoutReset={()=> { setMinimizedPanels(new Set()); try { localStorage.removeItem('efmap:minPanels'); } catch {}; }} />
             </PanelDrawer>
           )}

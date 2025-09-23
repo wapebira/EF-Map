@@ -235,6 +235,56 @@ const baseSections: SectionDef[] = [
     ],
   },
   {
+    id: 'smart-gates',
+    title: 'Smart Gates',
+    subsections: [
+      {
+        id: 'sg-overview',
+        title: 'Overview',
+        content: (
+          <div>
+            <p>Draws player‑made Smart Gate links on the map. Links appear like normal stargates and are included in routing when enabled. Only live, linked, online connections are shown; edges are directional.</p>
+          </div>
+        ),
+      },
+      {
+        id: 'sg-modes',
+        title: 'Modes & Access',
+        content: (
+          <div>
+            <ul style={{ paddingLeft:'18px', margin:'6px 0' }}>
+              <li><strong>View:</strong> <em>All</em> (everything), <em>Unrestricted only</em> (public edges), <em>Authorized</em> (your allowed edges; enabled after login).</li>
+              <li><strong>Color:</strong> Accent or <em>By Tribe</em> (top‑10 tribes get distinct colors; others grouped).</li>
+            </ul>
+            <p>When logged out, the Authorized mode is unavailable. After login, the panel uses your policy to show the traversable set.</p>
+          </div>
+        ),
+      },
+      {
+        id: 'sg-legend',
+        title: 'Legend & Filters',
+        content: (
+          <div>
+            <p>In <em>By Tribe</em>, a compact legend lists top tribes and an <em>Other</em> bucket. Click a row to isolate that tribe; use <em>Clear filter</em> to restore all. Counts update instantly.</p>
+          </div>
+        ),
+      },
+      {
+        id: 'sg-visuals',
+        title: 'Visuals & Routing',
+        content: (
+          <div>
+            <ul style={{ paddingLeft:'18px', margin:'6px 0' }}>
+              <li>Smart Gates render like stargate links for readability.</li>
+              <li>Routing respects the chosen mode (None, Public, Authorized) and only uses live links.</li>
+              <li>Route notes mark Smart Gate hops explicitly; regular stargates are grouped as runs.</li>
+            </ul>
+          </div>
+        ),
+      },
+    ],
+  },
+  {
     id: 'p2p-routing',
     title: 'Point-to-Point Routing',
     subsections: [
@@ -247,6 +297,15 @@ const baseSections: SectionDef[] = [
             <p><strong>Quick / Basic (A*):</strong> Gives you a solid route fast—ideal for short trips, experimentation, or when you just need a workable path immediately.</p>
             <p><strong>Advanced / Thorough (Dijkstra):</strong> Systematically expands every cheaper partial path without directional bias. That exhaustive ordering often surfaces a route with lower total lightyears (fuel) and/or fewer or shorter ship jumps than the quicker A* result—most noticeable on longer or branching routes.</p>
             <p><strong>Trade‑off:</strong> Dijkstra takes longer (the “wandering” is deliberate exploration) but can yield meaningful fuel savings. Mental model: A* says “head roughly that way and refine”; Dijkstra says “exhaustively check by true cost so nothing cheaper is skipped.” Use A* for speed; switch to Dijkstra when squeezing out minimum fuel matters.</p>
+          </div>
+        ),
+      },
+      {
+        id: 'p2p-smart-gates',
+        title: 'Smart Gates',
+        content: (
+          <div>
+            <p>Use <em>Use Smart Gates</em> to include Smart Gate links: <em>None</em>, <em>Unrestricted only</em>, or <em>Authorized</em> (enabled after login). Routing uses only live links and honors direction. Route notes add a <em>[Smart Gate]</em> marker with an in‑game link for each Smart Gate hop.</p>
           </div>
         ),
       },

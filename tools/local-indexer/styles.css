@@ -1,0 +1,69 @@
+:root{ --bg:#f6f7fb; --card:#fff; --muted:#6b7280; --text:#111827; --border:#e5e7eb; --accent:#3b82f6; }
+*{ box-sizing:border-box }
+body{ margin:0; font-family: ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial; background:var(--bg); color:var(--text) }
+.container{ max-width:1200px; margin:0 auto; padding:24px }
+.row{ display:grid; grid-template-columns: repeat(12, 1fr); gap:16px }
+.card{ background:var(--card); border:1px solid var(--border); border-radius:16px; padding:16px; box-shadow: 0 1px 2px rgba(0,0,0,0.04) }
+.title{ font-weight:700; font-size:20px }
+.sub{ color:var(--muted); font-size:12px }
+.kpi{ display:flex; align-items:center; justify-content:space-between }
+.kpi .label{ color:var(--muted); font-size:12px; text-transform:uppercase }
+.kpi .value{ font-weight:700 }
+.kpiValueWrap{ display:flex; align-items:baseline; gap:8px }
+.delta{ font-size:12px; padding:2px 6px; border-radius:999px; background:transparent; color:var(--muted); border:1px solid var(--border) }
+.delta.up{ color:#10b981; border-color:#065f46 }
+.delta.down{ color:#ef4444; border-color:#7f1d1d }
+.pill{ display:inline-flex; align-items:center; gap:6px; padding:3px 8px; border-radius:999px; font-size:12px }
+.pill.live{ background:#ecfdf5; color:#047857 }
+.pill.catch{ background:#fffbeb; color:#92400e }
+.gauge{ display:flex; align-items:center; gap:12px }
+.grid12{ grid-column: span 12 }
+.grid8{ grid-column: span 8 }
+.grid4{ grid-column: span 4 }
+.grid3{ grid-column: span 3 }
+.grid6{ grid-column: span 6 }
+table{ width:100%; border-collapse: collapse; font-size: 14px }
+th, td{ padding:8px 10px; border-top:1px solid var(--border) }
+.muted{ color:var(--muted) }
+.bar{ height:8px; background:#eef2ff; border-radius:999px; overflow:hidden }
+.bar > div{ height:8px; background:#6366f1 }
+.footer{ font-size:12px; color:var(--muted); display:flex; justify-content:space-between; border-top:1px solid var(--border); padding-top:12px; margin-top:16px }
+
+/* Scrollable content blocks */
+.scroll{
+	max-height:640px;
+	overflow-y:auto;
+	overflow-x:hidden;
+	border:1px solid var(--border);
+	border-radius:12px;
+	padding:8px;
+	background:rgba(0,0,0,0.02);
+	/* Reserve space for scrollbar so layout doesn't shift */
+	scrollbar-gutter: stable both-edges;
+}
+.scroll:focus{ outline:none }
+/* Make sure there is enough content height to trigger scroll when many rows */
+.scroll .kv{ min-height:28px }
+/* WebKit scrollbar styling for visibility */
+.scroll::-webkit-scrollbar{ width:10px }
+.scroll::-webkit-scrollbar-track{ background:transparent }
+.scroll::-webkit-scrollbar-thumb{ background-color:#cbd5e1; border-radius:999px; border:2px solid transparent; background-clip:content-box }
+.scroll::-webkit-scrollbar-thumb:hover{ background-color:#94a3b8 }
+.kv{ display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 6px; border-bottom:1px solid var(--border) }
+.kv:last-child{ border-bottom:none }
+.kv-name{ font-family: ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px }
+.kv-val{ color:var(--muted); font-size:12px }
+
+/* Subtle highlight when a value changes */
+.changed{ animation: flash 0.5s ease-out }
+@keyframes flash { 0%{ background: #fff7ed } 100%{ background: transparent } }
+
+/* Dark theme (auto) */
+@media (prefers-color-scheme: dark){
+	:root{ --bg:#0b1220; --card:#0f172a; --muted:#94a3b8; --text:#e5e7eb; --border:#1f2937; --accent:#60a5fa; }
+	.card{ box-shadow:none }
+	.bar{ background:#1e293b }
+	.bar > div{ background:#6366f1 }
+	.scroll{ background:rgba(255,255,255,0.02) }
+	.scroll::-webkit-scrollbar-thumb{ background-color:#475569 }
+}

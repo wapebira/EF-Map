@@ -1,5 +1,5 @@
 import React from 'react';
-import { getPrefs, setGateGradientSpan, setHoverPrecisionFloor, setPulseSpeed, setPulseHeadSize, setPulseTailSize, setPulseWidth, setAccent, setShowShipDash, setPulseBrightness, setStarSizeScale, setRouteThickness } from '../utils/prefs';
+import { getPrefs, setGateGradientSpan, setHoverPrecisionFloor, setPulseSpeed, setPulseHeadSize, setPulseTailSize, setPulseWidth, setAccent, setShowShipDash, setPulseBrightness, setStarSizeScale, setRouteThickness, setShowSmartGateChevrons } from '../utils/prefs';
 
 interface DisplaySettingsPanelProps { onLayoutReset?: ()=>void }
 export const DisplaySettingsPanel: React.FC<DisplaySettingsPanelProps> = ({ onLayoutReset }) => {
@@ -13,6 +13,7 @@ export const DisplaySettingsPanel: React.FC<DisplaySettingsPanelProps> = ({ onLa
   const [pulseWidth, setPulseWidthState] = React.useState<number>(prefs.pulseWidth ?? 0.15);
   const [accent, setAccentState] = React.useState<'orange'|'blue'>(prefs.accent || 'orange');
   const [showShipDash, setShowShipDashState] = React.useState<boolean>(prefs.showShipDash !== false);
+  const [showSmartGateChevrons, setShowSmartGateChevronsState] = React.useState<boolean>(prefs.showSmartGateChevrons !== false);
   const [pulseBrightness, setPulseBrightnessState] = React.useState<number>(prefs.pulseBrightness ?? 1.0);
   const [starSizeScale, setStarSizeScaleState] = React.useState<number>(prefs.starSizeScale ?? 1.0);
   const [routeThickness, setRouteThicknessState] = React.useState<number>(prefs.routeThickness ?? 1.0);
@@ -33,12 +34,13 @@ export const DisplaySettingsPanel: React.FC<DisplaySettingsPanelProps> = ({ onLa
   setPulseBrightness(pulseBrightness);
     setStarSizeScale(starSizeScale);
     setRouteThickness(routeThickness);
+    setShowSmartGateChevrons(showSmartGateChevrons);
       // Fire custom event so App.tsx can listen & update uniforms / refs immediately
-  try { window.dispatchEvent(new CustomEvent('ef-display-settings-changed', { detail:{ gateSpan, hoverFloor, pulseSpeed, pulseHead, pulseTail, pulseWidth, accent, showShipDash, pulseBrightness, starSizeScale, routeThickness } })); } catch {/* ignore */}
+  try { window.dispatchEvent(new CustomEvent('ef-display-settings-changed', { detail:{ gateSpan, hoverFloor, pulseSpeed, pulseHead, pulseTail, pulseWidth, accent, showShipDash, pulseBrightness, starSizeScale, routeThickness, showSmartGateChevrons } })); } catch {/* ignore */}
     });
   };
 
-  React.useEffect(()=>{ scheduleWrite(); /* eslint-disable-next-line react-hooks/exhaustive-deps */}, [gateSpan, hoverFloor, pulseSpeed, pulseHead, pulseTail, pulseWidth, accent, showShipDash, pulseBrightness, starSizeScale, routeThickness]);
+  React.useEffect(()=>{ scheduleWrite(); /* eslint-disable-next-line react-hooks/exhaustive-deps */}, [gateSpan, hoverFloor, pulseSpeed, pulseHead, pulseTail, pulseWidth, accent, showShipDash, showSmartGateChevrons, pulseBrightness, starSizeScale, routeThickness]);
 
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:'12px', fontSize:12 }}>
@@ -57,7 +59,7 @@ export const DisplaySettingsPanel: React.FC<DisplaySettingsPanelProps> = ({ onLa
               setGateSpan(pct/100);
             }}
           />
-          <small style={{ opacity:0.7 }}>0% = disabled accent on neighboring gates. 100% = full accent across all connected gates.</small>
+          {/* Help text removed per request; rely on Help panel */}
         </label>
       </section>
       <section>
@@ -66,7 +68,15 @@ export const DisplaySettingsPanel: React.FC<DisplaySettingsPanelProps> = ({ onLa
           <input type="checkbox" checked={showShipDash} onChange={e=> setShowShipDashState(e.target.checked)} />
           <span>Show dashed pattern for ship jumps</span>
         </label>
-        <small style={{ opacity:0.7 }}>Uncheck to render ship jump segments as solid lines.</small>
+        {/* Help text removed */}
+      </section>
+      <section>
+        <h4 style={{ margin:'4px 0 6px' }}>Smart Gate Dash Pattern</h4>
+        <label style={{ display:'flex', alignItems:'center', gap:6 }}>
+          <input type="checkbox" checked={showSmartGateChevrons} onChange={e=> setShowSmartGateChevronsState(e.target.checked)} />
+          <span>Show distinct dash pattern on Smart Gate hops</span>
+        </label>
+        {/* Help text removed */}
       </section>
   {/* Ship jump dash animation controls removed (feature simplified to static pattern) */}
       <section>
@@ -91,7 +101,7 @@ export const DisplaySettingsPanel: React.FC<DisplaySettingsPanelProps> = ({ onLa
           <span>Pulse Width: {pulseWidth.toFixed(2)}</span>
           <input type="range" min={0.05} max={0.4} step={0.01} value={pulseWidth} onChange={e=> setPulseWidthState(parseFloat(e.target.value))} />
         </label>
-        <small style={{ opacity:0.7 }}>Customize traveling pulse highlight along routed gate edges.</small>
+        {/* Help text removed */}
       </section>
       <section>
         <h4 style={{ margin:'4px 0 6px' }}>Star Size</h4>
@@ -99,7 +109,7 @@ export const DisplaySettingsPanel: React.FC<DisplaySettingsPanelProps> = ({ onLa
           <span>Star Size Scale: {starSizeScale.toFixed(2)}x</span>
           <input type="range" min={0.5} max={1.5} step={0.05} value={starSizeScale} onChange={e=> setStarSizeScaleState(parseFloat(e.target.value))} />
         </label>
-        <small style={{ opacity:0.7 }}>Adjust rendering size of stars (visual only).</small>
+        {/* Help text removed */}
       </section>
       <section>
         <h4 style={{ margin:'4px 0 6px' }}>Route Thickness</h4>
@@ -107,7 +117,7 @@ export const DisplaySettingsPanel: React.FC<DisplaySettingsPanelProps> = ({ onLa
           <span>Thickness: {routeThickness.toFixed(2)}x</span>
           <input type="range" min={0.5} max={2.0} step={0.05} value={routeThickness} onChange={e=> setRouteThicknessState(parseFloat(e.target.value))} />
         </label>
-        <small style={{ opacity:0.7 }}>Scales base route pixel width window. Higher values improve visibility for presentations; lower values reduce visual dominance.</small>
+        {/* Help text removed */}
       </section>
       <section>
         <h4 style={{ margin:'4px 0 6px' }}>Accent Color</h4>

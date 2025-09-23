@@ -4,9 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-  "dev": "vite",
-  "dev:netlify": "netlify dev",
-  "build": "tsc -b && vite build && node scripts/copy-worker.cjs",
+    "dev": "vite",
+    "dev:netlify": "netlify dev",
+    "build": "tsc -b && vite build && node scripts/copy-worker.cjs",
     "deploy": "echo 'Cloudflare Pages deploy step (no-op)'",
     "typecheck": "tsc -b",
     "lint": "eslint .",
@@ -19,6 +19,9 @@
   "dependencies": {
     "@netlify/blobs": "^8.1.0",
     "@types/three": "^0.179.0",
+    "ef-map-root": "file:..",
+    "ethereum-cryptography": "^2.1.3",
+    "eve-frontier-map": "file:",
     "lucide-react": "^0.460.0",
     "lz-string": "^1.5.0",
     "qrcode": "^1.5.4",
