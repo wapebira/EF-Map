@@ -70,6 +70,11 @@ Older entries and legacy indexer details have been archived: [archive\decision-l
   - Pattern: `https://<branch-or-alias>.ef-map.pages.dev` (project `ef-map`).
 
 ## 2025-09-24 – Overlay folder-based map filtering + inline tribe note edit
+## 2025-09-24 – Production deploy: overlay hover parity + help panel updates
+- Goal: Promote overlay folder infrastructure (filtered feed + folder-scoped map halo rendering), tribe hover highlight parity, and expanded Help Panel documentation (tribe shared folder semantics, d…
+- Risk: low (UI event handlers + documentation text). Worker bundle already validated in preview; no persistence format changes.
+- Verification: `npm run build` ✅ (vite + copy-worker) | `wrangler pages deploy dist --project-name ef-map` ✅ (deployment id visible in CLI) | Smoke ✅ (open production domain: Help Panel shows new se…
+
 - Goal: Ensure new users (no personal folders yet) can still select and view all personal marks; previously the "All Personal" tree item appeared only after at least one folder existed, hiding marks …
 - Risk: low (UI-only conditional removal). No data or worker impact.
 - Gates: build ✅ preview ✅ (`overlay-all-personal-root-20` alias) manual smoke: add mark with zero folders → All Personal present & rings display.
