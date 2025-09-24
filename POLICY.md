@@ -1,5 +1,3 @@
-<!-- Mirror of root POLICY.md for static site serving. Keep in sync manually or via future sync script. -->
-
 # Tribe Marks & User-Generated Content Policy
 
 Effective: 2025-09-24
@@ -49,4 +47,3 @@ Fallback (public issues – avoid sensitive details): GitHub repository issues p
 
 ---
 Archived verbose draft retained at `docs/archive/policy/` for historical context.
-

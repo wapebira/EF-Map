@@ -102,6 +102,10 @@ Older entries and legacy indexer details have been archived: [archive\decision-l
 ## 2025-09-23 – Tribe mark sharing button
 - Goal: Allow promoting a personal mark into tribe shared marks directly from overlay.
 - Risk: medium (introduces mutate path usage from UI)
+## 2025-09-24 – Expose POLICY.md as Static Asset
+- Goal: Make `/POLICY.md` link in Help Panel load actual policy content instead of falling back to SPA root.
+- Risk: Low (static file only). Rollback: delete the public copy.
+- Gates: build ✅ (file present in dist) | deploy ✅ (prod deployment 29611507 serves POLICY.md) | smoke ✅ (direct fetch should return markdown, not index.html).
 - Gates: typecheck ✅ build ✅ smoke ✅
 - Goal: Ensure a tribe virtual folder reliably appears immediately after login when only `tribeId` (no slug/name) is present, and reduce ambiguity about why a folder might not show.
 - Risk: low (UI-only polling + read-only fetch; worker change narrows code path).
@@ -1161,3 +1165,7 @@ Older entries and legacy indexer details have been archived: [archive\decision-l
 - Goal: Align in-app Help Panel tribe marks documentation with POLICY.md draft (privacy distinctions, storage model, limits, content rules, reporting channel).
 - Risk: Low (UI text only; no functional code paths changed).
 - Gates: typecheck N/A (TS unaffected) | build PENDING | smoke PENDING (expected: Help panel loads; two subsections render; mailto link points to abuse@ef-map.com).
+## 2025-09-24 – Tribe Marks Policy Trim & Archive
+- Goal: Replace verbose draft policy with concise public-facing version (scope, storage, visibility, sanitization, prohibited content, enforcement/reporting, roadmap note, disclaimer, contact) and ar…
+- Risk: Low (static markdown only). Rollback: restore archived verbose file to root + public.
+- Gates: build ✅ (markdown asset only) | deploy PENDING | smoke PENDING (`/POLICY.md` returns trimmed content; Help Panel link intact).
