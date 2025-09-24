@@ -1669,6 +1669,45 @@ async function handleStats(url, env){
     currentOut = agg;
   }
 
+  // Self-heal: legacy 'current' may predate Smart Gate metrics; if sg_* missing but present in daily snapshots, backfill them.
+  try {
+    const needsHeal = !!currentOut && currentOut.counters && !(
+      'sg_route_any' in currentOut.counters ||
+      'sg_route_unrestricted' in currentOut.counters ||
+      'sg_route_authorized' in currentOut.counters ||
+      'sg_hops_sum' in (currentOut.sums||{})
+    );
+    if(needsHeal){
+      const heal = { sg_route_any:0, sg_route_unrestricted:0, sg_route_authorized:0, sg_hops_sum:0, sg_hops_count:0 };
+      for(const k of filteredAll){
+        try {
+          const dr = await env.EF_STATS.get(k); if(!dr) continue;
+          let txt = dr; if(txt.charCodeAt(0)===0xFEFF) txt = txt.slice(1);
+          const snap = JSON.parse(txt);
+          const c = snap.counters||{}; const s = snap.sums||{};
+          if(c.sg_route_any) heal.sg_route_any += Number(c.sg_route_any)||0;
+          if(c.sg_route_unrestricted) heal.sg_route_unrestricted += Number(c.sg_route_unrestricted)||0;
+          if(c.sg_route_authorized) heal.sg_route_authorized += Number(c.sg_route_authorized)||0;
+          if(s.sg_hops_sum) heal.sg_hops_sum += Number(s.sg_hops_sum)||0;
+          if(s.sg_hops_count) heal.sg_hops_count += Number(s.sg_hops_count)||0;
+        } catch {/* ignore individual parse */}
+      }
+      const added = (heal.sg_route_any + heal.sg_route_unrestricted + heal.sg_route_authorized + heal.sg_hops_sum + heal.sg_hops_count) > 0;
+      if(added){
+        currentOut.counters = currentOut.counters||{};
+        currentOut.sums = currentOut.sums||{};
+        if(!( 'sg_route_any' in currentOut.counters)) currentOut.counters.sg_route_any = heal.sg_route_any;
+        if(!( 'sg_route_unrestricted' in currentOut.counters)) currentOut.counters.sg_route_unrestricted = heal.sg_route_unrestricted;
+        if(!( 'sg_route_authorized' in currentOut.counters)) currentOut.counters.sg_route_authorized = heal.sg_route_authorized;
+        if(!( 'sg_hops_sum' in currentOut.sums)) currentOut.sums.sg_hops_sum = heal.sg_hops_sum;
+        if(!( 'sg_hops_count' in currentOut.sums)) currentOut.sums.sg_hops_count = heal.sg_hops_count;
+        currentOut.updatedAt = new Date().toISOString();
+        // Persist healed snapshot back to KV so subsequent reads are fast
+        try { await env.EF_STATS.put('current', JSON.stringify(currentOut)); } catch {/* ignore persist error */}
+      }
+    }
+  } catch {/* silent heal errors */}
+
   if(debug){
     return json({ current: currentOut, history, debug:{ mode:'list', requestedDays: histDays, foundDailyKeys: filteredAll, listError } });
   }

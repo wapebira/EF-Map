@@ -1,0 +1,16 @@
+.folder-modal-backdrop{position:fixed;inset:0;z-index:5100;background:rgba(6,8,14,0.68);backdrop-filter:blur(6px);display:flex;align-items:center;justify-content:center;padding:24px;font-family:var(--font-stack, 'Inter', 'Segoe UI', system-ui, sans-serif);} 
+.folder-modal{width:min(440px,92%);background:rgba(18,18,22,0.96);border:1px solid rgba(255,255,255,0.14);border-radius:18px;box-shadow:0 22px 58px -18px rgba(0,0,0,0.7),0 0 0 1px rgba(255,255,255,0.05);padding:26px 28px;color:#f2f5f9;display:flex;flex-direction:column;gap:12px;}
+.folder-modal h3{margin:0;font-size:18px;font-weight:600;letter-spacing:0.3px;color:#f7f9fb;}
+.folder-modal p{margin:0;font-size:13px;line-height:1.55;opacity:0.78;color:#d9dde7;}
+.folder-modal-form{display:flex;flex-direction:column;gap:14px;margin-top:6px;}
+.folder-modal input{background:#101217;border:1px solid rgba(255,255,255,0.18);color:#f6f8fc;border-radius:8px;padding:12px 14px;font-size:14px;letter-spacing:0.2px;transition:border 0.15s ease, box-shadow 0.15s ease;}
+.folder-modal input:focus{outline:none;border:1px solid var(--accent,#00aaff);box-shadow:0 0 0 3px rgba(0,170,255,0.22);}
+.folder-modal input:disabled{opacity:0.6;cursor:not-allowed;}
+.folder-modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:4px;}
+.folder-modal-actions button{background:#1f212a;color:#e4e7f0;border:1px solid rgba(255,255,255,0.14);padding:8px 16px;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer;transition:background 0.15s ease, transform 0.15s ease;}
+.folder-modal-actions button:hover{background:#272a35;transform:translateY(-1px);} 
+.folder-modal-actions button:disabled{opacity:0.55;cursor:not-allowed;transform:none;}
+.folder-modal-actions button[type=submit]{background:var(--accent,#00aaff);border-color:var(--accent,#00aaff);color:#0b131a;font-weight:600;box-shadow:0 8px 24px -10px rgba(0,170,255,0.6);} 
+.folder-modal-actions button[type=submit]:hover:not(:disabled){filter:brightness(1.06);} 
+.folder-modal-error{background:rgba(255,77,77,0.12);border:1px solid rgba(255,120,120,0.4);color:#ffb9b9;padding:8px 10px;border-radius:8px;font-size:12px;line-height:1.4;} 
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;} 

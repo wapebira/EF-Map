@@ -1790,6 +1790,43 @@ async function handleStats(url, env){
     if(latestTs>0) agg.updatedAt = new Date(latestTs).toISOString();
     currentObj = agg;
   }
+
+  // Self-heal for legacy 'current' snapshot missing Smart Gate metrics: backfill sg_* counters & sg_hops sums from daily rollups
+  try {
+    const needsHeal = !!currentObj && currentObj.counters && !(
+      'sg_route_any' in currentObj.counters ||
+      'sg_route_unrestricted' in currentObj.counters ||
+      'sg_route_authorized' in currentObj.counters ||
+      'sg_hops_sum' in (currentObj.sums||{})
+    );
+    if(needsHeal){
+      const heal = { sg_route_any:0, sg_route_unrestricted:0, sg_route_authorized:0, sg_hops_sum:0, sg_hops_count:0 };
+      for(const k of filteredAll){
+        try {
+          const dr = await env.EF_STATS.get(k); if(!dr) continue;
+          const snap = JSON.parse(dr);
+          const c = snap.counters||{}; const s = snap.sums||{};
+            if(c.sg_route_any) heal.sg_route_any += Number(c.sg_route_any)||0;
+            if(c.sg_route_unrestricted) heal.sg_route_unrestricted += Number(c.sg_route_unrestricted)||0;
+            if(c.sg_route_authorized) heal.sg_route_authorized += Number(c.sg_route_authorized)||0;
+            if(s.sg_hops_sum) heal.sg_hops_sum += Number(s.sg_hops_sum)||0;
+            if(s.sg_hops_count) heal.sg_hops_count += Number(s.sg_hops_count)||0;
+        } catch {/* ignore */}
+      }
+      const added = (heal.sg_route_any + heal.sg_route_unrestricted + heal.sg_route_authorized + heal.sg_hops_sum + heal.sg_hops_count) > 0;
+      if(added){
+        currentObj.counters = currentObj.counters||{};
+        currentObj.sums = currentObj.sums||{};
+        if(!('sg_route_any' in currentObj.counters)) currentObj.counters.sg_route_any = heal.sg_route_any;
+        if(!('sg_route_unrestricted' in currentObj.counters)) currentObj.counters.sg_route_unrestricted = heal.sg_route_unrestricted;
+        if(!('sg_route_authorized' in currentObj.counters)) currentObj.counters.sg_route_authorized = heal.sg_route_authorized;
+        if(!('sg_hops_sum' in currentObj.sums)) currentObj.sums.sg_hops_sum = heal.sg_hops_sum;
+        if(!('sg_hops_count' in currentObj.sums)) currentObj.sums.sg_hops_count = heal.sg_hops_count;
+        currentObj.updatedAt = new Date().toISOString();
+        try { await env.EF_STATS.put('current', JSON.stringify(currentObj)); } catch {/* ignore persist */}
+      }
+    }
+  } catch {/* silent */}
   if(debug){
     return json({ current: currentObj, history, debug:{ mode:'list', requestedDays: histDays, foundDailyKeys: filteredAll, listError: listErr } });
   }

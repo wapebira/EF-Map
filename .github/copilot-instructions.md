@@ -10,7 +10,15 @@ Purpose: This repo hosts (1) map data processing scripts (Python) for EVE Fronti
 5. Non-trivial decisions appended to `docs/decision-log.md` (≤10 lines each).
 6. Multi-day / migration tasks update `docs/archive/migration/MIGRATION_PLAN.md` & `docs/archive/migration/migration_status.json` before further code.
 
+For a quick refresher on standing guardrails, skim `AGENTS.md` alongside this document—they form the combined contract for agents working in this repo.
+
 If stuck: ask for "safer alternative" or "explain tradeoffs". Avoid giving line-by-line code; just describe desired outcome.
+
+### Model Workflow Expectations (GPT-5 Codex)
+- Begin each reply with a concise acknowledgement plus a high-level plan for the next actions.
+- Create and maintain a synchronized todo list via the provided tooling; keep exactly one item `in-progress` at a time and update statuses as you work.
+- Report progress as deltas rather than repeating unchanged plans; highlight what moved since the last update.
+- Run fast verification steps yourself when feasible (tests/build/lint) before reporting status.
 
 ## Architecture Overview
 - Root Python scripts + JSON assets generate / transform map data consumed by the web app. No runtime coupling – they are one‑off preprocessing utilities.
@@ -99,6 +107,7 @@ If user asks for broad refactor, first propose smallest path to accomplish user-
 - Build succeeds.
 - Smoke: map renders, orbit/pan/zoom, hover label, selection label, search works, no startup console errors.
 - Additional (if metrics): event appears in `usage-event.js` EVENT_MAP and Stats page (or noted intentionally hidden).
+- Run the relevant checks yourself whenever tooling is available. If a gate cannot be executed (e.g. missing dependency, platform constraint), call it out explicitly with the command you would have run and any fallback validation performed.
 
 ### Decision Log Template
 `## YYYY-MM-DD – <Title>`\
@@ -118,8 +127,10 @@ If user asks for broad refactor, first propose smallest path to accomplish user-
 ### Cloudflare Migration (State)
 Migration is complete. Cloudflare is primary; Netlify fallback is removed in client code. Remaining Netlify files are archival until you approve final purge. Avoid reintroducing multi-provider conditionals. For historical context, see `docs/archive/migration/`.
 
-### AI Output Style Shortcuts
-Assistant may label responses (plain text, no markup needed) at top with one of: `PATCH PROPOSAL`, `PHASE STATUS`, `RISK UPDATE`, `ROLLBACK ADVICE` for quick scanning.
+### Response Framing
+- Start with the purposeful preamble + plan outlined in the workflow expectations above; reserve additional labels for rare cases when they materially aid scanning.
+- Keep follow-up updates focused on what changed since the prior message (delta reporting).
+- Reference filenames and symbols with backticks for clarity.
 
 ### Cloudflare UI Setup (Reference)
 Environment is already provisioned. Prefer Wrangler CLI for all operations. If you need to reprovision, follow Cloudflare’s official docs; keep secrets out of the repo and set them via `wrangler pages secret put` when needed.
@@ -172,13 +183,19 @@ Environment is already provisioned. Prefer Wrangler CLI for all operations. If y
   - Grafana Utils (yesoreyeram.grafana) and Grafana (grafana.grafana-vscode)
 - Guidance: Proactively suggest using these when they improve ergonomics (e.g., browse Postgres via extension UI; author Grafana panels with JSON helpers; test HTTP endpoints with REST Client) and mention any setup assumptions if needed. Do not instruct manual installs unless the user requests more tools.
 
-## Cloudflare Platform & CLI Preference
+### Cloudflare Platform & CLI Preference
 The project is now fully operated on Cloudflare (Pages + Workers + KV). Operational preference: perform all feasible platform actions via CLI / API (Wrangler) instead of the Cloudflare dashboard UI.
 
 ### Assistant CLI Execution Policy (Explicit)
 This section codifies a hard requirement from the operator: the assistant MUST directly run every Cloudflare / Wrangler CLI command that does not require pasting or revealing a secret value. The operator will manually paste any secret when prompted (e.g., `wrangler pages secret put`). Do NOT ask the operator to run a command the assistant can execute. Do NOT instruct use of the Cloudflare web UI when an equivalent Wrangler command exists unless:
 - The Wrangler command genuinely lacks required functionality, AND
 - The limitation is stated clearly with a short justification.
+
+Quick checklist before issuing Cloudflare guidance:
+- Can I execute the command myself? If yes, run it and summarize the result.
+- Does it require a secret? Start the command and prompt the operator to paste the value locally.
+- After 3–5 related commands, provide a concise outcome summary (IDs, URLs, counts) before moving on.
+- If a failure occurs, retry once when transient and document the stderr plus next options if it persists.
 
 Operational Rules:
 1. Default to executing (not just printing) non-secret commands: deployments, listings, KV key reads/writes (safe sample data), D1 migrations, namespace inspection.

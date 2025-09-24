@@ -2,6 +2,12 @@
 
 Purpose: Provide persistent, high-signal context and guardrails for agent mode in this repository. VS Code will automatically ingest this file (1.104+). Keep it short and link out for depth.
 
+## Workflow primer (GPT-5 Codex)
+- Start every reply with a brief acknowledgement plus a high-level plan.
+- Manage work through the todo list tool with exactly one item `in-progress`; update statuses as soon as tasks start or finish.
+- Report status as deltas—highlight what changed since the last message instead of repeating full plans.
+- Run fast verification steps yourself when feasible and note any gates you couldn’t execute.
+
 ## Project quick facts
 - What: EVE Frontier interactive map + data tools
 - Frontend: `eve-frontier-map/` (React + TypeScript + Vite); served on Cloudflare Pages + Worker
@@ -19,12 +25,13 @@ Useful entry points:
 ## Agent operating rules (must follow)
 1) Prefer smallest safe change; don’t refactor broadly without explicit approval.
 2) Cloudflare-first. Do NOT reintroduce Netlify. Any persistence change must target the existing Cloudflare Worker + KV abstraction.
-3) CLI mandate for Cloudflare ops: When possible, run CLI commands yourself (Wrangler) and summarize results. Prompt user only for secret inputs. Never commit secrets. See `.github/copilot-instructions.md` → “Cloudflare Platform & CLI Preference”.
-4) Usage metrics: Only emit via `eve-frontier-map/src/utils/usage.ts` and whitelist server-side. Avoid double-counting.
-5) Workers & heavy compute: Keep algorithms in web workers; throttle progress ≤5Hz; respect cache invalidation rules in routing.
-6) Sensitive edits: Treat worker files (`*_worker.js`, `_worker.js`) and production config as sensitive; ask before structural changes.
-7) Database access: Use the VS Code Postgres extension (configured for the local Docker Postgres) for schema inspection and routine queries. Prefer this path over PowerShell `docker exec` to avoid nested quoting issues.
-8) Preview-only rule: Any website/Worker/API changes must be tested via Cloudflare Pages Preview deployments first; do not modify production (main) unless explicitly approved.
+3) Follow the GPT-5 Codex workflow: purposeful preamble + plan, synchronized todo list, and delta-style progress updates.
+4) CLI mandate for Cloudflare ops: When possible, run CLI commands yourself (Wrangler) and summarize results. Prompt user only for secret inputs. Never commit secrets. See `.github/copilot-instructions.md` → “Cloudflare Platform & CLI Preference”.
+5) Usage metrics: Only emit via `eve-frontier-map/src/utils/usage.ts` and whitelist server-side. Avoid double-counting.
+6) Workers & heavy compute: Keep algorithms in web workers; throttle progress ≤5Hz; respect cache invalidation rules in routing.
+7) Sensitive edits: Treat worker files (`*_worker.js`, `_worker.js`) and production config as sensitive; ask before structural changes.
+8) Database access: Use the VS Code Postgres extension (configured for the local Docker Postgres) for schema inspection and routine queries. Prefer this path over PowerShell `docker exec` to avoid nested quoting issues.
+9) Preview-only rule: Any website/Worker/API changes must be tested via Cloudflare Pages Preview deployments first; do not modify production (main) unless explicitly approved.
 
 ## Fast context to load on start
 - Read `.github/copilot-instructions.md` (source of truth for patterns & guardrails)
@@ -37,11 +44,14 @@ Useful entry points:
 - Cloudflare deploy preview: Build `eve-frontier-map`, deploy Pages preview, verify Worker endpoints (`/api/*`), no Netlify code added
 - Add a new metric: client emit in `usage.ts`, server whitelist in Worker, optional Stats page panel, run typecheck/build
 - Routing tweak: maintain identical path outputs unless explicitly requested; keep performance neutral or better
+- Build frontend locally: run the VS Code task **“shell: Build frontend”** (installs deps on first run) to ensure Vite build + Worker bundling succeed.
 
 ## Safety & boundaries
 - Never commit secrets; use env vars or `.env.example` for placeholders
 - Avoid large diffs (>150 LoC) or dependency adds without explicit approval
 - If you need to create data migrations or bulk KV ops, create small scripts under `tools/` with a DRY_RUN flag and concise logs
+
+Remember to append material decisions or behavioral changes to `docs/decision-log.md` using the template in `.github/copilot-instructions.md`.
 
 ## Links
 - Cinematic mode spec: `CINEMATIC_MODE_SPEC.md`

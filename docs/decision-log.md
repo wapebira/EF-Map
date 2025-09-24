@@ -69,6 +69,10 @@ Older entries and legacy indexer details have been archived: [archive\decision-l
 - Preview URLs
   - Pattern: `https://<branch-or-alias>.ef-map.pages.dev` (project `ef-map`).
 
+## 2025-09-24 – User Overlay Modal & Agent Workflow Docs
+- Goal: Replace browser prompt flows for overlay folder creation with an in-app modal, and align contributor guidance with enforced GPT-5 Codex workflow + Cloudflare CLI execution mandate.
+- Risk: Medium (new UI surface + instructions baseline). Modal tested in preview; documentation affects contributor behavior only.
+- Gates: npm run build ✅ | Preview deploy (`wrangler pages deploy dist --project-name ef-map --branch feature-systemselection`) ✅ | Manual smoke: create folder in overlay (modal validation + focus), …
 ## 2025-09-24 – SEO Static Pages & Sitemap
 - Goal: Add crawlable static marketing/content pages (FAQ, Features, About) + sitemap.xml and robots.txt pointing to sitemap to improve indexation for queries like "EVE Frontier map" & "Smart Gate ro…
 - Risk: low (static assets only; no runtime logic, KV, or worker changes). Rollback: delete added files; remove sitemap reference in robots.txt if needed.

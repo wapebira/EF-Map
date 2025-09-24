@@ -6,6 +6,7 @@ import { fetchTribeMarks, mutateWithRetry, type TribeDoc, type TribeOp } from '.
 import { useRef } from 'react';
 import { getPersonalFolders, addPersonalFolder, renamePersonalFolder, deletePersonalFolder, getEntryFolder, getFolderCounts, subscribeFolders, setDefaultAddFolderId, setEntryFolder, type PersonalFolder } from '../../utils/overlayFolders';
 import { publishFilteredOverlay } from '../../utils/overlayFilteredFeed';
+import FolderNameModal from './FolderNameModal';
 
 interface SortState { key: keyof UserOverlayEntry | 'systemName'; dir:1|-1; }
 const headerStyle: React.CSSProperties = { position:'sticky', top:0, background:'rgba(40,40,44,0.92)', cursor:'pointer', padding:'4px 6px', fontSize:11, fontWeight:600, zIndex:1, whiteSpace:'nowrap' };
@@ -62,6 +63,8 @@ export const UserOverlayPanel: React.FC<PanelProps> = ({ onAddMark, onSetDestina
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [lastClickedIndex, setLastClickedIndex] = useState<number|null>(null);
   const [legendDragColor, setLegendDragColor] = useState<string|null>(null);
+  const [folderModal, setFolderModal] = useState<null | { scope:'tribe'|'personal' }>(null);
+  const [folderModalError, setFolderModalError] = useState<string|null>(null);
   // Tribe note inline editing state
   const [editingTribeId, setEditingTribeId] = useState<string|null>(null);
   const [editingTribeNote, setEditingTribeNote] = useState('');
@@ -249,8 +252,65 @@ export const UserOverlayPanel: React.FC<PanelProps> = ({ onAddMark, onSetDestina
   const onExport = () => { const data = userOverlayStore.export(); const blob = new Blob([JSON.stringify(data,null,2)], { type:'application/json' }); const a=document.createElement('a'); a.download = `overlay_export_${new Date().toISOString().slice(0,10)}.json`; a.href = URL.createObjectURL(blob); a.click(); try { (window as any).__efOverlayExport?.(); } catch {} setTimeout(()=> URL.revokeObjectURL(a.href), 2000); };
   const onImport = (files:FileList|null)=> { if(!files||!files.length) return; const f=files[0]; const r=new FileReader(); r.onload=()=>{ try { const json=JSON.parse(String(r.result)); const res = userOverlayStore.import(json); const after = userOverlayStore.getEntries().length; if(res.added>0) { try { (window as any).__efOverlayImport?.(after); } catch {} } } catch(e){ console.warn('[overlay] import failed', e); } }; r.readAsText(f); };
   const clearAll = ()=> { if(!entries.length) return; if(confirm('Clear all overlay marks? This cannot be undone.')) userOverlayStore.clearAll(); };
+  const openFolderModal = (scope:'tribe'|'personal') => {
+    if(scope==='tribe' && (tribeBusy || tribeBusyRef.current)) return;
+    setFolderModal({ scope });
+    setFolderModalError(null);
+  };
+  const closeFolderModal = () => {
+    setFolderModal(null);
+    setFolderModalError(null);
+  };
+  const handleFolderSubmit = async (rawName: string): Promise<boolean> => {
+    const trimmed = rawName.trim();
+    if(!trimmed){
+      setFolderModalError('Enter a folder name.');
+      return false;
+    }
+    if(!folderModal) return false;
+    if(folderModal.scope === 'tribe'){
+      if(!tribeDoc || !tribeEtag){
+        setFolderModalError('Tribe data not ready yet.');
+        return false;
+      }
+      if(tribeBusy || tribeBusyRef.current){
+        setFolderModalError('Another tribe action is in progress. Try again shortly.');
+        return false;
+      }
+      const id = trimmed.toLowerCase().replace(/[^a-z0-9_-]/g,'').slice(0,24) || ('f'+Date.now().toString(36));
+      const op:TribeOp={ type:'add_folder', id, name: trimmed };
+      setTribeBusy(true); tribeBusyRef.current = true; setTribeErr(null);
+      try {
+        const { doc, etag } = await mutateWithRetry(tribeDoc.tribe, [op], tribeEtag, { allowPreview:true });
+        setTribeDoc(doc);
+        setTribeEtag(etag);
+        closeFolderModal();
+        return true;
+      } catch(e:any){
+        const rawMsg = String(e?.message || e || '');
+        setTribeErr(rawMsg);
+        const friendly = rawMsg && rawMsg !== '[object Object]' ? rawMsg : 'Unable to create folder.';
+        setFolderModalError(friendly);
+        return false;
+      } finally {
+        setTribeBusy(false);
+        tribeBusyRef.current = false;
+      }
+    } else {
+      const created = addPersonalFolder(trimmed);
+      if(created){
+        setFolders(getPersonalFolders());
+        closeFolderModal();
+        return true;
+      }
+      setFolderModalError('Folder already exists or name is invalid.');
+      return false;
+    }
+  };
   const header = (label:string, key:SortState['key'], style?:React.CSSProperties) => <th style={{ ...headerStyle, textAlign:'center', ...(style||{}) }} onClick={()=> toggleSort(key)}>{label} {sort.key===key? (sort.dir===1?'▲':'▼'):''}</th>;
+  const addFolderDisabled = activeFolderId.startsWith('tribe:') && tribeBusy;
   return (
+    <>
     <div style={{ width:'100%', height:'100%', display:'flex', flexDirection:'row', overflow:'hidden' }}>
       {/* Left Folder Pane */}
       <div
@@ -261,22 +321,8 @@ export const UserOverlayPanel: React.FC<PanelProps> = ({ onAddMark, onSetDestina
           <strong style={{ fontSize:12, letterSpacing:'.4px', opacity:0.9 }}>Folders</strong>
           <button
             style={{ ...rowBtnStyle, marginRight:0 }}
-            onClick={()=>{
-              if(activeFolderId.startsWith('tribe:')){
-                const name = prompt('New tribe folder name')?.trim(); if(!name) return;
-                if(!tribeDoc || !tribeEtag) return;
-                const id = name.toLowerCase().replace(/[^a-z0-9_-]/g,'').slice(0,24) || ('f'+Date.now().toString(36));
-                const op:TribeOp={ type:'add_folder', id, name };
-                setTribeBusy(true); setTribeErr(null);
-                mutateWithRetry(tribeDoc.tribe, [op], tribeEtag, { allowPreview:true })
-                  .then(({ doc, etag })=> { setTribeDoc(doc); setTribeEtag(etag); })
-                  .catch(e=> setTribeErr(String((e as any)?.message||e)))
-                  .finally(()=> setTribeBusy(false));
-              } else {
-                const name = prompt('New personal folder name')?.trim(); if(!name) return;
-                const f = addPersonalFolder(name); if(f){ setFolders(getPersonalFolders()); }
-              }
-            }}
+            onClick={()=> openFolderModal(activeFolderId.startsWith('tribe:')? 'tribe':'personal')}
+            disabled={addFolderDisabled}
             title={activeFolderId.startsWith('tribe:')? 'Add tribe folder':'Add personal folder'}
           >+</button>
         </div>
@@ -748,6 +794,17 @@ export const UserOverlayPanel: React.FC<PanelProps> = ({ onAddMark, onSetDestina
       </div>
       </div>
     </div>
+    {folderModal && (
+      <FolderNameModal
+        open={!!folderModal}
+        scope={folderModal.scope}
+        busy={folderModal.scope==='tribe'? tribeBusy : false}
+        error={folderModalError}
+        onCancel={closeFolderModal}
+        onSubmit={handleFolderSubmit}
+      />
+    )}
+    </>
   );
 };
 
