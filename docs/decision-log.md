@@ -1157,3 +1157,7 @@ Older entries and legacy indexer details have been archived: [archive\decision-l
 - Goal: Extend shared tribe marks to carry color (#rrggbb) and verification timestamp for parity with personal overlay features, including drag-to-recolor, verify, and delete actions. Simplify share …
 - Risk: Medium (adds new mutable fields + op to shared KV doc; concurrency model unchanged). Deterministic empty doc ETag preserved.
 - Gates: typecheck PENDING | build PENDING | smoke PENDING (expected: share to tribe retains color; tribe rows show color, verify adds timestamp, recolor via drag updates immediately, delete removes …
+## 2025-09-24 – Help Panel Tribe Marks Sections Update
+- Goal: Align in-app Help Panel tribe marks documentation with POLICY.md draft (privacy distinctions, storage model, limits, content rules, reporting channel).
+- Risk: Low (UI text only; no functional code paths changed).
+- Gates: typecheck N/A (TS unaffected) | build PENDING | smoke PENDING (expected: Help panel loads; two subsections render; mailto link points to abuse@ef-map.com).

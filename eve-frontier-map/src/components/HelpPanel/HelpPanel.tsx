@@ -165,7 +165,7 @@ const baseSections: SectionDef[] = [
         content: (
           <div>
             <p>When you click a system (or a region name in the Compare Regions table) a compact Region Stats window can appear showing a snapshot of metrics for that single region: system counts, gated vs isolated distribution, connectivity %, representative distance aggregates, jump estimates, planet totals and averages, and station presence. Tooltips on most labels provide precise definitions or formulas—hover (desktop) or long‑press/focus (touch) for details.</p>
-            <ul style={{ paddingLeft:'18px', margin:'6px 0' }}>
+            <ul style={{ paddingLeft:'18px', margin: '6px 0' }}>
               <li><strong>Purpose:</strong> Quick at‑a‑glance health & structure summary of the current highlighted region without leaving the map context.</li>
               <li><strong>Auto‑update:</strong> Selecting a system in a different region (or choosing a region via the comparison table) refreshes the snapshot instantly.</li>
               <li><strong>Complement to Highlight:</strong> Region highlight gives spatial outline; the stats window supplies quantitative context.</li>
@@ -790,7 +790,41 @@ const baseSections: SectionDef[] = [
             </ul>
           </div>
         )
-      }
+      },
+      {
+        id: 'overlay-tribe-privacy',
+        title: 'Tribe Marks – Data & Privacy',
+        content: (
+          <div>
+            <p><strong>Personal vs Tribe:</strong> Personal marks stay entirely in your browser (local only, never uploaded). Tribe marks are a shared tactical layer visible to currently authenticated members of your tribe and readable by the site operator (no end‑to‑end encryption yet).</p>
+            <ul style={{ paddingLeft:'18px', margin:'6px 0' }}>
+              <li><strong>Stored Fields:</strong> system id, color (#rrggbb), note (≤160 chars), title/derived label (≤60), folder id (if any), timestamps (created, updated, verified).</li>
+              <li><strong>Access Control:</strong> Server validates tribe membership (wallet + World API) on every request; clients cannot self‑assert another tribe.</li>
+              <li><strong>Sanitization:</strong> Control chars removed; over‑length trimmed; generic HTTP(S) & Discord invite links replaced with placeholders. Do not include secrets, PII, invites, or harassment—keep entries brief & tactical.</li>
+              <li><strong>Optimistic Concurrency:</strong> Concurrent edits auto‑retry; the last successfully merged change wins (no per‑field merge UI).</li>
+              <li><strong>Analytics:</strong> Only anonymous aggregate counters (e.g. share actions) are recorded—mark text itself is never sent to metrics.</li>
+            </ul>
+            <p style={{ fontSize:'12px', opacity:.85 }}>Policy draft covers roadmap (optional future encryption), prohibited content, and enforcement. Full details: <a href="/POLICY.md" target="_blank" rel="noopener noreferrer">Policy</a>. Report misuse or sensitive leakage: <a href="mailto:abuse@ef-map.com">abuse@ef-map.com</a> (include tribe id, approximate UTC time, and mark id or excerpt).</p>
+          </div>
+        )
+      },
+      {
+        id: 'overlay-tribe-limits',
+        title: 'Tribe Marks – Limits & Content Rules',
+        content: (
+          <div>
+            <p><strong>Limits:</strong> Up to 300 tribe marks total, 100 tribe folders, title ≤60 chars, note ≤160 chars. Sharing a personal mark to the tribe copies its color + note; removing from tribe requires deleting it there (no reverse sync). Moving a tribe mark to “No folder” returns it to the tribe root list.</p>
+            <ul style={{ paddingLeft:'18px', margin:'6px 0' }}>
+              <li><strong>Edits:</strong> Inline edits (note, color, folder, verify) are immediate optimistic updates; conflicts silently retry.</li>
+              <li><strong>Allowed Use:</strong> Short tactical annotations only (e.g. status, need scout, safe, hostile).</li>
+              <li><strong>Prohibited (summary):</strong> Secrets/keys, personal private details, threats/harassment, large pasted dumps, or anything outside normal in‑game coordination. See full policy for canonical wording.</li>
+              <li><strong>Enforcement:</strong> Operator may edit/remove violating entries; repeated misuse can revoke tribe overlay access.</li>
+              <li><strong>Aging & Verification:</strong> Verification timestamp indicates manual re‑check; aging slider is visual only (no data removal).</li>
+            </ul>
+            <p style={{ fontSize:'12px', opacity:.85 }}>Need clarification or to report an issue? <a href="mailto:abuse@ef-map.com">abuse@ef-map.com</a> – include tribe id and context. Detailed rules & roadmap: <a href="/POLICY.md" target="_blank" rel="noopener noreferrer">Policy</a>.</p>
+          </div>
+        )
+      },
     ]
   },
   {
@@ -803,7 +837,7 @@ const baseSections: SectionDef[] = [
         content: (
           <div>
             <p>Fine‑tune visual emphasis without committing to full Cinematic Mode. Controls here adjust core map clarity (star size scale), route readability (pulse brightness, dash visibility), and aesthetic intensity (pulse width separately controlled elsewhere). Changes apply immediately and persist between sessions.</p>
-            <ul style={{ paddingLeft:'18px', margin:'6px 0' }}>
+            <ul style={{ paddingLeft: '18px', margin: '6px 0' }}>
               <li><strong>Star Size Scale:</strong> Uniformly enlarges or shrinks rendered star sprites (helps legibility on high‑DPI or when filming).</li>
               <li><strong>Pulse Brightness:</strong> Scales the luminosity of the route pulse effect without altering its timing or width.</li>
               <li><strong>Dashed Ship Segments:</strong> Toggle static dash pattern for ship (non‑gate) jumps. Off = solid continuous ribbon for all segments.</li>
