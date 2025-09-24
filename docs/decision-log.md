@@ -69,6 +69,10 @@ Older entries and legacy indexer details have been archived: [archive\decision-l
 - Preview URLs
   - Pattern: `https://<branch-or-alias>.ef-map.pages.dev` (project `ef-map`).
 
+## 2025-09-24 – SEO Static Pages & Sitemap
+- Goal: Add crawlable static marketing/content pages (FAQ, Features, About) + sitemap.xml and robots.txt pointing to sitemap to improve indexation for queries like "EVE Frontier map" & "Smart Gate ro…
+- Risk: low (static assets only; no runtime logic, KV, or worker changes). Rollback: delete added files; remove sitemap reference in robots.txt if needed.
+- Gates: typecheck ✅ (unchanged TS) | build ✅ (vite) | smoke ✅ (files present in `dist/` after build; HTML contains correct canonical + meta; FAQ JSON-LD valid structure).
 ## 2025-09-24 – Overlay folder-based map filtering + inline tribe note edit
 ## 2025-09-24 – Production deploy: overlay hover parity + help panel updates
 - Goal: Promote overlay folder infrastructure (filtered feed + folder-scoped map halo rendering), tribe hover highlight parity, and expanded Help Panel documentation (tribe shared folder semantics, d…

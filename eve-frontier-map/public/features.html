@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>EF‑Map Features – EVE Frontier Map & Smart Gate Planner</title>
+  <meta name="description" content="Explore EF‑Map core features: interactive EVE Frontier star map, Smart Gate route optimization, region analysis, fast local database, collaborative tribe marks, and privacy‑respecting design." />
+  <link rel="canonical" href="https://ef-map.pages.dev/features" />
+  <meta name="robots" content="index,follow" />
+  <meta name="theme-color" content="#0b0f17" />
+  <meta property="og:type" content="article" />
+  <meta property="og:title" content="EF‑Map Features – EVE Frontier Map" />
+  <meta property="og:description" content="Interactive map, Smart Gate routing, region analysis, collaborative tribe marks, and rapid local performance." />
+  <meta property="og:image" content="https://ef-map.pages.dev/og-cover.png" />
+  <meta property="og:url" content="https://ef-map.pages.dev/features" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <style>
+    body { font-family: system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,sans-serif; margin:0; line-height:1.55; background:#0b0f17; color:#e4e9f1; }
+    header, footer { background:#111a27; padding:0.75rem 1.25rem; }
+    nav a { color:#8bc3ff; margin-right:1rem; text-decoration:none; font-weight:500; }
+    nav a:hover { text-decoration:underline; }
+    main { max-width:960px; margin:0 auto; padding:1.25rem 1.25rem 3rem; }
+    h1 { font-size:1.95rem; margin-top:0; letter-spacing:.5px; }
+    h2 { margin:1.8rem 0 .6rem; font-size:1.22rem; }
+    p { margin:.55rem 0 1rem; }
+    ul { padding-left:1.2rem; }
+    li { margin:.4rem 0; }
+    footer { font-size:.85rem; color:#b6c2d0; }
+    footer a { color:#9ecbff; }
+    a { color:#7ebeff; }
+    a:visited { color:#b5d4ff; }
+  </style>
+</head>
+<body>
+  <header>
+    <nav aria-label="Primary">
+      <a href="/">App</a>
+      <a href="/features" aria-current="page">Features</a>
+      <a href="/faq">FAQ</a>
+      <a href="/about">About</a>
+      <a href="/POLICY.md">Policy</a>
+    </nav>
+  </header>
+  <main>
+    <h1>EF‑Map Features</h1>
+    <p><strong>EF‑Map</strong> is a focused, performance‑first <em>EVE Frontier map</em> and Smart Gate route planning tool. It emphasizes clarity, speed, and data transparency while keeping friction low—no account or tracking scripts required.</p>
+
+    <h2>Interactive Star Map</h2>
+    <p>Pan, zoom, and select systems fluidly. Spatial indices and a compact rendering path keep interaction latency low even during dense navigation sequences.</p>
+
+    <h2>Smart Gate Route Optimization</h2>
+    <p>The pathfinder evaluates combined gate and standard jump possibilities, assigning fuel‑aware costs. You can pivot between fuel and jump count optimization for different tactical goals.</p>
+
+    <h2>Local SQLite Data Layer</h2>
+    <p>Core stellar data loads once into an in‑browser SQLite database powered by <code>sql.js</code>. Most queries (system lookup, region filtering, adjacency inspection) resolve instantly with no round trips.</p>
+
+    <h2>Collaborative Tribe Marks</h2>
+    <p>Shared text markers allow light coordination—staging points, warnings, logistics notes. They are stored in Cloudflare KV with guardrails: size limits, sanitization, and spam mitigation. Personal marks stay local to your device.</p>
+
+    <h2>Region & System Insights</h2>
+    <p>Context panels surface structured attributes enabling faster situational assessment. Future expansion targets richer comparative overlays and activity deltas.</p>
+
+    <h2>Privacy‑Respecting Telemetry</h2>
+    <p>Only aggregate, anonymous usage events (e.g., feature tap counts, session timing buckets) are collected. No personal identifiers, no third‑party analytics beacons.</p>
+
+    <h2>Resilient Performance Architecture</h2>
+    <p>Expensive calculations (routing heuristics, neighbor graph expansion) execute inside Web Workers with throttled progress messaging, preserving main‑thread responsiveness.</p>
+
+    <h2>Lightweight Deployment</h2>
+    <p>Hosted on Cloudflare Pages + Worker for minimal latency and edge‑cached static assets. A single unified Worker also handles share links, usage event aggregation, and future content endpoints.</p>
+
+    <h2>Upcoming Enhancements</h2>
+    <ul>
+      <li>Dynamic overlay filters (threat, logistics, density)</li>
+      <li>Smart Gate graph analytics & reliability signals</li>
+      <li>Optional exportable state snapshots</li>
+      <li>Accessibility refinements and keyboard navigation depth</li>
+      <li>Progressive performance trimming of bundle surface</li>
+    </ul>
+
+    <p>See the <a href="/faq">FAQ</a> for common usage questions or the <a href="/POLICY.md">policy</a> for mark rules. For historical or architectural context, in‑app panels provide contextual hints.</p>
+  </main>
+  <footer>
+    <p>EF‑Map – EVE Frontier Map & Smart Gate Route Planner • <a href="/features">Features</a> • <a href="/about">About</a> • <a href="/faq">FAQ</a> • <a href="/POLICY.md">Policy</a></p>
+  </footer>
+</body>
+</html>

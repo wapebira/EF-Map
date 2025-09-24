@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>EVE Frontier Map FAQ – Smart Gate Routing & Features</title>
+  <meta name="description" content="Frequently asked questions about the EVE Frontier interactive map (EF‑Map): Smart Gate routing, system search, tribe marks, privacy, performance, and roadmap." />
+  <link rel="canonical" href="https://ef-map.pages.dev/faq" />
+  <meta name="robots" content="index,follow" />
+  <meta name="theme-color" content="#0b0f17" />
+  <meta property="og:type" content="article" />
+  <meta property="og:title" content="EVE Frontier Map FAQ" />
+  <meta property="og:description" content="Answers about Smart Gate routing, tribe marks, data sources, privacy, and using EF‑Map efficiently." />
+  <meta property="og:url" content="https://ef-map.pages.dev/faq" />
+  <meta property="og:image" content="https://ef-map.pages.dev/og-cover.png" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <style>
+    body { font-family: system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,sans-serif; margin: 0; line-height: 1.55; background:#0b0f17; color:#e4e9f1; }
+    header, footer { background:#111a27; padding:0.75rem 1.25rem; }
+    nav a { color:#8bc3ff; margin-right:1rem; text-decoration:none; font-weight:500; }
+    nav a:hover { text-decoration:underline; }
+    main { max-width:960px; margin:0 auto; padding:1.25rem 1.25rem 3rem; }
+    h1 { font-size:1.95rem; margin-top:0; letter-spacing:.5px; }
+    h2 { margin:2rem 0 .6rem; font-size:1.15rem; }
+    p { margin:.5rem 0 1rem; }
+    code { background:#182532; padding:2px 5px; border-radius:4px; font-size:.9em; }
+    a { color:#7ebeff; }
+    a:visited { color:#b5d4ff; }
+    .q { margin-top:1.75rem; }
+    .q:first-of-type { margin-top:1rem; }
+    .answer-list { padding-left:1.2rem; }
+    footer { font-size:.85rem; color:#b6c2d0; }
+    footer a { color:#9ecbff; }
+  </style>
+  <!-- FAQ Structured Data -->
+  <script type="application/ld+json">{
+    "@context":"https://schema.org",
+    "@type":"FAQPage",
+    "mainEntity":[
+      {"@type":"Question","name":"What is EF‑Map?","acceptedAnswer":{"@type":"Answer","text":"EF‑Map is a fast, privacy‑respecting interactive EVE Frontier map and Smart Gate route planner. It lets you explore systems, plan optimized travel using Smart Gates, analyze regions, and collaborate via lightweight tribe marks."}},
+      {"@type":"Question","name":"How does Smart Gate routing work?","acceptedAnswer":{"@type":"Answer","text":"Routing weights gate jumps at zero cost (fuel mode) and treats ship jump distance as a cost, producing efficient multi‑hop paths that leverage connected Smart Gates when available."}},
+      {"@type":"Question","name":"How do I search for a system?","acceptedAnswer":{"@type":"Answer","text":"Use the search panel (magnifier icon) and type part of a system name. Results filter instantly; press Enter or click to center and select the system on the star map."}},
+      {"@type":"Question","name":"What are tribe marks and who can see them?","acceptedAnswer":{"@type":"Answer","text":"Tribe marks are shared tactical annotations stored in Cloudflare KV. Anyone using the app sees them (no login). Personal marks stay local to your browser only."}},
+      {"@type":"Question","name":"What data does EF‑Map store about me?","acceptedAnswer":{"@type":"Answer","text":"No personal identity is stored. Only anonymous aggregate usage events (e.g., feature counts, session buckets) and any shared tribe mark text you intentionally submit are persisted."}},
+      {"@type":"Question","name":"Can I remove or update a mistaken tribe mark?","acceptedAnswer":{"@type":"Answer","text":"Yes. Marks can be edited or cleared within defined size & rate limits. Abusive content may be sanitized or overridden automatically (links, large pastes)."}},
+      {"@type":"Question","name":"Why is the app so fast?","acceptedAnswer":{"@type":"Answer","text":"All heavy work (routing, spatial queries) runs client‑side or in web workers. A compact SQLite database (sql.js) is loaded once and queried locally—no round‑trip for routine interactions."}},
+      {"@type":"Question","name":"What comes next on the roadmap?","acceptedAnswer":{"@type":"Answer","text":"Upcoming ideas include richer filter overlays, optional web‑accessible snapshot exports, deeper Smart Gate analytics, and incremental performance + accessibility refinements."}}
+    ]
+  }</script>
+</head>
+<body>
+  <header>
+    <nav aria-label="Primary">
+      <a href="/">App</a>
+      <a href="/features">Features</a>
+      <a href="/faq" aria-current="page">FAQ</a>
+      <a href="/about">About</a>
+      <a href="/POLICY.md">Policy</a>
+    </nav>
+  </header>
+  <main>
+    <h1>EVE Frontier Map – FAQ</h1>
+    <p>This FAQ covers common questions about using the <strong>EF‑Map EVE Frontier map and Smart Gate route planner</strong>. All answers here reflect the current public version. For policy details see the <a href="/POLICY.md">Tribe Marks & Content Policy</a>.</p>
+
+    <section class="q" id="q1">
+      <h2>What is EF‑Map?</h2>
+      <p>EF‑Map is a fast, privacy‑respecting interactive EVE Frontier map and Smart Gate route planner. It lets you explore systems, plan optimized travel using Smart Gates, analyze regions, and collaborate using lightweight tribe marks that any player can view.</p>
+    </section>
+
+    <section class="q" id="q2">
+      <h2>How does Smart Gate routing work?</h2>
+      <p>The routing engine assigns zero fuel cost to valid Smart Gate jumps (when optimizing for fuel) and distance cost to ship jumps, letting you stitch efficient multi‑hop chains across connected gates. You can switch optimization modes for alternate path shapes.</p>
+    </section>
+
+    <section class="q" id="q3">
+      <h2>How do I search for a system?</h2>
+      <p>Open the search panel (magnifier icon) and start typing part of a system name. Results filter instantly. Press Enter or click a result to center and select it on the star map, where you can begin route planning or mark placement.</p>
+    </section>
+
+    <section class="q" id="q4">
+      <h2>What are tribe marks and who can see them?</h2>
+      <p>Tribe marks are shared tactical annotations stored in Cloudflare KV and visible to all users of the app. They support quick, low‑friction coordination. Personal marks remain only in your local browser storage and never leave your device.</p>
+    </section>
+
+    <section class="q" id="q5">
+      <h2>What data does EF‑Map store about me?</h2>
+      <p>No personal identity is collected. The app only stores anonymous aggregate usage metrics (e.g., feature usage counts and coarse session buckets) plus any shared tribe mark text you explicitly submit. See <a href="/POLICY.md">policy</a> for limits and sanitization rules.</p>
+    </section>
+
+    <section class="q" id="q6">
+      <h2>Can I remove or update a mistaken tribe mark?</h2>
+      <p>Yes. Previously posted marks can be edited or cleared within the defined length and rate limits. Obvious spam, large pasted logs, live external links, or invite codes are automatically reduced or stripped to preserve signal, safety, and brevity.</p>
+    </section>
+
+    <section class="q" id="q7">
+      <h2>Why is the app so fast?</h2>
+      <p>The heavy work—routing heuristics, neighbor lookups, spatial indexing—runs locally in web workers. The star data loads once into an in‑browser SQLite database (using <code>sql.js</code>). After that, queries and path computations happen without further network latency.</p>
+    </section>
+
+    <section class="q" id="q8">
+      <h2>What comes next on the roadmap?</h2>
+      <p>Planned enhancements include richer filtering and overlays, optional exportable snapshots, deeper Smart Gate analytics, ongoing performance tuning, accessibility refinements, and incremental scalability improvements. Feedback helps prioritize—feel free to open an issue on the project repository.</p>
+    </section>
+
+    <p>If your question is not answered here, you can usually infer behavior from in‑app panel hints. More structured documentation may appear later as features stabilize.</p>
+  </main>
+  <footer>
+    <p>EF‑Map – EVE Frontier Map & Smart Gate Route Planner • <a href="/features">Features</a> • <a href="/about">About</a> • <a href="/faq">FAQ</a> • <a href="/POLICY.md">Policy</a></p>
+  </footer>
+</body>
+</html>
