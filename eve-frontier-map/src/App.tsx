@@ -16,6 +16,7 @@ import { userOverlayStore } from './utils/userOverlay';
 import { OVERLAY_FEATURE_FLAG } from './utils/userOverlay.ts';
 import { UserOverlayRings } from './modules/UserOverlayRings';
 import AddOverlayMarkModal from './components/UserOverlay/AddOverlayMarkModal';
+import { getDefaultAddFolderId, setEntryFolder } from './utils/overlayFolders';
 import logo from './assets/logo/logo.png';
 import { openDbFromArrayBuffer } from "./lib/sql";
 import type { SystemRow, StargateRow, RegionRow, ConstellationRow } from "./types/db";
@@ -2933,6 +2934,19 @@ function App() {
             const optMode = (lastP2PParamsRef.current?.optimize) || 'fuel';
             (window as any).__efTrackP2PRouteMeta && (window as any).__efTrackP2PRouteMeta(algoUsed, optMode, hops, waypoints.length);
             (window as any).__efMarkFirstAction && (window as any).__efMarkFirstAction('p2p');
+            // Smart Gates analytics: if this multi-segment route used any SG pairs, emit per-mode counters and hop count
+            try {
+              const usedPairsArr = Array.from(usedSmartGatePairsGlobal);
+              if(usedPairsArr.length){
+                // Count SG hops present in the final path (pairs are unique by design here)
+                track({ type:'sg_hops', count: usedPairsArr.length });
+                const mode = smartGateMode as ('none'|'public'|'authorized'|undefined);
+                if(mode === 'public') track({ type:'sg_route_unrestricted' });
+                else if(mode === 'authorized') track({ type:'sg_route_authorized' });
+                // Aggregate any-mode adoption
+                track({ type:'sg_route_any' });
+              }
+            } catch { /* ignore sg analytics errors */ }
           } catch {}
         } catch {}
         if(fullPath.length && mapData){
@@ -5505,6 +5519,7 @@ function App() {
           systemId={addOverlaySystem.id}
           systemName={addOverlaySystem.name}
           onClose={()=> { setAddOverlayOpen(false); setAddOverlaySystem(null); }}
+          onAdded={(id)=>{ try { const fid = getDefaultAddFolderId(); if(fid) setEntryFolder(id, fid); } catch {} }}
         />
       )}
   <DonateCryptoModal open={cryptoModalOpen} onClose={()=> setCryptoModalOpen(false)} address="0xC1204805b018ec2Ad06e6119965134AfFa212C10" ensName="lacal.eth" />

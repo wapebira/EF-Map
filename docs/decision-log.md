@@ -1,8 +1,8 @@
-<!-- Curated on 2025-09-23. This log keeps entries relevant to: Primordium indexer (World API via Docker), Postgres, Grafana, Docker, and the Cloudflare-hosted website (KV stats/snapshots/overlays). Older/legacy D1 indexer & cron/decoder content moved to archive. -->
+<!-- Curated on 2025-09-24. This log keeps entries relevant to: Primordium indexer (World API via Docker), Postgres, Grafana, Docker, and the Cloudflare-hosted website (KV stats/snapshots/overlays). Older/legacy D1 indexer & cron/decoder content moved to archive. -->
 
 Older entries and legacy indexer details have been archived: [archive\decision-log\decision-log-legacy-2025-09-23.md](./archive/decision-log/decision-log-legacy-2025-09-23.md)
 
-## Current Environment Quick Reference (as of 2025-09-23)
+## Current Environment Quick Reference (as of 2025-09-24)
 - Hosting/runtime
   - Cloudflare Pages + Worker (Pages serves assets; `_worker.js` handles `/api/*`). Netlify code removed post-cutover.
   - Preview detection: hosts ending with `.pages.dev`; admin endpoints allow preview bypass with `?openPreview=1` when token is absent/mismatched.
@@ -46,7 +46,10 @@ Older entries and legacy indexer details have been archived: [archive\decision-l
   - /api/smart-gate-links
   - /api/stats
   - /api/system-overlays
+  - /api/tribe-marks
+  - /api/tribe-marks/mutate
   - /api/usage-event
+  - /api/usage-flush
   - /api/worldapi-stats
   - /api/worldapi-update
 - Caching (selected Cache-Control values)
@@ -66,6 +69,61 @@ Older entries and legacy indexer details have been archived: [archive\decision-l
 - Preview URLs
   - Pattern: `https://<branch-or-alias>.ef-map.pages.dev` (project `ef-map`).
 
+## 2025-09-24 – Overlay folder-based map filtering + inline tribe note edit
+- Goal: Ensure new users (no personal folders yet) can still select and view all personal marks; previously the "All Personal" tree item appeared only after at least one folder existed, hiding marks …
+- Risk: low (UI-only conditional removal). No data or worker impact.
+- Gates: build ✅ preview ✅ (`overlay-all-personal-root-20` alias) manual smoke: add mark with zero folders → All Personal present & rings display.
+
+- Goal: Make map render only the marks in the currently selected overlay folder (personal or tribe) for easier focus when managing many marks; and bring tribe mark note editing UX to parity with pers…
+- Risk: low (UI + client-only feed; server ops unchanged). Rendering risk minimal (ring rebuild path already idempotent; added subscription disposal).
+- Gates: typecheck ✅ | build ✅ (vite) | smoke (local) ✅ (folder switch updates rings immediately; tribe share copies note; inline edit saves & closes; empty folder hides rings).
+## 2025-09-24 – Help Panel overlay documentation refresh
+- Goal: Align in-app Help (User Overlay section) with new sidebar folders, folder-driven map halo filtering, tribe mark parity (inline note/color/verify), share-to-tribe color+note propagation, and a…
+- Risk: low (documentation text only; no behavioral impact).
+- Gates: typecheck ✅ | build ✅ (vite) | smoke ✅ (panel opens, updated text renders, no console warnings).
+## 2025-09-24 – Tribe hover highlight parity + help doc additions
+- Goal: Provide consistent soft-hover system highlight (ring color substitution without camera movement) for tribe marks matching existing personal mark hover behavior; clarify Help content for tribe…
+- Risk: low (UI event handlers + copy only). No persistence or worker changes.
+- Gates: build ✅ (vite) | typecheck ✅ | smoke ✅ (hover personal & tribe rows both trigger soft highlight; no console errors; Help panel displays new bullets).
+## 2025-09-23 – Overlay sidebar folder UX overhaul + accessibility pass
+- Goal: Replace cramped top-of-panel folder dropdown + scattered buttons with an Explorer‑style left sidebar supporting (a) tribe virtual root + subfolders, (b) personal folders, (c) drag & drop mark…
+- Risk: medium (UI restructuring, new keyboard handlers). No worker / schema / KV changes.
+- Verification: `npm run build` passes (tsc + vite). Manual smoke: (1) Sidebar renders; (2) Keyboard Enter/Space selects; (3) F2 triggers rename prompt; (4) Delete prompts removal; (5) Drag mark betw…
+## 2025-09-23 – Tribe folder auto-select + diagnostics
+## 2025-09-23 – Tribe folder name enrichment
+- Goal: Display the human-readable tribe name (when known elsewhere in the app) instead of a bare numeric id in the User Overlay tribe folder dropdown, even when the player profile only returns a `tr…
+- Risk: low (read-only fetch; graceful no-op on failure; does not alter persistence or API shape).
+- Gates: typecheck ✅ | build ✅ | preview deploy ✅ (alias with enrichment: latest `feature-safe-wip-2025-09-19-d08c`).
+## 2025-09-23 – Tribe mark sharing button
+- Goal: Allow promoting a personal mark into tribe shared marks directly from overlay.
+- Risk: medium (introduces mutate path usage from UI)
+- Gates: typecheck ✅ build ✅ smoke ✅
+- Goal: Ensure a tribe virtual folder reliably appears immediately after login when only `tribeId` (no slug/name) is present, and reduce ambiguity about why a folder might not show.
+- Risk: low (UI-only polling + read-only fetch; worker change narrows code path).
+- Gates: typecheck ✅ | build ✅ (panel compiles) | preview deploy pending | smoke pending (expect console log on preview host, tribe folder auto-selected, exclusion still applied to `clonebank86`).
+## 2025-09-23 – Player profile tribe deep scan heuristic
+- Goal: Ensure `/api/player-profile` reliably surfaces `tribeId`, `tribeSlug`, and `tribeName` for authenticated users so the unified overlay can render the tribe virtual folder (membership-gated; ex…
+- Risk: low (read-only transformation of fetched JSON; caching behavior unchanged; no schema or storage mutations).
+- Gates: typecheck ✅ | build ✅ (`npm run build` produced worker bundle; no TS errors) | deploy ✅ (Pages preview branch alias) | smoke ✅ (manual fetch returns tribe fields when present upstream; fallb…
+## 2025-09-23 – In-worker usage aggregation (Pages preview)
+- Goal: Reduce EF_STATS KV writes by batching usage events in-memory and flushing to hourly snapshots with daily rollup deltas; allow manual flush on preview.
+- Risk: medium (server behavior for stats only; preview-only feature flag enabled).
+- Gates: typecheck ✅ (tsc via app build) | build ✅ (vite + copy-worker) | smoke ✅ (preview endpoints work)
+- Preview: https://feature-usage-agg.ef-map.pages.dev
+## 2025-09-23 – Pages EVENT_MAP: Smart Gates metrics
+- Goal: Make Smart Gates analytics visible in Stats by adding sg_* events to the Cloudflare Pages worker EVENT_MAP (parity with root worker).
+- Risk: low (analytics whitelist only; no UI/algorithm changes).
+- Gates: typecheck ✅ (via app build) | build ✅ (vite) | deploy ✅ (Pages preview) | smoke ✅
+- Preview alias: https://feature-sg-stats.ef-map.pages.dev
+## 2025-09-23 – Pages production deploy: Smart Gates analytics live
+- Goal: Promote preview to production and confirm sg_* analytics are visible in production Stats.
+- Risk: low (analytics whitelist already validated in preview).
+- Gates: typecheck ✅ (tsc) | build ✅ (vite + copy-worker) | deploy ✅ (Pages) | smoke ✅
+## 2025-09-23 – Tribe shared marks API (server)
+- Goal: Provide shared per-tribe marks storage with simple foldering and optimistic concurrency.
+- Endpoints:
+- Risk: medium (new write path to KV with optimistic concurrency). Isolated endpoints; no impact on routing/UI yet.
+- Gates: typecheck N/A | build N/A | smoke pending (to be exercised from client UI or REST client).
 ## 2025-09-23 – Production deploy (ef-map): Smart Gates live
 - Goal: Deploy Smart Gates feature set (routing modes none/public/authorized, directional links, origin-side itemId hyperlinks, visuals parity, UI polish) to production after merging to `main`.
 - Risk: low (config fix only; worker/app behavior unchanged aside from binding resolution).
@@ -1090,3 +1148,7 @@ Older entries and legacy indexer details have been archived: [archive\decision-l
 - Preview: https://feature-safe-wip-2025-09-19.ef-map.pages.dev
 - Risk: low (UI controls only; rendering pipeline in place; no schema or worker changes).
 - Gates: typecheck ✅ | build ✅ | preview deploy ✅ | smoke: root 200 OK ✅, /api/stats JSON content-type ✅.
+## 2025-09-23 – Tribe Marks Color + Verification Fields
+- Goal: Extend shared tribe marks to carry color (#rrggbb) and verification timestamp for parity with personal overlay features, including drag-to-recolor, verify, and delete actions. Simplify share …
+- Risk: Medium (adds new mutable fields + op to shared KV doc; concurrency model unchanged). Deterministic empty doc ETag preserved.
+- Gates: typecheck PENDING | build PENDING | smoke PENDING (expected: share to tribe retains color; tribe rows show color, verify adds timestamp, recolor via drag updates immediately, delete removes …

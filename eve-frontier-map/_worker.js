@@ -129,6 +129,15 @@ const TABLE_ALLOWLIST_SET = new Set(Object.keys(TABLE_ALLOWLIST_META));
 // Full EVENT_MAP parity with Netlify usage-event.js for migration consistency.
 const EVENT_MAP = new Map(Object.entries({
   p2p_route: { counters: ['p2p_routes'] },
+  // Smart Gates routing analytics
+  // sg_route_unrestricted: routes that used at least one Smart Gate hop while in Public mode
+  // sg_route_authorized: routes that used at least one Smart Gate hop while in Authorized mode (per-session allowed set)
+  // sg_route_any: any route that used one or more Smart Gate hops (regardless of mode)
+  // sg_hops: sum/count of Smart Gate hops used per route (valueField 'count')
+  sg_route_unrestricted: { counters: ['sg_route_unrestricted'] },
+  sg_route_authorized: { counters: ['sg_route_authorized'] },
+  sg_route_any: { counters: ['sg_route_any'] },
+  sg_hops: { sum: { key: 'sg_hops_sum', countKey: 'sg_hops_count', valueField: 'count' } },
   scout_baseline: { counters: ['scout_baselines'], sum: { key: 'scout_collected_systems_sum', countKey: 'scout_collected_systems_count', valueField: 'collectedSystems' }, extraCounters: (b)=> b.planetFilterOn ? ['planet_filter_baselines'] : [] },
   scout_opt_start: { counters: ['scout_optimizations'] },
   scout_abandoned: { counters: ['scout_abandoned'] },
@@ -1659,7 +1668,9 @@ async function handleUsageEvent(req, env, ctx){
   const events = Array.isArray(body?.events) ? body.events : (body && typeof body.type==='string' ? [{ type: body.type, body }] : []);
   if(!events.length) return new Response('Missing events',{ status:400 });
   // Feature-flagged in-worker aggregation path
-  if(env.SERVER_AGGREGATE_USAGE === '1'){
+  // Preview bypass: on *.pages.dev, allow ?openPreview=1 to write directly to daily KV for reliable testing
+  let openPreview=false; try { const urlObj = new URL(req.url); const host = req.headers.get('host')||urlObj.host||''; const isPreviewHost = host.endsWith('.pages.dev'); openPreview = isPreviewHost && urlObj.searchParams.get('openPreview')==='1'; } catch { /* ignore */ }
+  if(env.SERVER_AGGREGATE_USAGE === '1' && !openPreview){
     const now = new Date();
     const hk = usageHourKey(now);
     let applied=false;

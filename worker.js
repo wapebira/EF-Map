@@ -18,6 +18,15 @@ const WORLD_API_BASE = 'https://world-api-stillness.live.tech.evefrontier.com';
 // EVENT_MAP as plain object (root worker references via property indexing)
 const EVENT_MAP = {
   p2p_route: { counters: ['p2p_routes'] },
+  // Smart Gates routing analytics
+  // sg_route_unrestricted: routes that used at least one Smart Gate hop while in Public mode
+  // sg_route_authorized: routes that used at least one Smart Gate hop while in Authorized mode (per-session allowed set)
+  // sg_route_any: any route that used one or more Smart Gate hops (regardless of mode)
+  // sg_hops: sum/count of Smart Gate hops used per route (valueField 'count')
+  sg_route_unrestricted: { counters: ['sg_route_unrestricted'] },
+  sg_route_authorized: { counters: ['sg_route_authorized'] },
+  sg_route_any: { counters: ['sg_route_any'] },
+  sg_hops: { sum: { key: 'sg_hops_sum', countKey: 'sg_hops_count', valueField: 'count' } },
   scout_baseline: { counters: ['scout_baselines'], sum: { key: 'scout_collected_systems_sum', countKey: 'scout_collected_systems_count', valueField: 'collectedSystems' }, extraCounters: (b)=> b.planetFilterOn ? ['planet_filter_baselines'] : [] },
   scout_opt_start: { counters: ['scout_optimizations'] },
   scout_abandoned: { counters: ['scout_abandoned'] },
@@ -107,6 +116,98 @@ const EVENT_MAP = {
   screen_res_bucket: { countersDynamic: (b)=> { const v=b.bucket; const allowed=['res_720p','res_1080p','res_1440p','res_4k_plus']; return allowed.includes(v)? [v]: []; } },
   cpu_cores_bucket: { countersDynamic: (b)=> { const v=b.bucket; const allowed=['cores_1_2','cores_3_4','cores_5_8','cores_9_12','cores_13_16','cores_17_plus']; return allowed.includes(v)? [v]: []; } }
 };
+
+// ---- In-worker usage aggregation (hourly buckets with periodic flush) ----
+// Feature flag: set env.SERVER_AGGREGATE_USAGE = '1' to enable.
+// Behavior:
+//  - Buffer events into in-memory hourly buckets (key: YYYY-MM-DDTHH)
+//  - Every ~15 minutes (or on manual flush), persist the full hourly snapshot to KV at
+//    EF_STATS/hourly/YYYY-MM-DDTHH.json and apply the delta vs existing hourly to the
+//    EF_STATS/daily/YYYY-MM-DD.json rollup to avoid double-counting across multiple flushes.
+const USAGE_AGG_STATE = {
+  buckets: new Map(), // hourKey -> { version, updatedAt, counters:{}, sums:{} }
+  nextFlushAt: 0,
+  flushing: false
+};
+function usageHourKey(d){
+  // Returns 'YYYY-MM-DDTHH' (UTC hour)
+  const iso = (d instanceof Date ? d : new Date(d)).toISOString();
+  return iso.slice(0,13); // up to hour
+}
+function usageDailyKeyFromHour(hourKey){
+  // hourKey like 'YYYY-MM-DDTHH' -> 'daily/YYYY-MM-DD.json'
+  const day = hourKey.slice(0,10);
+  return 'daily/' + day + '.json';
+}
+function usageHourlyKeyPath(hourKey){
+  // 'hourly/YYYY-MM-DDTHH.json'
+  return 'hourly/' + hourKey + '.json';
+}
+function usageEnsureBucket(hourKey){
+  let b = USAGE_AGG_STATE.buckets.get(hourKey);
+  if(!b){
+    b = { version: SCHEMA_VERSION, updatedAt: new Date().toISOString(), counters:{}, sums:{} };
+    USAGE_AGG_STATE.buckets.set(hourKey, b);
+  }
+  return b;
+}
+function usageApplyEvent(bucket, type, body){
+  // Reuse existing applyEvent logic on an isolated snapshot object
+  return applyEvent(bucket, type, body);
+}
+function usageComputeDelta(prevSnap, currSnap){
+  const delta = { counters:{}, sums:{} };
+  // counters
+  const keysC = new Set([ ...Object.keys(currSnap.counters||{}), ...Object.keys(prevSnap?.counters||{}) ]);
+  for(const k of keysC){
+    const now = Number(currSnap.counters?.[k]||0);
+    const was = Number(prevSnap?.counters?.[k]||0);
+    const d = now - was; if(d>0) delta.counters[k] = d;
+  }
+  // sums
+  const keysS = new Set([ ...Object.keys(currSnap.sums||{}), ...Object.keys(prevSnap?.sums||{}) ]);
+  for(const k of keysS){
+    const now = Number(currSnap.sums?.[k]||0);
+    const was = Number(prevSnap?.sums?.[k]||0);
+    const d = now - was; if(d>0) delta.sums[k] = d;
+  }
+  return delta;
+}
+async function usageFlush(env){
+  if(USAGE_AGG_STATE.flushing) return { skipped:true, reason:'already_flushing' };
+  USAGE_AGG_STATE.flushing = true;
+  const result = { flushed:0, errors:[] };
+  try {
+    const entries = Array.from(USAGE_AGG_STATE.buckets.entries());
+    for(const [hourKey, snap] of entries){
+      // Load existing hourly to compute delta safely (idempotent)
+      const hourlyPath = usageHourlyKeyPath(hourKey);
+      let prevHourly=null; try { const raw = await env.EF_STATS.get(hourlyPath); if(raw){ prevHourly = JSON.parse(raw.charCodeAt(0)===0xFEFF? raw.slice(1): raw); } } catch{/* ignore parse */}
+      // Persist current hourly snapshot
+      const hourlyPayload = JSON.stringify(snap);
+      try { await env.EF_STATS.put(hourlyPath, hourlyPayload); } catch(e){ result.errors.push('hourly_put:'+String(e).slice(0,120)); }
+      // Compute delta and apply to daily rollup
+      const delta = usageComputeDelta(prevHourly||{ counters:{}, sums:{} }, snap);
+      const dailyKey = usageDailyKeyFromHour(hourKey);
+      let daily = await loadSnapshot(env.EF_STATS, dailyKey); upgradeSnapshot(daily);
+      // apply delta into daily
+      for(const [ck, cv] of Object.entries(delta.counters)){
+        const n = Number(cv); if(!isFinite(n) || n<=0) continue; daily.counters[ck] = (daily.counters[ck]||0) + n;
+      }
+      for(const [sk, sv] of Object.entries(delta.sums)){
+        const n = Number(sv); if(!isFinite(n) || n<=0) continue; daily.sums[sk] = (daily.sums[sk]||0) + n;
+      }
+      daily.updatedAt = new Date().toISOString();
+      try { await env.EF_STATS.put(dailyKey, JSON.stringify(daily)); } catch(e){ result.errors.push('daily_put:'+String(e).slice(0,120)); }
+      result.flushed++;
+    }
+    // Schedule next flush window ~15 minutes ahead
+    USAGE_AGG_STATE.nextFlushAt = Date.now() + 15*60*1000;
+  } finally {
+    USAGE_AGG_STATE.flushing = false;
+  }
+  return result;
+}
 
 // ---- Auth helpers (SIWE-lite with HMAC; 7-day sliding window) ----
 const SESSION_COOKIE = 'EFSESS';
@@ -973,7 +1074,7 @@ async function handleWorldApiUpdate(req, env){
   return json({ status:'stored' });
 }
 
-// Session-gated profile proxy – returns { address, name, avatarUrl, characterId }
+// Session-gated profile proxy – returns { address, name, avatarUrl, characterId, tribeId?, tribeSlug?, tribeName? }
 // GET /api/player-profile
 // Uses EFSESS to derive address; proxies World API v2/smartcharacters/{address}
 async function handlePlayerProfile(req, env){
@@ -1011,11 +1112,17 @@ async function handlePlayerProfile(req, env){
   } catch(e){
     return json({ error:'worldapi_error', message:String(e) },502);
   }
-  // Normalize fields
+  // Normalize fields (include tribe info so UI can show tribe folder)
   const name = raw?.name || raw?.characterName || null;
   const avatarUrl = raw?.portraitPng || raw?.portraitUrl || raw?.image || null;
   const characterId = raw?.characterId || raw?.id || null;
-  const payload = { address: addr, name, avatarUrl, characterId };
+  // Extract tribe info from root or nested tribe object only (deep scan removed for simplicity).
+  let tribeId = (raw?.tribeId!=null)? String(raw.tribeId) : (raw?.tribe?.id!=null? String(raw.tribe.id): null);
+  let tribeSlug = (raw?.tribeSlug!=null)? String(raw.tribeSlug).toLowerCase() : (raw?.tribe?.slug? String(raw.tribe.slug).toLowerCase(): null);
+  let tribeName = (raw?.tribeName!=null)? String(raw.tribeName) : (raw?.tribe?.name? String(raw.tribe.name): null);
+  // If only a name exists, provide slug fallback for UI; if only id exists that's fine (UI falls back to id).
+  if(!tribeSlug && tribeName){ try { tribeSlug = String(tribeName).toLowerCase(); } catch{} }
+  const payload = { address: addr, name, avatarUrl, characterId, tribeId, tribeSlug, tribeName };
   const res = new Response(JSON.stringify(payload), { status:200, headers:{ 'Content-Type':'application/json', 'Cache-Control':'public, max-age: 60' } });
   try { if(!fresh){ await caches.default.put(cacheKey, res.clone()); } } catch {/* ignore */}
   return res;
@@ -1238,6 +1345,210 @@ async function handleSystemOverlays(url, req, env){
   return new Response(payload, { status:200, headers: hdrs });
 }
 
+// ---- Tribe Marks (shared, per-tribe) ----
+// Storage: EF_STATS KV under key prefix 'tribe_marks_v1/<tribeId>.json'
+// Access: requires authenticated session and membership in the requested tribe.
+// Excludes starter tribe 'clonebank86'.
+// Limits: max 300 items per tribe, max 100 folders, title<=60, note<=160, single-level folders.
+const TRIBE_MARKS_PREFIX = 'tribe_marks_v1/';
+const TRIBE_STARTER_EXCLUDE = 'clonebank86';
+const TRIBE_MARKS_LIMITS = { items: 300, folders: 100, title: 60, note: 160 };
+function sanitizeColor(c){
+  if(typeof c !== 'string') return '';
+  let v = c.trim();
+  // Allow #rgb or #rrggbb or bare hex; normalize to #rrggbb when possible
+  if(/^#[0-9a-fA-F]{3}$/.test(v)){
+    v = '#' + v.slice(1).split('').map(ch=> ch+ch).join('');
+  } else if(/^[0-9a-fA-F]{6}$/.test(v)){
+    v = '#' + v;
+  }
+  if(!/^#[0-9a-fA-F]{6}$/.test(v)) return '';
+  return v.toLowerCase();
+}
+function sanitizeText(s, max){
+  if(typeof s !== 'string') return '';
+  let t = s.trim();
+  // Collapse whitespace and remove control chars
+  t = t.replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ');
+  // Simple blocklist for links/invites
+  t = t.replace(/https?:\/\/[\w./?#%&=+-]+/gi, '[link removed]');
+  t = t.replace(/discord\.(gg|com)\/[\w-]+/gi, '[invite removed]');
+  if(max && t.length>max) t = t.slice(0, max);
+  return t;
+}
+async function sha256Hex(str){
+  const data = new TextEncoder().encode(str);
+  const buf = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+async function fetchUserTribe(req, env){
+  // Returns { address, tribeId, tribeSlug, tribeName } or null on failure
+  const ses = await parseAndVerifySession(req, env);
+  if(!ses.valid) return null;
+  const address = ses.payload.addr;
+  try {
+    const resp = await fetch(`${WORLD_API_BASE}/v2/smartcharacters/${address}`, { headers:{ 'accept':'application/json' } });
+    if(!resp.ok) return { address, tribeId:null, tribeSlug:null, tribeName:null };
+    const j = await resp.json();
+    // Flexible extraction: accept common fields if present
+    const tribeId = (j?.tribeId!=null)? String(j.tribeId) : (j?.tribe?.id!=null? String(j.tribe.id): null);
+    const tribeSlug = (j?.tribeSlug!=null)? String(j.tribeSlug).toLowerCase() : (j?.tribe?.slug? String(j.tribe.slug).toLowerCase(): null);
+    const tribeName = (j?.tribeName!=null)? String(j.tribeName) : (j?.tribe?.name? String(j.tribe.name): null);
+    return { address, tribeId, tribeSlug, tribeName };
+  } catch { return { address, tribeId:null, tribeSlug:null, tribeName:null }; }
+}
+function normalizeTribeParam(url){
+  const q = (url.searchParams.get('tribe') || url.searchParams.get('t') || '').trim();
+  if(!q) return '';
+  return q.toLowerCase();
+}
+function emptyMarksDoc(tribe){
+  // IMPORTANT: Use a deterministic updatedAt for empty (not-yet-persisted) docs so that
+  // consecutive GET + MUTATE sequences see identical payload -> identical ETag.
+  // Previously this used new Date().toISOString(), producing different ETags on each
+  // loadTribeMarks() call when the doc did not yet exist, causing perpetual 409
+  // etag_mismatch responses on the very first add_item attempt.
+  return { version:1, tribe, updatedAt: '1970-01-01T00:00:00.000Z', folders: [], items: [] };
+}
+function canAccessTribe(requested, user){
+  if(!requested || !user) return false;
+  if(requested === TRIBE_STARTER_EXCLUDE) return false;
+  // Accept match on slug or case-insensitive name; allow numeric/id exact match if provided
+  const reqLower = requested.toLowerCase();
+  if(user.tribeSlug && user.tribeSlug.toLowerCase() === reqLower) return true;
+  if(user.tribeName && user.tribeName.toLowerCase() === reqLower) return true;
+  if(user.tribeId && String(user.tribeId).toLowerCase() === reqLower) return true;
+  return false;
+}
+async function loadTribeMarks(kv, tribe){
+  const key = TRIBE_MARKS_PREFIX + tribe + '.json';
+  let raw = await kv.get(key);
+  if(!raw) return { key, doc: emptyMarksDoc(tribe), exists:false };
+  if(raw.charCodeAt(0)===0xFEFF) raw = raw.slice(1);
+  let doc=null; try { doc = JSON.parse(raw); } catch{ doc = emptyMarksDoc(tribe); }
+  if(!doc || typeof doc!=='object') doc = emptyMarksDoc(tribe);
+  if(!Array.isArray(doc.folders)) doc.folders = [];
+  if(!Array.isArray(doc.items)) doc.items = [];
+  doc.version = 1;
+  return { key, doc, exists:true };
+}
+function validateAndClampDoc(doc){
+  // Enforce limits and sanitize fields in-place
+  const lim = TRIBE_MARKS_LIMITS;
+  // Folders: id:string, name:string
+  const seenF = new Set(); const outF=[];
+  for(const f of (doc.folders||[])){
+    if(!f || typeof f!=='object') continue;
+    let id = String(f.id||'').trim().slice(0,32).replace(/[^A-Za-z0-9_-]/g,'');
+    if(!id || seenF.has(id)) continue; seenF.add(id);
+    let name = sanitizeText(f.name||'', lim.title);
+    outF.push({ id, name });
+    if(outF.length >= lim.folders) break;
+  }
+  doc.folders = outF;
+  // Items: id, systemId:number, title, note, folderId(optional)
+  const folderSet = new Set(outF.map(f=>f.id));
+  const seenI = new Set(); const outI=[];
+  for(const it of (doc.items||[])){
+    if(!it || typeof it!=='object') continue;
+    let id = String(it.id||'').trim().slice(0,36).replace(/[^A-Za-z0-9_-]/g,'');
+    if(!id || seenI.has(id)) continue; seenI.add(id);
+    const systemId = Number(it.systemId);
+    if(!Number.isFinite(systemId) || systemId<=0) continue;
+    const title = sanitizeText(it.title||'', lim.title);
+    const note = sanitizeText(it.note||'', lim.note);
+    const folderId = it.folderId && folderSet.has(String(it.folderId)) ? String(it.folderId) : null;
+    const createdAt = it.createdAt && typeof it.createdAt==='string' ? it.createdAt : new Date().toISOString();
+    const updatedAt = new Date().toISOString();
+    const authorHash = typeof it.authorHash==='string' ? it.authorHash : '';
+    const color = sanitizeColor(it.color||'');
+    const verifiedAt = it.verifiedAt && typeof it.verifiedAt==='string' ? it.verifiedAt : null;
+    outI.push({ id, systemId, title, note, folderId, createdAt, updatedAt, authorHash, color, verifiedAt });
+    if(outI.length >= lim.items) break;
+  }
+  doc.items = outI;
+  return doc;
+}
+function applyOps(doc, ops){
+  const lim = TRIBE_MARKS_LIMITS;
+  const folders = new Map(doc.folders.map(f=>[f.id,f]));
+  const items = new Map(doc.items.map(i=>[i.id,i]));
+  function addFolder(id, name){ if(folders.size>=lim.folders) return; if(!id) return; if(folders.has(id)) return; folders.set(id,{ id, name: sanitizeText(name||'', lim.title) }); }
+  function renameFolder(id,name){ const f=folders.get(id); if(f){ f.name = sanitizeText(name||'', lim.title); } }
+  function deleteFolder(id){ folders.delete(id); for(const it of items.values()){ if(it.folderId===id) it.folderId=null; } }
+  function addItem(obj){ if(items.size>=lim.items) return; const id = String(obj.id||'').trim().slice(0,36).replace(/[^A-Za-z0-9_-]/g,''); if(!id||items.has(id)) return; const systemId=Number(obj.systemId); if(!Number.isFinite(systemId)||systemId<=0) return; const title=sanitizeText(obj.title||'', lim.title); const note=sanitizeText(obj.note||'', lim.note); const folderId=obj.folderId && folders.has(String(obj.folderId))? String(obj.folderId): null; const now=new Date().toISOString(); const color = sanitizeColor(obj.color||''); items.set(id,{ id, systemId, title, note, folderId, createdAt: now, updatedAt: now, authorHash: String(obj.authorHash||''), color, verifiedAt: null }); }
+  function updateItem(obj){ const it=items.get(String(obj.id||'')); if(!it) return; if(obj.title!=null) it.title = sanitizeText(String(obj.title), lim.title); if(obj.note!=null) it.note = sanitizeText(String(obj.note), lim.note); if(obj.folderId!==undefined){ const fid = obj.folderId && folders.has(String(obj.folderId))? String(obj.folderId): null; it.folderId = fid; } if(obj.color!==undefined){ const c = sanitizeColor(obj.color||''); it.color = c; } it.updatedAt = new Date().toISOString(); }
+  function verifyItem(id){ const it = items.get(String(id||'')); if(!it) return; it.verifiedAt = new Date().toISOString(); it.updatedAt = new Date().toISOString(); }
+  function removeItem(id){ items.delete(String(id||'')); }
+  for(const op of (ops||[])){
+    if(!op||typeof op!=='object') continue;
+    const t = op.type;
+    if(t==='add_folder') addFolder(String(op.id||'').slice(0,32).replace(/[^A-Za-z0-9_-]/g,''), op.name||'');
+    else if(t==='rename_folder') renameFolder(String(op.id||''), op.name||'');
+    else if(t==='delete_folder') deleteFolder(String(op.id||''));
+    else if(t==='add_item') addItem(op);
+    else if(t==='update_item') updateItem(op);
+    else if(t==='remove_item') removeItem(op.id);
+    else if(t==='move_item'){ updateItem({ id: op.id, folderId: op.folderId }); }
+    else if(t==='verify_item'){ verifyItem(op.id); }
+  }
+  doc.folders = Array.from(folders.values());
+  doc.items = Array.from(items.values());
+  validateAndClampDoc(doc);
+  doc.updatedAt = new Date().toISOString();
+  return doc;
+}
+async function handleTribeMarksGet(req, env){
+  const url = new URL(req.url);
+  const tribe = normalizeTribeParam(url);
+  if(!tribe) return json({ error:'missing_tribe' },400);
+  if(tribe === TRIBE_STARTER_EXCLUDE) return json({ error:'tribe_excluded' },403);
+  // Membership check
+  const user = await fetchUserTribe(req, env);
+  const host = req.headers.get('host')||''; const isPreviewHost = host.endsWith('.pages.dev');
+  const bypass = isPreviewHost && url.searchParams.get('allowPreview')==='1';
+  if(!bypass && !canAccessTribe(tribe, user)) return json({ error:'forbidden' },403);
+  if(!env.EF_STATS) return json({ error:'EF_STATS KV not bound' },500);
+  const { key, doc } = await loadTribeMarks(env.EF_STATS, tribe);
+  const payload = JSON.stringify(doc);
+  const etag = await computeEtag(payload);
+  if(req.headers.get('If-None-Match') === etag){ return new Response(null, { status:304, headers:{ 'ETag': etag } }); }
+  const headers = new Headers({ 'Content-Type':'application/json', 'Cache-Control':'no-store', 'ETag': etag });
+  headers.set('X-Tribe-Key', key);
+  return new Response(payload, { status:200, headers });
+}
+async function handleTribeMarksMutate(req, env){
+  if(req.method !== 'POST') return json({ error:'Method Not Allowed' },405);
+  const url = new URL(req.url);
+  const tribe = normalizeTribeParam(url);
+  if(!tribe) return json({ error:'missing_tribe' },400);
+  if(tribe === TRIBE_STARTER_EXCLUDE) return json({ error:'tribe_excluded' },403);
+  const user = await fetchUserTribe(req, env);
+  const host = req.headers.get('host')||''; const isPreviewHost = host.endsWith('.pages.dev');
+  const bypass = isPreviewHost && url.searchParams.get('allowPreview')==='1';
+  if(!bypass && !canAccessTribe(tribe, user)) return json({ error:'forbidden' },403);
+  if(!env.EF_STATS) return json({ error:'EF_STATS KV not bound' },500);
+  let body={}; try { if(req.headers.get('content-type')?.includes('application/json')) body = await req.json(); } catch { return json({ error:'Invalid JSON' },400); }
+  const ops = Array.isArray(body?.ops) ? body.ops : null;
+  if(!ops || !ops.length) return json({ error:'missing_ops' },400);
+  const { key, doc } = await loadTribeMarks(env.EF_STATS, tribe);
+  const currentPayload = JSON.stringify(doc);
+  const currentEtag = await computeEtag(currentPayload);
+  const ifMatch = req.headers.get('If-Match');
+  if(!ifMatch) return json({ error:'precondition_required' },428);
+  if(ifMatch !== currentEtag) return new Response(JSON.stringify({ error:'etag_mismatch' }), { status:409, headers:{ 'Content-Type':'application/json', 'ETag': currentEtag } });
+  // Stamp authorHash for any add_item ops
+  const authorHash = user?.address ? (await sha256Hex(user.address)).slice(0,16) : '';
+  for(const op of ops){ if(op && op.type==='add_item' && !op.authorHash) op.authorHash = authorHash; }
+  const updated = applyOps({ ...doc }, ops);
+  const outText = JSON.stringify(updated);
+  await env.EF_STATS.put(key, outText);
+  const newEtag = await computeEtag(outText);
+  const headers = new Headers({ 'Content-Type':'application/json','Cache-Control':'no-store','ETag': newEtag });
+  headers.set('X-Tribe-Key', key);
+  return new Response(outText, { status:200, headers });
+}
+
 async function loadSnapshot(kv, key){
   const raw = await kv.get(key);
   if(!raw){
@@ -1257,11 +1568,32 @@ function applyEvent(snapshot, type, body){
   return true;
 }
 
-async function handleUsageEvent(req, env){
+async function handleUsageEvent(req, env, ctx){
   if(req.method !== 'POST') return new Response('Method Not Allowed',{ status:405 });
   let body={}; try { body = req.headers.get('content-type')?.includes('application/json') ? await req.json() : {}; } catch { return new Response('Invalid JSON',{ status:400 }); }
   const events = Array.isArray(body.events) ? body.events : (body.type ? [{ type: body.type, body: body.body || body }] : []);
   if(!events.length) return new Response('Missing events',{ status:400 });
+  const aggEnabled = (env.SERVER_AGGREGATE_USAGE||'').trim() === '1';
+  if(aggEnabled){
+    const now = new Date();
+    const hourKey = usageHourKey(now);
+    const bucket = usageEnsureBucket(hourKey);
+    let appliedAny=false;
+    for(const evt of events){
+      try {
+        if(typeof evt.type !== 'string') continue; if(!EVENT_MAP[evt.type]) continue;
+        const ok2 = usageApplyEvent(bucket, evt.type, evt.body||{});
+        if(ok2) appliedAny=true;
+      } catch{/* ignore single event errors */}
+    }
+    if(appliedAny){ bucket.updatedAt = new Date().toISOString(); }
+    // Schedule periodic flush if time has passed
+    if(Date.now() >= (USAGE_AGG_STATE.nextFlushAt||0)){
+      try { ctx?.waitUntil?.(usageFlush(env)); } catch{/* ignore */}
+    }
+    return new Response(null,{ status:204, headers:{ 'X-Usage-Mode':'aggregated', 'Cache-Control':'no-store' } });
+  }
+  // Fallback: legacy direct daily write
   const day = new Date().toISOString().slice(0,10);
   const dailyKey = 'daily/' + day + '.json';
   const daily = await loadSnapshot(env.EF_STATS, dailyKey); upgradeSnapshot(daily);
@@ -1271,12 +1603,12 @@ async function handleUsageEvent(req, env){
       if(typeof evt.type !== 'string') continue; if(!EVENT_MAP[evt.type]) continue;
       const ok2 = applyEvent(daily, evt.type, evt.body||{});
       if(ok2) appliedAny=true;
-    } catch(e){
+    } catch{
       try { applyEvent(daily, 'ingestion_error', {}); appliedAny=true; } catch{/* ignore */}
     }
   }
   if(appliedAny){ await env.EF_STATS.put(dailyKey, JSON.stringify(daily)); }
-  return new Response(null,{ status:204 });
+  return new Response(null,{ status:204, headers:{ 'X-Usage-Mode':'direct', 'Cache-Control':'no-store' } });
 }
 
 async function handleStats(url, env){
@@ -1412,7 +1744,17 @@ export default {
   // Cloudflare-only endpoints post-cutover (Netlify fallbacks removed)
   if(p === '/api/create-share') return handleCreateShare(req, env);
   if(p === '/api/get-share') return handleGetShare(url, env);
-  if(p === '/api/usage-event') return handleUsageEvent(req, env);
+  if(p === '/api/usage-event') return handleUsageEvent(req, env, ctx);
+  if(p === '/api/usage-flush'){
+    // Preview-only manual flush endpoint to force writing hourly buckets and updating daily rollups
+    const host = req.headers.get('host')||'';
+    const isPreview = host.endsWith('.pages.dev');
+    if(!isPreview) return json({ error:'forbidden' },403);
+    const enabled = (env.SERVER_AGGREGATE_USAGE||'').trim() === '1';
+    if(!enabled) return json({ status:'disabled' });
+    const res = await usageFlush(env);
+    return json({ status:'flushed', ...res });
+  }
   if(p === '/api/stats') return handleStats(url, env);
   if(p === '/api/worldapi-stats') return handleWorldApiStats(env, url);
   if(p === '/api/worldapi-update') return handleWorldApiUpdate(req, env);
@@ -1421,6 +1763,9 @@ export default {
   if(p === '/api/system-overlays') return handleSystemOverlays(url, req, env);
   if(p === '/api/gate-access') return handleGateAccess(url, req, env);
   if(p === '/api/player-profile') return handlePlayerProfile(req, env);
+  // Tribe shared marks
+  if(p === '/api/tribe-marks') return handleTribeMarksGet(req, env);
+  if(p === '/api/tribe-marks/mutate') return handleTribeMarksMutate(req, env);
   // Auth endpoints
   if(p === '/api/auth/nonce') return handleAuthNonce(req, env);
   if(p === '/api/auth/verify') return handleAuthVerify(req, env);
