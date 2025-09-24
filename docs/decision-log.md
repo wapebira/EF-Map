@@ -73,6 +73,10 @@ Older entries and legacy indexer details have been archived: [archive\decision-l
 - Goal: Add crawlable static marketing/content pages (FAQ, Features, About) + sitemap.xml and robots.txt pointing to sitemap to improve indexation for queries like "EVE Frontier map" & "Smart Gate ro…
 - Risk: low (static assets only; no runtime logic, KV, or worker changes). Rollback: delete added files; remove sitemap reference in robots.txt if needed.
 - Gates: typecheck ✅ (unchanged TS) | build ✅ (vite) | smoke ✅ (files present in `dist/` after build; HTML contains correct canonical + meta; FAQ JSON-LD valid structure).
+## 2025-09-24 – Canonical Domain Switch (pages.dev → ef-map.com)
+- Goal: Normalize all public-facing canonical, Open Graph, Twitter, JSON-LD SearchAction, sitemap, and robots.txt references from the Cloudflare Pages default subdomain (`ef-map.pages.dev`) to the cu…
+- Risk: low (static text replacements; no runtime code or worker logic changed). Rollback: revert commit to restore previous host references.
+- Gates: typecheck ✅ (no TS changes) | build ✅ (vite build after edits) | smoke ⏳ (post-deploy fetch of https://ef-map.com/sitemap.xml + page heads pending deploy).
 ## 2025-09-24 – Overlay folder-based map filtering + inline tribe note edit
 ## 2025-09-24 – Production deploy: overlay hover parity + help panel updates
 - Goal: Promote overlay folder infrastructure (filtered feed + folder-scoped map halo rendering), tribe hover highlight parity, and expanded Help Panel documentation (tribe shared folder semantics, d…

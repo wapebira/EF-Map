@@ -2,13 +2,56 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png">
     <link rel="icon" href="/favicon.ico" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>EF-Map</title>
+    <!-- Primary SEO -->
+    <title>EVE Frontier Map & Smart Gate Route Planner (EF‑Map)</title>
+    <meta name="description" content="Interactive EVE Frontier map with Smart Gate routing, region stats, system search, and shared tribe tactical marks. Fast, privacy‑respecting web tool." />
+  <link rel="canonical" href="https://ef-map.com/" />
+    <meta name="theme-color" content="#0b0f17" />
+    <meta name="keywords" content="EVE Frontier map, EVE Frontier route planner, Smart Gates, EF Map, EVE Frontier tools" />
+    
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://ef-map.com/" />
+    <meta property="og:title" content="EVE Frontier Map & Smart Gate Route Planner" />
+    <meta property="og:description" content="Plan routes with Smart Gates, analyze regions, share tribe tactical marks. Fast, privacy‑respecting EVE Frontier map." />
+  <meta property="og:image" content="https://ef-map.com/og-cover.png" />
+    
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="EVE Frontier Map & Smart Gate Route Planner" />
+    <meta name="twitter:description" content="Interactive EVE Frontier map with Smart Gate routing & region stats." />
+  <meta name="twitter:image" content="https://ef-map.com/og-cover.png" />
+    
+    <!-- JSON-LD: WebSite (Phase 1) -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      "name": "EF-Map – EVE Frontier Map & Smart Gate Planner",
+  "url": "https://ef-map.com/",
+      "potentialAction": {
+        "@type": "SearchAction",
+  "target": "https://ef-map.com/?q={search_term}",
+        "query-input": "required name=search_term"
+      }
+    }
+    </script>
+    
+    <!-- Accessibility: Provide initial descriptive text for crawlers & no-JS -->
+    <meta name="robots" content="index,follow" />
   </head>
   <body>
     <div id="root"></div>
+    <noscript>
+      <section>
+        <h1>EVE Frontier Map & Smart Gate Route Planner (EF‑Map)</h1>
+        <p>EF‑Map is an interactive EVE Frontier star map and Smart Gate route planner. Explore solarsystems, plan optimized routes, visualize Smart Gates, analyze region statistics, and share collaborative tribe marks. This lightweight, privacy‑respecting tool helps players navigate faster, coordinate tactics, and understand the evolving frontier.</p>
+      </section>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

@@ -1,27 +1,27 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
-    <loc>https://ef-map.pages.dev/</loc>
+  <loc>https://ef-map.com/</loc>
     <changefreq>daily</changefreq>
     <priority>0.9</priority>
   </url>
   <url>
-    <loc>https://ef-map.pages.dev/features</loc>
+  <loc>https://ef-map.com/features</loc>
     <changefreq>weekly</changefreq>
     <priority>0.6</priority>
   </url>
   <url>
-    <loc>https://ef-map.pages.dev/faq</loc>
+  <loc>https://ef-map.com/faq</loc>
     <changefreq>weekly</changefreq>
     <priority>0.6</priority>
   </url>
   <url>
-    <loc>https://ef-map.pages.dev/about</loc>
+  <loc>https://ef-map.com/about</loc>
     <changefreq>monthly</changefreq>
     <priority>0.4</priority>
   </url>
   <url>
-    <loc>https://ef-map.pages.dev/POLICY.md</loc>
+  <loc>https://ef-map.com/POLICY.md</loc>
     <changefreq>monthly</changefreq>
     <priority>0.2</priority>
   </url>

@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://ef-map.pages.dev/sitemap.xml
+Sitemap: https://ef-map.com/sitemap.xml
