@@ -5,6 +5,7 @@ Purpose: Publish smart gate links and access ACL snapshots to Cloudflare KV (EF_
 Keys written:
 - smart_gate_links_v1 → { updatedAt, links: [...] }
 - gate_access_snapshot_v1 → { updatedAt, rules: [...] }
+- structure_snapshot_v1 → { meta: {...}, systems: {...} }
 
 Env vars (container or local):
 - PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD – Postgres (Primordium reader)
@@ -19,6 +20,7 @@ Env vars (container or local):
 Local quick-checks:
 - node tools/snapshot-exporter/check_kv_freshness.js --namespace-id <id> --remote
 - node tools/kv_bump_snapshot_timestamp.js smart_gate_links_v1 (env EF_SNAPSHOTS_NAMESPACE_ID)
+- node tools/snapshot-exporter/structure_snapshot_exporter.js --dry-run --out tmp_structure_snapshot.json
 
 Docker Compose:
 - See tools/worldapi-cron/docker-compose.yml (service: snapshot-exporter). Copy .env.sample to .env and fill CF token + namespace id.# Snapshot Exporter (Smart Gate Links)
@@ -54,3 +56,24 @@ Provide these variables (e.g., via a `.env` next to the compose file):
 - Override SQL via `GATE_SOURCE_SQL` if your source table/view name differs; expected columns: `gate_id, origin_system_id, destination_system_id, linked, online, traversal_cost, last_change_at`. The exporter will also attempt to read per-schema `evefrontier__smart_gate_config` to resolve `appliedSystemId`; missing table simply yields `isPublic=true` for those gates.
 - Wrangler is installed in the container; secrets are passed as env vars (not embedded in the image).
 - Owner/tribe discovery uses a flexible column scan (gate id aliases like `object_id`, `assembly_id`, `deployable_id`; account aliases like `owner_wallet`, `admin_address`, etc.) plus deterministic account→character→tribe mapping and DLT membership. If specific gates still miss attribution, use `GATE_TRIBE_OVERRIDES` temporarily.
+
+## Structure snapshot exporter
+
+`structure_snapshot_exporter.js` builds the `structure_snapshot_v1` payload used by the upcoming structures overlay:
+
+- Aggregates smart assemblies by solar system, structure type, and deployable status.
+- Adds optional tribe breakdowns for UI filtering.
+- Stores compact metadata (`generatedAt`, `lastBlock`, total counts).
+
+Run locally:
+
+```
+node tools/snapshot-exporter/structure_snapshot_exporter.js --dry-run --out tmp_structure_snapshot.json
+```
+
+Environment overrides:
+
+- `STRUCTURE_SCHEMA` defaults to `0x7085f3e652987f656fb8dee5aa6592197bb75de8`.
+- `STRUCTURE_*` table overrides mirror the source tables listed in `docs/support/structure_snapshot_plan.md`.
+
+Current implementation performs a full rebuild each run; incremental mode will be layered on later once the snapshot is wired into cron.

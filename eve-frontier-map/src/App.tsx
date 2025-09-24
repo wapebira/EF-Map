@@ -15,6 +15,7 @@ import DisplaySettingsPanel from './components/DisplaySettingsPanel';
 import { userOverlayStore } from './utils/userOverlay';
 import { OVERLAY_FEATURE_FLAG } from './utils/userOverlay.ts';
 import { UserOverlayRings } from './modules/UserOverlayRings';
+import { SmartAssemblyHalos, type SmartAssemblyHaloDatum } from './modules/SmartAssemblyHalos';
 import AddOverlayMarkModal from './components/UserOverlay/AddOverlayMarkModal';
 import { getDefaultAddFolderId, setEntryFolder } from './utils/overlayFolders';
 import logo from './assets/logo/logo.png';
@@ -28,6 +29,7 @@ import PanelDrawer, { type PanelDrawerHandle } from './components/layout/PanelDr
 import RoutingPanel from './components/Routing/RoutingPanel';
 import CinematicPanel from './components/Cinematic/CinematicPanel';
 import PlanetLegendPanel from './components/Planets/PlanetLegendPanel';
+import SmartAssembliesPanel, { type SmartAssemblyTypeId } from './components/SmartAssemblies/SmartAssembliesPanel';
 import './components/layout/panelLayout.css';
 // Bring neutral input/select styles used by Routing to Smart Gates panel
 import './components/P2PRouting/P2PRouting.css';
@@ -163,6 +165,72 @@ type SqlValue = number | string | Uint8Array | null;
 const DEFAULT_STAR_COLOR = new THREE.Color(0xffffff);
 let SELECTED_STAR_COLOR = new THREE.Color(0xff4c26); // Will track accent (orange default)
 const REGION_OUTLINE_COLOR = new THREE.Color(0x00aaff); // Shared blue for region outlines
+
+const SMART_ASSEMBLY_TYPES = ['manufacturer', 'smart_hangar', 'NWN', 'SG', 'SSU', 'ST'] as const;
+type SmartAssemblyType = typeof SMART_ASSEMBLY_TYPES[number];
+type SmartAssemblyStatus = '2' | '3' | '4';
+const SMART_ASSEMBLY_STATUS_ORDER: SmartAssemblyStatus[] = ['3', '2', '4'];
+const SMART_ASSEMBLY_DEFAULT_STATUSES: Record<SmartAssemblyStatus, boolean> = {
+  '2': false,
+  '3': true,
+  '4': false,
+};
+const SMART_ASSEMBLY_DEFAULT_TYPES: Record<SmartAssemblyType, boolean> = {
+  manufacturer: true,
+  smart_hangar: true,
+  NWN: true,
+  SSU: true,
+  ST: true,
+  SG: true,
+};
+const SMART_ASSEMBLY_TYPE_LABELS: Record<SmartAssemblyType, string> = {
+  manufacturer: 'Manufacturers',
+  smart_hangar: 'Smart Hangars',
+  NWN: 'Network Nodes',
+  SSU: 'Smart Storage Units',
+  ST: 'Smart Turrets',
+  SG: 'Smart Gates',
+};
+const SMART_ASSEMBLY_STATUS_LABELS: Record<SmartAssemblyStatus, string> = {
+  '2': 'Anchored',
+  '3': 'Online',
+  '4': 'Destroyed',
+};
+const SMART_TRIBE_PALETTE: number[] = [
+  0x00d1ff,
+  0xff8a00,
+  0x9d7dff,
+  0x2ef0a9,
+  0xff5b90,
+  0xf2ff61,
+  0x45c6ff,
+  0xff69b4,
+  0x00ff00,
+  0xff3b30,
+];
+
+const SMART_TRIBE_OTHER_COLOR = 0xffb000;
+
+interface StructureSnapshotMeta {
+  generatedAt?: string;
+  updatedAt?: string;
+  totalAssemblies?: number;
+  statuses?: Record<string, number>;
+  types?: Record<string, number>;
+  [key: string]: any;
+}
+
+interface StructureSnapshotSystemEntry {
+  counts?: Partial<Record<SmartAssemblyType, Record<string, number>>>;
+  tribes?: Record<string, any>;
+}
+
+interface StructureSnapshot {
+  meta?: StructureSnapshotMeta;
+  systems?: Record<string, StructureSnapshotSystemEntry>;
+  updatedAt?: string;
+  status?: string;
+}
 
 function App() {
   // Lightweight standalone stats page rendering (no full router). If path is /stats, render stats component only.
@@ -654,15 +722,138 @@ function App() {
   const controlsRef = useRef<OrbitControls | null>(null);
   const starFieldRef = useRef<THREE.Points | null>(null);
   const overlayRingsRef = useRef<UserOverlayRings | null>(null); // persistent user overlay halos
+  const smartAssemblyHalosRef = useRef<SmartAssemblyHalos | null>(null);
+  const smartAssemblyPendingDataRef = useRef<{ entries: SmartAssemblyHaloDatum[]; maxTotal: number } | null>(null);
+  const [sceneReadyToken, setSceneReadyToken] = useState(0);
+  const mapDataRef = useRef<MapData | null>(null);
 
   // When mapData loads (or changes), inject into overlay rings so positions rebuild with correct coordinates
   useEffect(()=>{
+    mapDataRef.current = mapData;
     if(mapData && overlayRingsRef.current){ try { overlayRingsRef.current.setMapData(mapData); } catch(e){ console.warn('[overlay] setMapData failed', e); } }
   }, [mapData]);
   const hoverPointRef = useRef<THREE.Points | null>(null);
   const stargateLinesRef = useRef<THREE.LineSegments | null>(null);
   // Smart Gate overlay
+  const smartAssemblyAbortRef = useRef<AbortController | null>(null);
+  const [smartAssemblySnapshot, setSmartAssemblySnapshot] = useState<StructureSnapshot | null>(null);
+  const [smartAssemblyLoading, setSmartAssemblyLoading] = useState(false);
+  const [smartAssemblyError, setSmartAssemblyError] = useState<string | null>(null);
+  const [smartAssemblyOverlayEnabled, setSmartAssemblyOverlayEnabled] = useState<boolean>(()=>{
+    if (typeof window === 'undefined') return false;
+    try { return localStorage.getItem('efmap:structures:overlay') === '1'; } catch { return false; }
+  });
+  const smartAssemblyOverlayEnabledRef = useRef(smartAssemblyOverlayEnabled);
+  useEffect(()=>{ smartAssemblyOverlayEnabledRef.current = smartAssemblyOverlayEnabled; }, [smartAssemblyOverlayEnabled]);
+  const [smartAssemblyStatuses, setSmartAssemblyStatuses] = useState<Record<SmartAssemblyStatus, boolean>>(()=>{
+    const base = { ...SMART_ASSEMBLY_DEFAULT_STATUSES };
+    if (typeof window === 'undefined') return base;
+    try {
+      const raw = localStorage.getItem('efmap:structures:statuses');
+      if (!raw) return base;
+      const parsed = JSON.parse(raw);
+      const next = { ...base };
+      SMART_ASSEMBLY_STATUS_ORDER.forEach(status => {
+        if (parsed && Object.prototype.hasOwnProperty.call(parsed, status)) {
+          next[status] = !!parsed[status];
+        }
+      });
+      return next;
+    } catch {
+      return base;
+    }
+  });
+  const [smartAssemblyTypes, setSmartAssemblyTypes] = useState<Record<SmartAssemblyType, boolean>>(()=>{
+    const base = { ...SMART_ASSEMBLY_DEFAULT_TYPES };
+    if (typeof window === 'undefined') return base;
+    try {
+      const raw = localStorage.getItem('efmap:structures:types');
+      if (!raw) return base;
+      const parsed = JSON.parse(raw);
+      const next: Record<SmartAssemblyType, boolean> = { ...base };
+      SMART_ASSEMBLY_TYPES.forEach(type => {
+        if (parsed && Object.prototype.hasOwnProperty.call(parsed, type)) {
+          next[type] = !!parsed[type];
+        }
+      });
+      return next;
+    } catch {
+      return base;
+    }
+  });
+  const [smartAssemblyColorMode, setSmartAssemblyColorMode] = useState<'accent' | 'opposite' | 'tribe'>(()=>{
+    if (typeof window === 'undefined') return 'accent';
+    try {
+      const raw = String(localStorage.getItem('efmap:structures:colormode') || 'accent');
+      if (raw === 'opposite') return 'opposite';
+      if (raw === 'tribe' || raw === 'dominant-type') return 'tribe';
+      return 'accent';
+    } catch {
+      return 'accent';
+    }
+  });
+  const [smartAssemblyTribeLegend, setSmartAssemblyTribeLegend] = useState<Array<{ tribeId: string; color: number; count: number }>>([]);
+  const [smartAssemblyTribeFilters, setSmartAssemblyTribeFilters] = useState<string[]>([]);
+  const smartAssemblyTribeColorCacheRef = useRef<Map<string, THREE.Color>>(new Map());
+  const smartAssemblyTribeTopIdsRef = useRef<Set<string>>(new Set());
+  const smartAssemblyTribeLegendTopSet = useMemo(() => {
+    const set = new Set<string>();
+    smartAssemblyTribeLegend.forEach(item => {
+      if (item.tribeId && item.tribeId !== 'other') {
+        set.add(item.tribeId);
+      }
+    });
+    return set;
+  }, [smartAssemblyTribeLegend]);
+  const smartAssemblyTribeFilterSet = useMemo(() => new Set(smartAssemblyTribeFilters), [smartAssemblyTribeFilters]);
+  const fetchSmartAssemblies = useCallback(async (force = false) => {
+    if (smartAssemblyLoading && !force) return;
+    if (smartAssemblyAbortRef.current) {
+      smartAssemblyAbortRef.current.abort();
+    }
+    const controller = new AbortController();
+    smartAssemblyAbortRef.current = controller;
+    setSmartAssemblyLoading(true);
+    setSmartAssemblyError(null);
+    try {
+      const qs = force ? `?force=1&ts=${Date.now()}` : '';
+      const resp = await fetch(`/api/structure-snapshot${qs}`, {
+        cache: force ? 'no-store' : 'default',
+        signal: controller.signal,
+      });
+      if (!resp.ok) {
+        throw new Error(`HTTP ${resp.status}`);
+      }
+      const data = await resp.json();
+      if (data && data.status === 'empty') {
+        setSmartAssemblySnapshot(null);
+        setSmartAssemblyError('No Smart Assembly snapshot available yet.');
+      } else {
+        setSmartAssemblySnapshot(data as StructureSnapshot);
+      }
+    } catch (err: any) {
+      if (err?.name === 'AbortError') return;
+      setSmartAssemblyError(String(err?.message || err || 'Failed to load Smart Assemblies snapshot'));
+    } finally {
+      if (smartAssemblyAbortRef.current === controller) {
+        smartAssemblyAbortRef.current = null;
+      }
+      setSmartAssemblyLoading(false);
+    }
+  }, [smartAssemblyLoading]);
+  const handleSmartAssemblyOverlayChange = useCallback((enabled: boolean) => {
+    setSmartAssemblyOverlayEnabled(enabled);
+    if (enabled && !smartAssemblySnapshot && !smartAssemblyLoading) {
+      fetchSmartAssemblies(false);
+    }
+  }, [fetchSmartAssemblies, smartAssemblyLoading, smartAssemblySnapshot]);
+  const handleSmartAssemblyRefresh = useCallback((force: boolean = false) => {
+    fetchSmartAssemblies(force);
+  }, [fetchSmartAssemblies]);
+  const smartAssemblyAccentColor = useMemo(() => new THREE.Color(accentIsBlue ? 0x00aaff : 0xff4c26), [accentIsBlue]);
+  const smartAssemblyOppositeColor = useMemo(() => new THREE.Color(accentIsBlue ? 0xff4c26 : 0x00aaff), [accentIsBlue]);
   const smartGateLinesRef = useRef<THREE.LineSegments | null>(null);
+
   const [showSmartGates, setShowSmartGates] = useState<boolean>(()=>{ try { return localStorage.getItem('efmap:smartgates:show') === '1'; } catch { return false; } });
   // Phase 0: UI state for Smart Gates – color mode and viewing mode
   const [smartGateColorMode, setSmartGateColorMode] = useState<'accent'|'opposite'|'tribe'>(()=>{
@@ -854,6 +1045,16 @@ function App() {
 
   // Persist Smart Gates toggle
   useEffect(()=>{ try { localStorage.setItem('efmap:smartgates:show', showSmartGates ? '1':'0'); } catch {} }, [showSmartGates]);
+  useEffect(()=>{ if(typeof window === 'undefined') return; try { localStorage.setItem('efmap:structures:overlay', smartAssemblyOverlayEnabled ? '1':'0'); } catch {} }, [smartAssemblyOverlayEnabled]);
+  useEffect(()=>{ if(typeof window === 'undefined') return; try { localStorage.setItem('efmap:structures:statuses', JSON.stringify(smartAssemblyStatuses)); } catch {} }, [smartAssemblyStatuses]);
+  useEffect(()=>{ if(typeof window === 'undefined') return; try { localStorage.setItem('efmap:structures:types', JSON.stringify(smartAssemblyTypes)); } catch {} }, [smartAssemblyTypes]);
+  useEffect(()=>{ if(typeof window === 'undefined') return; try { localStorage.setItem('efmap:structures:colormode', smartAssemblyColorMode); } catch {} }, [smartAssemblyColorMode]);
+  useEffect(()=>{
+    if(smartAssemblyColorMode !== 'tribe'){
+      setSmartAssemblyTribeLegend([]);
+      setSmartAssemblyTribeFilters(prev => prev.length ? [] : prev);
+    }
+  }, [smartAssemblyColorMode]);
   // Persist Phase 0 Smart Gates UI preferences
   useEffect(()=>{ try { localStorage.setItem('efmap:smartgates:colormode', smartGateColorMode); } catch {} }, [smartGateColorMode]);
   useEffect(()=>{ try { localStorage.setItem('efmap:smartgates:viewmode', smartGateViewMode); } catch {} }, [smartGateViewMode]);
@@ -961,7 +1162,7 @@ function App() {
 
   // Legend state for tribe-based colouring (top-10 + Other bucket)
   const [smartGateTribeLegend, setSmartGateTribeLegend] = useState<Array<{ tribeId: string; color: number; count: number }>>([]);
-  const [smartGateTribeFilter, setSmartGateTribeFilter] = useState<string|null>(null); // tribeId or 'other'
+  const [smartGateTribeFilters, setSmartGateTribeFilters] = useState<string[]>([]);
   const [tribeNames, setTribeNames] = useState<Record<string,string>>({});
 
   // Helper to compute a tribe -> color mapping and legend from visible links (top-10 + Other)
@@ -985,34 +1186,19 @@ function App() {
     const sorted = Array.from(counts.entries()).sort((a,b)=> b[1]-a[1]);
     const top = sorted.filter(([tid])=> tid !== 'other').slice(0, 10);
     const topSet = new Set(top.map(([k])=> k));
-    // 10 visually distinct colors (good on dark):
-    // Note: positions 8 and 9 adjusted for visibility (hotpink, lime)
-    const palette = [
-      0xe6194b, // 1
-      0x3cb44b, // 2
-      0x0082c8, // 3
-      0xf58231, // 4
-      0x911eb4, // 5
-      0x46f0f0, // 6
-      0xf032e6, // 7
-      0xff69b4, // 8 (hot pink)
-      0x00ff00, // 9 (lime)
-      0xff3b30  // 10 (bright red variant for dark bg)
-    ];
     const colorMap = new Map<string, number>();
-    top.forEach(([tid], idx)=> colorMap.set(tid, palette[idx % palette.length]));
+    top.forEach(([tid], idx)=> colorMap.set(tid, SMART_TRIBE_PALETTE[idx % SMART_TRIBE_PALETTE.length]));
   const legend: Array<{ tribeId: string; color: number; count: number }> = top.map(([tid, cnt])=> ({ tribeId: tid || 'other', color: colorMap.get(tid)!, count: Math.round(cnt/2) }));
     // Compute 'Other' as everything not in topSet (including any explicit 'other' bucket if present)
   const otherCount = Array.from(counts.entries()).filter(([tid])=> !topSet.has(tid)).reduce((sum, [,c])=> sum + c, 0);
   // Use a distinct amber for 'Other' so it doesn't blend with stargate grey
-  const otherColor = 0xffb000;
-  if (otherCount > 0) { legend.push({ tribeId: 'other', color: otherColor, count: Math.round(otherCount/2) }); colorMap.set('other', otherColor); }
+    if (otherCount > 0) { legend.push({ tribeId: 'other', color: SMART_TRIBE_OTHER_COLOR, count: Math.round(otherCount/2) }); colorMap.set('other', SMART_TRIBE_OTHER_COLOR); }
     const resolveColor = (tidIn?: string, tribesIn?: string[]) => {
       const norm = (v:any) => { try { return String(v).trim(); } catch { return ''; } };
       let tid = norm(tidIn);
       if (!tid) tid = norm((Array.isArray(tribesIn) && tribesIn[0]) || '');
       if (!tid) tid = 'other';
-      return colorMap.get(tid) || otherColor;
+      return colorMap.get(tid) || SMART_TRIBE_OTHER_COLOR;
     };
     const getBucketId = (l:{ tribeId?:string; tribes?:string[] }) => {
       const norm = (v:any) => { try { return String(v).trim(); } catch { return ''; } };
@@ -1024,10 +1210,322 @@ function App() {
     return { legend, resolveColor, getBucketId, topIds: Array.from(topSet) };
   }, []);
 
+  const smartAssemblyFiltered = useMemo(() => {
+    const perSystem = new Map<number, {
+      total: number;
+      perType: Partial<Record<SmartAssemblyType, number>>;
+      dominantType: SmartAssemblyType | null;
+      tribeTotals: Map<string, number>;
+      dominantTribe: string | null;
+    }>();
+    const perTypeTotals: Partial<Record<SmartAssemblyType, number>> = {};
+    const tribeTotals = new Map<string, number>();
+    const selectedStatuses = SMART_ASSEMBLY_STATUS_ORDER.filter(status => smartAssemblyStatuses[status]);
+    const selectedTypes = SMART_ASSEMBLY_TYPES.filter(type => smartAssemblyTypes[type]);
+    if (!smartAssemblySnapshot || selectedStatuses.length === 0 || selectedTypes.length === 0) {
+      return { perSystem, perTypeTotals, total: 0, maxPerSystem: 0, selectedStatuses, selectedTypes, tribeTotals };
+    }
+    const systems = smartAssemblySnapshot.systems || {};
+    let total = 0;
+    let maxPerSystem = 0;
+    for (const [systemIdRaw, entry] of Object.entries(systems)) {
+      if (!entry) continue;
+      const counts = entry.counts || {};
+      const typeTotals: Partial<Record<SmartAssemblyType, number>> = {};
+      let systemTotal = 0;
+      let dominantType: SmartAssemblyType | null = null;
+      let dominantCount = 0;
+      const systemTribeTotals = new Map<string, number>();
+      for (const type of selectedTypes) {
+        const statusBuckets = counts[type] || {};
+        let typeTotal = 0;
+        for (const status of selectedStatuses) {
+          const raw = (statusBuckets as Record<string, any>)[status];
+          if (typeof raw === 'number') typeTotal += raw;
+          else if (raw != null) {
+            const num = Number(raw);
+            if (!Number.isNaN(num)) typeTotal += num;
+          }
+        }
+        if (typeTotal > 0) {
+          typeTotals[type] = typeTotal;
+          perTypeTotals[type] = (perTypeTotals[type] || 0) + typeTotal;
+          systemTotal += typeTotal;
+          if (typeTotal > dominantCount) {
+            dominantCount = typeTotal;
+            dominantType = type;
+          }
+        }
+      }
+      if (systemTotal > 0) {
+        const sysId = Number(systemIdRaw);
+        const tribeBuckets = entry.tribes || {};
+        let assigned = 0;
+        for (const [tribeIdRaw, tribePerType] of Object.entries(tribeBuckets)) {
+          if (!tribePerType) continue;
+          let tribeTotal = 0;
+          for (const type of selectedTypes) {
+            const perStatus = (tribePerType as Record<string, any>)[type] || {};
+            for (const status of selectedStatuses) {
+              const raw = (perStatus as Record<string, any>)[status];
+              let num = 0;
+              if (typeof raw === 'number') num = raw;
+              else if (raw != null) {
+                const val = Number(raw);
+                if (!Number.isNaN(val)) num = val;
+              }
+              if (num > 0) tribeTotal += num;
+            }
+          }
+          if (tribeTotal > 0) {
+            const tid = (()=>{
+              try {
+                const t = String(tribeIdRaw).trim();
+                return t.length ? t : 'other';
+              } catch {
+                return 'other';
+              }
+            })();
+            const prev = systemTribeTotals.get(tid) || 0;
+            systemTribeTotals.set(tid, prev + tribeTotal);
+            assigned += tribeTotal;
+          }
+        }
+        if (systemTotal > assigned) {
+          const extra = systemTotal - assigned;
+          systemTribeTotals.set('other', (systemTribeTotals.get('other') || 0) + extra);
+        }
+        let dominantTribe: string | null = null;
+        let dominantTribeCount = 0;
+        systemTribeTotals.forEach((count, tribeId) => {
+          if (count > dominantTribeCount) {
+            dominantTribe = tribeId;
+            dominantTribeCount = count;
+          }
+        });
+        systemTribeTotals.forEach((count, tribeId) => {
+          tribeTotals.set(tribeId, (tribeTotals.get(tribeId) || 0) + count);
+        });
+        perSystem.set(sysId, { total: systemTotal, perType: typeTotals, dominantType, tribeTotals: systemTribeTotals, dominantTribe });
+        total += systemTotal;
+        if (systemTotal > maxPerSystem) maxPerSystem = systemTotal;
+      }
+    }
+    return { perSystem, perTypeTotals, total, maxPerSystem, selectedStatuses, selectedTypes, tribeTotals };
+  }, [smartAssemblySnapshot, smartAssemblyStatuses, smartAssemblyTypes]);
+
+  useEffect(() => {
+    const colorCache = smartAssemblyTribeColorCacheRef.current;
+    if (smartAssemblyColorMode !== 'tribe') {
+      colorCache.clear();
+      colorCache.set('other', new THREE.Color(SMART_TRIBE_OTHER_COLOR));
+      if (smartAssemblyTribeLegend.length > 0) setSmartAssemblyTribeLegend([]);
+      if (smartAssemblyTribeFilters.length > 0) setSmartAssemblyTribeFilters([]);
+      smartAssemblyTribeTopIdsRef.current = new Set();
+      return;
+    }
+
+    const totals = smartAssemblyFiltered.tribeTotals;
+    if (!totals || totals.size === 0) {
+      colorCache.clear();
+      colorCache.set('other', new THREE.Color(SMART_TRIBE_OTHER_COLOR));
+      if (smartAssemblyTribeLegend.length > 0) setSmartAssemblyTribeLegend([]);
+      if (smartAssemblyTribeFilters.length > 0) setSmartAssemblyTribeFilters([]);
+      smartAssemblyTribeTopIdsRef.current = new Set();
+      return;
+    }
+
+    const entries = Array.from(totals.entries()).filter(([, count]) => count > 0);
+    if (entries.length === 0) {
+      colorCache.clear();
+      colorCache.set('other', new THREE.Color(SMART_TRIBE_OTHER_COLOR));
+      if (smartAssemblyTribeLegend.length > 0) setSmartAssemblyTribeLegend([]);
+      if (smartAssemblyTribeFilters.length > 0) setSmartAssemblyTribeFilters([]);
+      smartAssemblyTribeTopIdsRef.current = new Set();
+      return;
+    }
+
+    entries.sort((a, b) => b[1] - a[1]);
+    const top = entries.filter(([tid]) => tid !== 'other').slice(0, 10);
+    const topSet = new Set(top.map(([tid]) => tid));
+
+    colorCache.clear();
+    const legend: Array<{ tribeId: string; color: number; count: number }> = [];
+
+    top.forEach(([tid, count], idx) => {
+      const hex = SMART_TRIBE_PALETTE[idx % SMART_TRIBE_PALETTE.length];
+      colorCache.set(tid, new THREE.Color(hex));
+      legend.push({ tribeId: tid, color: hex, count: Math.round(count) });
+    });
+
+    let otherCount = 0;
+    for (const [tid, count] of entries) {
+      if (!topSet.has(tid)) otherCount += count;
+    }
+    colorCache.set('other', new THREE.Color(SMART_TRIBE_OTHER_COLOR));
+    if (otherCount > 0) {
+      legend.push({ tribeId: 'other', color: SMART_TRIBE_OTHER_COLOR, count: Math.round(otherCount) });
+    }
+
+    smartAssemblyTribeTopIdsRef.current = topSet;
+
+    const sameLength = smartAssemblyTribeLegend.length === legend.length;
+    const sameEntries = sameLength && legend.every((item, idx) => {
+      const current = smartAssemblyTribeLegend[idx];
+      return current && current.tribeId === item.tribeId && current.color === item.color && current.count === item.count;
+    });
+    if (!sameEntries) {
+      setSmartAssemblyTribeLegend(legend);
+    }
+
+    if (smartAssemblyTribeFilters.length > 0) {
+      const validIds = new Set(legend.map(item => item.tribeId));
+      const nextFilters = smartAssemblyTribeFilters.filter(id => validIds.has(id));
+      if (nextFilters.length !== smartAssemblyTribeFilters.length) {
+        setSmartAssemblyTribeFilters(nextFilters);
+      }
+    }
+  }, [smartAssemblyColorMode, smartAssemblyFiltered, smartAssemblyTribeLegend, smartAssemblyTribeFilters]);
+
+  const smartAssemblyMeta = smartAssemblySnapshot?.meta || null;
+  const smartAssemblyLastUpdatedIso = smartAssemblyMeta?.generatedAt || smartAssemblyMeta?.updatedAt || smartAssemblySnapshot?.updatedAt || null;
+  const smartAssemblyStatusOptions = useMemo(() => (
+    SMART_ASSEMBLY_STATUS_ORDER.map(status => ({
+      id: status,
+      label: SMART_ASSEMBLY_STATUS_LABELS[status],
+      active: !!smartAssemblyStatuses[status],
+      total: smartAssemblyMeta?.statuses ? smartAssemblyMeta.statuses[status] ?? null : null,
+    }))
+  ), [smartAssemblyStatuses, smartAssemblyMeta]);
+  const smartAssemblyTypeOptions = useMemo(() => (
+    SMART_ASSEMBLY_TYPES.map(type => ({
+      id: type,
+      label: SMART_ASSEMBLY_TYPE_LABELS[type],
+      active: !!smartAssemblyTypes[type],
+      total: smartAssemblyMeta?.types ? smartAssemblyMeta.types[type] ?? null : null,
+    }))
+  ), [smartAssemblyTypes, smartAssemblyMeta]);
+
+  const smartAssemblyDisplayTotals = useMemo(() => {
+    const perTypeTotals: Partial<Record<SmartAssemblyType, number>> = {};
+    let total = 0;
+    let systems = 0;
+    smartAssemblyFiltered.perSystem.forEach((value) => {
+      if (!value || value.total <= 0) return;
+      if (smartAssemblyColorMode === 'tribe' && smartAssemblyTribeFilters.length > 0) {
+        let bucketId = value.dominantTribe || 'other';
+        if (bucketId !== 'other' && !smartAssemblyTribeLegendTopSet.has(bucketId)) {
+          bucketId = 'other';
+        }
+        if (!smartAssemblyTribeFilterSet.has(bucketId)) return;
+      }
+      systems += 1;
+      total += value.total;
+      const perType = value.perType;
+      for (const [type, amount] of Object.entries(perType) as Array<[SmartAssemblyType, number]>) {
+        if (!amount) continue;
+        perTypeTotals[type] = (perTypeTotals[type] || 0) + amount;
+      }
+    });
+    return { total, systems, perTypeTotals };
+  }, [smartAssemblyFiltered, smartAssemblyColorMode, smartAssemblyTribeFilters, smartAssemblyTribeLegendTopSet, smartAssemblyTribeFilterSet]);
+
+  const toggleSmartAssemblyStatus = useCallback((status: SmartAssemblyStatus) => {
+    setSmartAssemblyStatuses(prev => ({ ...prev, [status]: !prev[status] }));
+  }, []);
+  const toggleSmartAssemblyType = useCallback((type: SmartAssemblyType | string) => {
+    const candidate = type as SmartAssemblyType;
+    if (!SMART_ASSEMBLY_TYPES.includes(candidate)) return;
+    setSmartAssemblyTypes(prev => ({ ...prev, [candidate]: !prev[candidate] }));
+  }, []);
+  const handleSmartAssemblyColorMode = useCallback((mode: 'accent' | 'opposite' | 'tribe') => {
+    setSmartAssemblyColorMode(mode);
+  }, []);
+  const handleSmartAssemblyTribeFilterToggle = useCallback((tribeId: string, multi: boolean) => {
+    setSmartAssemblyTribeFilters(prev => {
+      const has = prev.includes(tribeId);
+      if (multi) {
+        if (has) {
+          return prev.filter(id => id !== tribeId);
+        }
+        return [...prev, tribeId];
+      }
+      if (!has) {
+        return [tribeId];
+      }
+      return prev.length === 1 ? [] : [tribeId];
+    });
+  }, []);
+  const clearSmartAssemblyTribeFilters = useCallback(() => {
+    setSmartAssemblyTribeFilters(prev => (prev.length ? [] : prev));
+  }, []);
+  const toggleSmartGateTribeFilter = useCallback((tribeId: string, multi: boolean) => {
+    setSmartGateTribeFilters(prev => {
+      const has = prev.includes(tribeId);
+      if (multi) {
+        if (has) {
+          return prev.filter(id => id !== tribeId);
+        }
+        return [...prev, tribeId];
+      }
+      if (!has) {
+        return [tribeId];
+      }
+      return prev.length === 1 ? [] : [tribeId];
+    });
+  }, []);
+  const clearSmartGateTribeFilters = useCallback(() => {
+    setSmartGateTribeFilters(prev => (prev.length ? [] : prev));
+  }, []);
+  useEffect(() => {
+    if (!smartAssemblyHalosRef.current) return;
+    smartAssemblyHalosRef.current.setVisible(smartAssemblyOverlayEnabled && !cinematicMode);
+  }, [smartAssemblyOverlayEnabled, cinematicMode]);
+
+  useEffect(() => {
+    if (smartAssemblyFiltered.perSystem.size === 0 || smartAssemblyFiltered.maxPerSystem <= 0) {
+      smartAssemblyPendingDataRef.current = null;
+      smartAssemblyHalosRef.current?.setData([], 0);
+      return;
+    }
+
+    const entries: SmartAssemblyHaloDatum[] = [];
+    let filteredMax = 0;
+    const tribeColorCache = smartAssemblyTribeColorCacheRef.current;
+    const tribeTopIds = smartAssemblyTribeTopIdsRef.current;
+
+    smartAssemblyFiltered.perSystem.forEach((value, systemId) => {
+      if (!value || value.total <= 0) return;
+      let color: THREE.Color = smartAssemblyAccentColor;
+      if (smartAssemblyColorMode === 'opposite') {
+        color = smartAssemblyOppositeColor;
+      } else if (smartAssemblyColorMode === 'tribe') {
+        let bucketId = value.dominantTribe || 'other';
+        if (bucketId !== 'other' && !tribeTopIds.has(bucketId)) {
+          bucketId = 'other';
+        }
+        if (smartAssemblyTribeFilters.length > 0 && !smartAssemblyTribeFilterSet.has(bucketId)) {
+          return;
+        }
+        color = tribeColorCache.get(bucketId) || tribeColorCache.get('other') || smartAssemblyAccentColor;
+      }
+
+      entries.push({ systemId, total: value.total, color });
+      if (value.total > filteredMax) filteredMax = value.total;
+    });
+
+    const payload = { entries, maxTotal: filteredMax > 0 ? filteredMax : smartAssemblyFiltered.maxPerSystem };
+    smartAssemblyPendingDataRef.current = payload;
+
+    if (smartAssemblyHalosRef.current) {
+      smartAssemblyHalosRef.current.setData(entries, payload.maxTotal);
+    }
+  }, [smartAssemblyFiltered, smartAssemblyColorMode, smartAssemblyAccentColor, smartAssemblyOppositeColor, smartAssemblyTribeFilters, smartAssemblyTribeFilterSet, mapData]);
+
   // Fetch tribe names for legend labels (use 'name' field)
   useEffect(()=>{
-    if(!showSmartGates) return;
-    if(smartGateColorMode !== 'tribe') return;
+    const needTribes = (showSmartGates && smartGateColorMode === 'tribe') || (smartAssemblyOverlayEnabled && smartAssemblyColorMode === 'tribe');
+    if(!needTribes) return;
     if(Object.keys(tribeNames).length > 0) return;
     let aborted = false;
     (async()=>{
@@ -1046,7 +1544,7 @@ function App() {
       } catch { /* ignore network/CORS errors; fall back to ids */ }
     })();
     return ()=>{ aborted = true; };
-  }, [showSmartGates, smartGateColorMode, tribeNames]);
+  }, [showSmartGates, smartGateColorMode, smartAssemblyOverlayEnabled, smartAssemblyColorMode, tribeNames]);
 
   // Session bootstrap: check existing cookie and refresh if needed
   useEffect(()=>{
@@ -1281,9 +1779,18 @@ function App() {
   const { legend, resolveColor, getBucketId } = buildTribeColorMap(links);
   setSmartGateTribeLegend(legend);
     tribeColorResolver = resolveColor;
-    // Apply optional tribe filter: reduce visible links to the selected tribe bucket
-    if(smartGateTribeFilter){
-      links = links.filter(l => getBucketId(l) === smartGateTribeFilter);
+    if(smartGateTribeFilters.length > 0){
+      const validIds = new Set(legend.map(item => item.tribeId));
+      let activeFilters = smartGateTribeFilters;
+      const filteredSelection = smartGateTribeFilters.filter(id => validIds.has(id));
+      if(filteredSelection.length !== smartGateTribeFilters.length){
+        setSmartGateTribeFilters(filteredSelection);
+        activeFilters = filteredSelection;
+      }
+      if(activeFilters.length > 0){
+        const activeSet = new Set(activeFilters);
+        links = links.filter(l => activeSet.has(getBucketId(l)));
+      }
     }
   } else {
     const themeAccentHex = accentIsBlue ? 0x00aaff : 0xff4c26;
@@ -1291,6 +1798,7 @@ function App() {
     const baseHex = (smartGateColorMode === 'opposite') ? oppositeAccentHex : themeAccentHex;
     baseCol = new THREE.Color(baseHex);
     setSmartGateTribeLegend([]);
+    setSmartGateTribeFilters(prev => prev.length ? [] : prev);
   }
       const tx = (p:{x:number;y:number;z:number})=>({ x:p.x, y:p.z, z:p.y*-1 });
       for(const l of links){
@@ -1328,7 +1836,7 @@ function App() {
       if(smartGateBuildRetry !== 0) setSmartGateBuildRetry(0);
       // No bloom duplicate created
     } catch {/* ignore build errors */}
-  }, [showSmartGates, smartGateSnapshot, mapData, stargateMaterial, smartGateMaterial, accentIsBlue, cinematicMode, publicEdgeSet, smartGateBuildRetry, gateAccessSnapshot, smartGateViewMode, traversableEdgeSet, smartGateColorMode]);
+  }, [showSmartGates, smartGateSnapshot, mapData, stargateMaterial, smartGateMaterial, accentIsBlue, cinematicMode, publicEdgeSet, smartGateBuildRetry, gateAccessSnapshot, smartGateViewMode, traversableEdgeSet, smartGateColorMode, smartGateTribeFilters]);
 
   // (Removed) separate public-only geometry rebuild; covered by unified view mode changes
 
@@ -1370,8 +1878,17 @@ function App() {
       for(let i=0;i<attr.count;i++){ attr.setXYZ(i, c.r, c.g, c.b); }
       attr.needsUpdate = true;
       setSmartGateTribeLegend([]);
+      setSmartGateTribeFilters(prev => prev.length ? [] : prev);
     } catch {/* ignore */}
-  }, [accentIsBlue, smartGateColorMode, smartGateTribeFilter]);
+  }, [accentIsBlue, smartGateColorMode, smartGateTribeFilters]);
+
+  useEffect(() => {
+    return () => {
+      if (smartAssemblyAbortRef.current) {
+        smartAssemblyAbortRef.current.abort();
+      }
+    };
+  }, []);
 
   // Manual refresh handler for Smart Gates snapshots (links + ACL)
   const refreshSmartGates = useCallback(async (alsoAcl:boolean = true) => {
@@ -1414,8 +1931,18 @@ function App() {
               const { legend, resolveColor, getBucketId } = buildTribeColorMap(links as any);
               setSmartGateTribeLegend(legend);
               tribeColorResolver = resolveColor;
-              if(smartGateTribeFilter){
-                links = (links as any).filter((l:any) => getBucketId(l) === smartGateTribeFilter);
+              if(smartGateTribeFilters.length > 0){
+                const validIds = new Set(legend.map(item => item.tribeId));
+                let activeFilters = smartGateTribeFilters;
+                const filteredSelection = smartGateTribeFilters.filter(id => validIds.has(id));
+                if(filteredSelection.length !== smartGateTribeFilters.length){
+                  setSmartGateTribeFilters(filteredSelection);
+                  activeFilters = filteredSelection;
+                }
+                if(activeFilters.length > 0){
+                  const activeSet = new Set(activeFilters);
+                  links = (links as any).filter((l:any) => activeSet.has(getBucketId(l)));
+                }
               }
             } else {
               const themeAccentHex = accentIsBlue ? 0x00aaff : 0xff4c26;
@@ -1423,6 +1950,7 @@ function App() {
               const baseHex = (smartGateColorMode === 'opposite') ? oppositeAccentHex : themeAccentHex;
               baseCol = new THREE.Color(baseHex);
               setSmartGateTribeLegend([]);
+              setSmartGateTribeFilters(prev => prev.length ? [] : prev);
             }
             const tx = (p:{x:number;y:number;z:number})=>({ x:p.x, y:p.z, z:p.y*-1 });
             for(const l of links){
@@ -1555,6 +2083,42 @@ function App() {
       z: position.y * -1,
     };
   }, []);
+
+  useEffect(() => {
+    if (!sceneRef.current || !ringTexture) return;
+    if (!smartAssemblyHalosRef.current) {
+      const positionResolver = (systemId: number, target: THREE.Vector3) => {
+        const sysMap = mapDataRef.current?.solar_systems || {};
+        const sys = sysMap[String(systemId)];
+        if (!sys || !sys.position) return null;
+        const pos = getTransformedPosition(sys.position);
+        return target.set(pos.x, pos.y, pos.z);
+      };
+      smartAssemblyHalosRef.current = new SmartAssemblyHalos(sceneRef.current, ringTexture, positionResolver);
+      smartAssemblyHalosRef.current.setVisible(smartAssemblyOverlayEnabledRef.current && !cinematicModeRef.current);
+      if (smartAssemblyPendingDataRef.current) {
+        smartAssemblyHalosRef.current.setData(
+          smartAssemblyPendingDataRef.current.entries,
+          smartAssemblyPendingDataRef.current.maxTotal,
+        );
+      }
+      if (cameraRef.current && rendererRef.current) {
+        smartAssemblyHalosRef.current.update(performance.now(), cameraRef.current, rendererRef.current);
+      }
+      try {
+        (window as any).__efGetSmartAssembliesHalos = () => smartAssemblyHalosRef.current;
+        (window as any).__efGetSmartAssembliesPending = () => smartAssemblyPendingDataRef.current;
+      } catch {/* ignore */}
+    }
+    return () => {
+      try {
+        delete (window as any).__efGetSmartAssembliesHalos;
+        delete (window as any).__efGetSmartAssembliesPending;
+      } catch {/* ignore */}
+      smartAssemblyHalosRef.current?.dispose();
+      smartAssemblyHalosRef.current = null;
+    };
+  }, [ringTexture, getTransformedPosition, sceneReadyToken]);
 
   // Helper to create label elements
   const createSystemLabelElement = useCallback((name: string, isPersistent = false, planets?: number): HTMLDivElement => {
@@ -2386,6 +2950,13 @@ function App() {
 
   // Multi-panel open state (allow several drawers at once) - persisted
   const [openPanels, setOpenPanels] = useState<Set<string>>(new Set());
+  const smartAssembliesPanelOpen = openPanels.has('smart-assemblies');
+
+  useEffect(() => {
+    if ((smartAssembliesPanelOpen || smartAssemblyOverlayEnabled) && !smartAssemblySnapshot && !smartAssemblyLoading && !smartAssemblyError) {
+      fetchSmartAssemblies(false);
+    }
+  }, [smartAssembliesPanelOpen, smartAssemblyOverlayEnabled, smartAssemblySnapshot, smartAssemblyLoading, smartAssemblyError, fetchSmartAssemblies]);
   // User Overlay Rings visibility & rebuild (consolidated)
   // Ensures halos reliably reappear after exiting cinematic mode while panel remains open (fix for step 4 failing)
   const prevOverlayShowRef = useRef<boolean>(false);
@@ -2521,6 +3092,7 @@ function App() {
   const userOverlayDrawerRef = useRef<PanelDrawerHandle|null>(null);
   const displaySettingsDrawerRef = useRef<PanelDrawerHandle|null>(null);
   const smartGatesDrawerRef = useRef<PanelDrawerHandle|null>(null);
+  const smartAssembliesDrawerRef = useRef<PanelDrawerHandle|null>(null);
   // Maintain legend in open order when toggled
   useEffect(()=>{
     setOpenPanelOrder(prev=>{
@@ -2544,7 +3116,7 @@ function App() {
   const autoOrderRef = useRef<string[]>([]); // current left-to-right order of auto-managed panels
   useLayoutEffect(()=>{
     const BASE_X = alignedBase.x, BASE_Y = alignedBase.y, GAP_X = 24;
-  const managed = (id:string)=> id==='routing' || id==='cinematic' || id==='planet-legend' || id==='region-stats' || id==='region-compare' || id==='user-overlay' || id==='display-settings' || id==='smart-gates';
+  const managed = (id:string)=> id==='routing' || id==='cinematic' || id==='planet-legend' || id==='region-stats' || id==='region-compare' || id==='user-overlay' || id==='display-settings' || id==='smart-gates' || id==='smart-assemblies';
     const active = openPanelOrder.filter(id=> managed(id) && (id==='planet-legend'? isPlanetCountActive : openPanels.has(id)));
     const prevOrder = autoOrderRef.current;
     // Remove any that are no longer active
@@ -2567,6 +3139,7 @@ function App() {
   else if(id==='user-overlay' && userOverlayDrawerRef.current) userOverlayDrawerRef.current.autoPosition(target);
   else if(id==='display-settings' && displaySettingsDrawerRef.current) displaySettingsDrawerRef.current.autoPosition(target);
     else if(id==='smart-gates' && smartGatesDrawerRef.current) smartGatesDrawerRef.current.autoPosition(target);
+    else if(id==='smart-assemblies' && smartAssembliesDrawerRef.current) smartAssembliesDrawerRef.current.autoPosition(target);
   else if(id==='planet-legend') { try { window.dispatchEvent(new CustomEvent('ef:auto-pos', { detail:{ id, target, cascade:true } })); } catch {/* ignore */} }
     };
     const compactAll = () => {
@@ -3352,6 +3925,8 @@ function App() {
     if (!currentMount) return;
 
   sceneRef.current = new THREE.Scene(); // Flat black background (fog removed)
+  try { (window as any).__efScene = sceneRef.current; } catch {/* ignore */}
+  setSceneReadyToken((token) => token + 1);
     cameraRef.current = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 10000000);
   rendererRef.current = new THREE.WebGLRenderer({ antialias: true });
   // Cap DPR for performance while keeping crisp rendering
@@ -3440,6 +4015,9 @@ function App() {
          const updaters = routeAnimUpdatersRef.current;
          for (let i = 0; i < updaters.length; i++) updaters[i]();
        } catch (e) { /* ignore */ }
+      if(smartAssemblyHalosRef.current){
+        smartAssemblyHalosRef.current.update(performance.now(), cameraRef.current, rendererRef.current);
+      }
   // (Selection halo pulse removed – only hover ring retained)
        // Baseline micro‑twinkle and parallax rotation (non-cinematic)
   if(!cinematicModeRef.current){
@@ -3769,6 +4347,9 @@ function App() {
          currentMount.removeChild(rendererRef.current!.domElement);
        }
        currentMount.removeChild(labelRenderer.domElement); // New: Clean up label renderer DOM
+      try { delete (window as any).__efScene; } catch {/* ignore */}
+      smartAssemblyHalosRef.current?.dispose();
+      smartAssemblyHalosRef.current = null;
     };
   }, [isLoaded, ringTexture, cinematicMode]);
   // FXAA pipeline removed
@@ -4038,13 +4619,13 @@ function App() {
       } catch { /* ignore */ }
       // Force restore of base star material properties (in case palette / additive blending lingered)
       try {
-      if (starFieldRef.current) {
+    if (starFieldRef.current) {
           const mat = starFieldRef.current.material as THREE.PointsMaterial;
           mat.blending = THREE.NormalBlending;
           mat.depthWrite = true;
           mat.transparent = true;
           mat.opacity = 1.0;
-      if(overlayRingsRef.current){ try { overlayRingsRef.current.dispose(); } catch {}; overlayRingsRef.current = null; }
+    if(overlayRingsRef.current){ try { overlayRingsRef.current.dispose(); } catch {}; overlayRingsRef.current = null; }
           (mat as any).needsUpdate = true;
           // Reapply color buffer to plain white (actual pipeline effect will recolor next frame)
           const geom = starFieldRef.current.geometry as THREE.BufferGeometry;
@@ -4339,6 +4920,49 @@ function App() {
     }
     starColorsAttribute.needsUpdate = true;
 
+    if (smartAssemblyOverlayEnabled && smartAssemblyFiltered.perSystem.size > 0 && smartAssemblyFiltered.maxPerSystem > 0) {
+      const perSystem = smartAssemblyFiltered.perSystem;
+      const maxPerSystem = smartAssemblyFiltered.maxPerSystem > 0 ? smartAssemblyFiltered.maxPerSystem : 1;
+      const baseColor = DEFAULT_STAR_COLOR;
+      const baseR = baseColor.r;
+      const baseG = baseColor.g;
+      const baseB = baseColor.b;
+      const overlayColor = smartAssemblyColorMode === 'opposite' ? smartAssemblyOppositeColor : smartAssemblyAccentColor;
+      const overlayR = overlayColor.r;
+      const overlayG = overlayColor.g;
+      const overlayB = overlayColor.b;
+      const tribeColors = smartAssemblyTribeColorCacheRef.current;
+      const tribeTopIds = smartAssemblyTribeTopIdsRef.current;
+      for (let i = 0; i < visibleSystemsRef.current.length; i++) {
+        const system = visibleSystemsRef.current[i];
+        if (!system) continue;
+        const entry = perSystem.get(system.id);
+        if (!entry) continue;
+        const normalized = Math.min(1, Math.max(0, entry.total / maxPerSystem));
+        if (normalized <= 0) continue;
+        const strength = Math.sqrt(normalized);
+        const idx = i * 3;
+        if (smartAssemblyColorMode === 'tribe') {
+          let bucketId = entry.dominantTribe || 'other';
+          if (bucketId !== 'other' && !tribeTopIds.has(bucketId)) {
+            bucketId = 'other';
+          }
+          if (smartAssemblyTribeFilters.length > 0 && !smartAssemblyTribeFilterSet.has(bucketId)) {
+            continue;
+          }
+          const tribeColor = tribeColors.get(bucketId) || tribeColors.get('other') || smartAssemblyAccentColor;
+          currentStarColors[idx] = baseR + (tribeColor.r - baseR) * strength;
+          currentStarColors[idx + 1] = baseG + (tribeColor.g - baseG) * strength;
+          currentStarColors[idx + 2] = baseB + (tribeColor.b - baseB) * strength;
+        } else {
+          currentStarColors[idx] = baseR + (overlayR - baseR) * strength;
+          currentStarColors[idx + 1] = baseG + (overlayG - baseG) * strength;
+          currentStarColors[idx + 2] = baseB + (overlayB - baseB) * strength;
+        }
+      }
+      starColorsAttribute.needsUpdate = true;
+    }
+
     // --- Step 2: Region Overlay (if HR && selectedStar) ---
     if (isRegionHighlighterActive && highlightedSystem) {
       RegionHighlighterModule.init(
@@ -4398,6 +5022,13 @@ function App() {
     getTransformedPosition,
     ringTexture,
     planetBinsActive,
+    smartAssemblyOverlayEnabled,
+    smartAssemblyFiltered,
+    smartAssemblyColorMode,
+    smartAssemblyAccentColor,
+    smartAssemblyOppositeColor,
+    smartAssemblyTribeFilters,
+    smartAssemblyTribeFilterSet,
   ]);
 
   // Ensure toggling the Highlight Region checkbox applies or removes highlights immediately
@@ -5733,6 +6364,7 @@ function App() {
               { id:'region', type:'toggle', label:'Highlight Region', display:(<>Highlight<br/>Region</>), icon:null, active:isRegionHighlighterActive, onToggle:()=> setIsRegionHighlighterActive(v=> !v) },
               { id:'planets', type:'toggle', label:'Display Planet Counts', display:(<>Planet<br/>Counts</>), icon:null, active:isPlanetCountActive, onToggle:()=> setIsPlanetCountActive(v=> !v) },
               { id:'smart-gates', type:'panel', label:'Smart Gates', display:(<>Smart<br/>Gates</>), icon:null, active:openPanels.has('smart-gates'), onSelect:()=> togglePanel('smart-gates') },
+              { id:'smart-assemblies', type:'panel', label:'Smart Assemblies', display:(<>Smart<br/>Assemblies</>), icon:null, active:openPanels.has('smart-assemblies'), onSelect:()=> togglePanel('smart-assemblies') },
               { id:'stations', type:'toggle', label:'Show Stations', display:(<>Show<br/>Stations</>), icon:null, active:showStations, onToggle:()=> setShowStations(v=> { const next=!v; try { persistShowStations(next); } catch {}; try { if(next) track({ type:'show_stations' }); } catch {}; return next; }) },
               { id:'distance', type:'toggle', label:'Show Distance', display:(<>Show<br/>Distance</>), icon:null, active:showDistance, onToggle:()=> setShowDistance(v=> !v) },
               { id:'region-compare', type:'panel', label:'Compare Regions', display:(<>Compare<br/>Regions</>), icon:null, active:openPanels.has('region-compare'), onSelect:()=> togglePanel('region-compare') },
@@ -5928,11 +6560,11 @@ function App() {
                 {showSmartGates && smartGateColorMode==='tribe' && smartGateTribeLegend.length>0 && (
                   <div style={{ marginTop: 4 }}>
                     <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:6 }}>
-                      <div style={{ fontSize:12, opacity:0.85 }}>Legend</div>
-                      {smartGateTribeFilter && (
+                      <div style={{ fontSize:12, opacity:0.8 }}>Tribe legend ({smartGateTribeLegend.length})</div>
+                      {smartGateTribeFilters.length > 0 && (
                         <button
                           type="button"
-                          onClick={()=> setSmartGateTribeFilter(null)}
+                          onClick={clearSmartGateTribeFilters}
                           aria-label="Clear tribe filter"
                           style={{
                             flex:'0 0 auto',
@@ -5952,16 +6584,18 @@ function App() {
                         </button>
                       )}
                     </div>
+                    <div style={{ fontSize:11, opacity:0.65, marginBottom:4 }}>Ctrl+click to add or remove tribes.</div>
                     <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
                       {smartGateTribeLegend.map((it)=> {
                         const label = tribeNames[it.tribeId] || (it.tribeId === 'other' ? 'Other' : it.tribeId);
-                        const isActive = smartGateTribeFilter === it.tribeId;
+                        const isActive = smartGateTribeFilters.includes(it.tribeId);
                         return (
                           <button
                             key={`legend-${it.tribeId}`}
-                            onClick={()=> setSmartGateTribeFilter(isActive ? null : it.tribeId)}
+                            onClick={(evt)=> toggleSmartGateTribeFilter(it.tribeId, evt.ctrlKey || evt.metaKey)}
                             style={{ display:'flex', alignItems:'center', gap:8, background:'transparent', border:'1px solid #333', borderRadius:4, padding:'4px 6px', cursor:'pointer', opacity: isActive? 1 : 0.9 }}
-                            title={isActive? 'Showing only this tribe' : 'Click to filter to this tribe'}
+                            title={isActive? 'Click to remove this tribe filter' : 'Click to filter; Ctrl+click to combine tribes'}
+                            aria-pressed={isActive}
                           >
                             <span style={{ width:14, height:14, borderRadius:2, backgroundColor: new THREE.Color(it.color).getStyle(), border:'1px solid #444' }} aria-hidden="true" />
                             <span style={{ fontSize:12, color:'#ddd', fontWeight: isActive? 700 : 500 }}>{label}</span>
@@ -5985,10 +6619,10 @@ function App() {
                         } else if(smartGateViewMode==='public'){
                           set = all.filter(l=> publicEdgeSet.has(`${l.origin}-${l.destination}`));
                         }
-                        if(smartGateColorMode==='tribe' && smartGateTribeFilter){
-                          // Reuse a lightweight bucket decider mirroring buildTribeColorMap
+                        if(smartGateColorMode==='tribe' && smartGateTribeFilters.length>0){
                           const pickTid = (l:any)=> (String(l.tribeId||'').trim() || (Array.isArray(l.tribes)? String(l.tribes[0]||'').trim():'')) || 'other';
-                          set = set.filter(l=> pickTid(l) === smartGateTribeFilter);
+                          const selectionSet = new Set(smartGateTribeFilters);
+                          set = set.filter(l=> selectionSet.has(pickTid(l)));
                           total = Math.round(set.length/2);
                           return `${total}`;
                         }
@@ -5998,6 +6632,35 @@ function App() {
                   </div>
                 )}
               </div>
+            </PanelDrawer>
+          )}
+          {openPanels.has('smart-assemblies') && (
+            <PanelDrawer ref={smartAssembliesDrawerRef} id="smart-assemblies" title="Smart Assemblies" defaultPos={alignedBase} scale={uiScale} zIndex={panelZ['smart-assemblies']||1450} onActivate={bringToFront} onClose={(id)=> setOpenPanels(p=> { const n=new Set(p); n.delete(id); return n; })} resetToken={layoutResetToken} isMinimized={minimizedPanels.has('smart-assemblies')} onToggleMinimize={toggleMinimize}>
+              <SmartAssembliesPanel
+                overlayEnabled={smartAssemblyOverlayEnabled}
+                loading={smartAssemblyLoading}
+                error={smartAssemblyError}
+                meta={smartAssemblyMeta}
+                lastUpdatedIso={smartAssemblyLastUpdatedIso}
+                statusOptions={smartAssemblyStatusOptions}
+                typeOptions={smartAssemblyTypeOptions}
+                onToggleStatus={toggleSmartAssemblyStatus}
+                onToggleType={toggleSmartAssemblyType}
+                onOverlayChange={handleSmartAssemblyOverlayChange}
+                onRefresh={handleSmartAssemblyRefresh}
+                colorMode={smartAssemblyColorMode}
+                onColorModeChange={handleSmartAssemblyColorMode}
+                filteredTotal={smartAssemblyDisplayTotals.total}
+                systemsWithData={smartAssemblyDisplayTotals.systems}
+                perTypeTotals={smartAssemblyDisplayTotals.perTypeTotals as Partial<Record<SmartAssemblyTypeId, number>>}
+                filteredStatuses={smartAssemblyFiltered.selectedStatuses}
+                filteredTypes={smartAssemblyFiltered.selectedTypes}
+                tribeLegend={smartAssemblyTribeLegend}
+                tribeFilters={smartAssemblyTribeFilters}
+                onTribeFilterToggle={handleSmartAssemblyTribeFilterToggle}
+                onTribeFilterClear={clearSmartAssemblyTribeFilters}
+                tribeNames={tribeNames}
+              />
             </PanelDrawer>
           )}
           {/* Floating planet legend (appears when planet coloring active). Separate from drawer so toggle works independently. */}

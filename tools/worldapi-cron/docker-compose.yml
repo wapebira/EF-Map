@@ -22,6 +22,7 @@ services:
       PGDATABASE: postgres
       PGUSER: user
       PGPASSWORD: password
+      STRUCTURE_SCHEMA: "0x7085f3e652987f656fb8dee5aa6592197bb75de8"
       # Cloudflare (provide actual values via env or Docker secrets at runtime)
       CF_ACCOUNT_ID: ${CF_ACCOUNT_ID}
       CF_API_TOKEN: ${CF_API_TOKEN}

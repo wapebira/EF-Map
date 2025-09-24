@@ -235,6 +235,46 @@ const baseSections: SectionDef[] = [
     ],
   },
   {
+    id: 'smart-assemblies',
+    title: 'Smart Assemblies',
+    subsections: [
+      {
+        id: 'sa-overview',
+        title: 'Overview',
+        content: (
+          <div>
+            <p>Smart Assemblies visualize player-created assembly complexes, grouped by owner tribe and annotated with live metrics. Each assembly renders as a compact halo with connection rays toward linked systems so you can spot where staging hubs sit relative to local routes.</p>
+            <p>The panel counter shows the number of visible assemblies (after filters) along with how many matching systems fall inside the current camera frustum. Toggle Smart Assemblies on from the left panel to draw the halos and enable filtering.</p>
+          </div>
+        ),
+      },
+      {
+        id: 'sa-filtering',
+        title: 'Filtering & Multi-Select',
+        content: (
+          <div>
+            <p>The legend lists top contributor tribes plus an <em>Other</em> bucket. Click a tribe to isolate it; click again to release. Hold <strong>Ctrl</strong> (or <strong>Cmd</strong> on macOS) while clicking to select multiple tribes simultaneously. The legend header displays how many filters are active.</p>
+            <ul style={{ paddingLeft: '18px', margin: '6px 0' }}>
+              <li><strong>Clear filters:</strong> Use the panel button to restore every tribe at once.</li>
+              <li><strong>Counts update instantly:</strong> Assembly totals and per-tribe system tallies reflect the active subset without rerendering the whole map.</li>
+              <li><strong>Authorized view:</strong> When authentication is available the panel will hide assemblies you lack permission to see, keeping filters in sync.</li>
+            </ul>
+          </div>
+        ),
+      },
+      {
+        id: 'sa-details',
+        title: 'Details & Map Interaction',
+        content: (
+          <div>
+            <p>Hover an assembly to view its system, owning tribe, and attached Smart Gate count. Clicking centers the map and opens the system info card. Assemblies inherit the same hover tooltips and search indexing as normal systems so they integrate with routing workflows.</p>
+            <p>When Smart Gates are also enabled, assemblies help you spot staging hubs that connect to high-value gate networks. Use Highlight Region or Display Planet Counts alongside Smart Assemblies to compare resource density around each complex.</p>
+          </div>
+        ),
+      },
+    ],
+  },
+  {
     id: 'smart-gates',
     title: 'Smart Gates',
     subsections: [

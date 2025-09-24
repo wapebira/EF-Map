@@ -45,6 +45,7 @@ Older entries and legacy indexer details have been archived: [archive\decision-l
   - /api/player-profile
   - /api/smart-gate-links
   - /api/stats
+  - /api/structure-snapshot
   - /api/system-overlays
   - /api/tribe-marks
   - /api/tribe-marks/mutate
@@ -69,10 +70,42 @@ Older entries and legacy indexer details have been archived: [archive\decision-l
 - Preview URLs
   - Pattern: `https://<branch-or-alias>.ef-map.pages.dev` (project `ef-map`).
 
+## 2025-09-24 – Smart Assemblies colour parity
+- Goal: Align Smart Assemblies overlay colour modes with Smart Gates (theme accent, opposite accent, tribe legend/filter) and push tribe filtering through halo rendering plus panel metrics.
+- Risk: medium (core scene update loop + overlay UI wiring).
+- Gates: `npm run build` ✅ (vite + worker copy).
+## 2025-09-24 – Tribe filter multi-select parity
+- Goal: Let Smart Assemblies and Smart Gates support ctrl/meta multi-select tribe filtering with clear legend hints, consistent counts, and visibility metrics.
+- Risk: medium (shared state, overlay rendering, and legend UX touched).
+- Gates: `npm run build` ✅ (tsc + vite + worker copy).
+## 2025-09-24 – Smart Assemblies Halo Preview Deploy
+- Goal: Publish the Smart Assemblies overlay (halo renderer + panel wiring) to a Cloudflare Pages preview for review (`feature-structure-overlays.ef-map.pages.dev`).
+- Risk: low (preview environment only, no production impact).
+- Gates: typecheck ✅ | build ✅ (`npm run build`) | smoke ✅ (`/api/structure-snapshot` → 200 `application/json` on preview).
+## 2025-09-24 – Pages worker structure snapshot parity
+- Goal: Ensure the Cloudflare Pages worker serves `/api/structure-snapshot` with KV-backed data, matching root worker behavior.
+- Risk: low (read-only KV fetch + JSON response).
+- Gates: typecheck ❌ (npm run build blocked by existing App.tsx Smart Assemblies errors), build ❌ (same), smoke ⏳ (pending post-fix verification).
+## 2025-09-24 – Smart Assemblies overlay panel
+- Goal: Add Smart Assemblies snapshot controls (status/type filters, color modes, overlay toggle) with persisted preferences and map tinting.
+- Risk: medium (core App wiring + render overlay integration).
+- Gates: `npm run build` ✅ (Vite + worker copy); manual smoke ⏳ (preview panel interaction + overlay colors).
 ## 2025-09-24 – User Overlay Modal & Agent Workflow Docs
 - Goal: Replace browser prompt flows for overlay folder creation with an in-app modal, and align contributor guidance with enforced GPT-5 Codex workflow + Cloudflare CLI execution mandate.
 - Risk: Medium (new UI surface + instructions baseline). Modal tested in preview; documentation affects contributor behavior only.
 - Gates: npm run build ✅ | Preview deploy (`wrangler pages deploy dist --project-name ef-map --branch feature-systemselection`) ✅ | Manual smoke: create folder in overlay (modal validation + focus), …
+## 2025-09-24 – Structure snapshot cron wiring
+- Goal: Package the structure snapshot exporter in the Docker image and schedule it via supercronic (15 min cadence) alongside the existing smart gate snapshot job.
+- Risk: low (container packaging + cron schedule only; exporter logic unchanged).
+- Gates: `node tools/snapshot-exporter/structure_snapshot_exporter.js --dry-run --out tmp_structure_snapshot.json` ✅ (verifies snapshot build post-packaging; file removed after check).
+## 2025-09-24 – Structure snapshot API endpoint
+- Goal: Serve `structure_snapshot_v1` via `/api/structure-snapshot` with KV fallback, system/meta filters, and cache-friendly headers.
+- Risk: low (read-only KV fetch + documentation tweak).
+- Gates: `npm run build` ✅ (Vite + worker copy) | `/api/structure-snapshot?meta=1` preview fetch ⏳ (pending after deployment).
+## 2025-09-24 – Structure snapshot exporter groundwork
+- Goal: Add a Node-based exporter that aggregates smart assembly counts by system/type/status/tribe and writes `structure_snapshot_v1` to EF_SNAPSHOTS (currently dry-run only).
+- Risk: medium (touches exporter pipeline + KV tooling; no production write yet).
+- Gates: `DRY_RUN=1 node tools/snapshot-exporter/structure_snapshot_exporter.js --dry-run --out tmp_structure_snapshot.json` ✅ (Postgres join + snapshot build).
 ## 2025-09-24 – SEO Static Pages & Sitemap
 - Goal: Add crawlable static marketing/content pages (FAQ, Features, About) + sitemap.xml and robots.txt pointing to sitemap to improve indexation for queries like "EVE Frontier map" & "Smart Gate ro…
 - Risk: low (static assets only; no runtime logic, KV, or worker changes). Rollback: delete added files; remove sitemap reference in robots.txt if needed.
