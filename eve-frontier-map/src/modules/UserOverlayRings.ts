@@ -1,11 +1,13 @@
 import * as THREE from 'three';
 import { userOverlayStore, getOverlayFilterColor, subscribeOverlayFilter } from '../utils/userOverlay';
 import type { UserOverlayEntry } from '../utils/userOverlay';
+import { subscribeFilteredOverlay, getFilteredOverlay } from '../utils/overlayFilteredFeed';
 
 export class UserOverlayRings {
   private group = new THREE.Group();
   private unsubscribe: (()=>void)|null = null;
   private unsubscribeFilter: (()=>void)|null = null;
+  private unsubscribeFiltered: (()=>void)|null = null;
   private disposed = false;
   private scene: THREE.Scene;
   private geometry: THREE.BufferGeometry | null = null;
@@ -24,6 +26,7 @@ export class UserOverlayRings {
     this.scene.add(this.group);
     this.unsubscribe = userOverlayStore.subscribe(()=> this.rebuild());
     this.unsubscribeFilter = subscribeOverlayFilter(()=> this.rebuild());
+    this.unsubscribeFiltered = subscribeFilteredOverlay(()=> this.rebuild());
     this.rebuild();
   }
   setMapData(mapData:any){ this.mapData = mapData; this.rebuild(); }
@@ -35,15 +38,21 @@ export class UserOverlayRings {
   }
   private rebuild(){
     if(this.disposed) return;
-    const entries = userOverlayStore.getEntries();
+    const filtered = getFilteredOverlay();
+    const useFiltered = filtered && Array.isArray(filtered); // always prefer published (can be empty intentionally)
+    const entries: any[] = useFiltered ? filtered : userOverlayStore.getEntries();
     const filter = getOverlayFilterColor();
     // bucket by system
     const bySystem = new Map<number, UserOverlayEntry[]>();
     for(const e of entries){
-      if(filter && e.color!==filter) continue;
-      if(this.suppressedSystemId != null && e.systemId === this.suppressedSystemId) continue; // skip suppressed system entirely
-      if(!bySystem.has(e.systemId)) bySystem.set(e.systemId, []);
-      bySystem.get(e.systemId)!.push(e);
+      const color = (e as any).color;
+      if(filter && color!==filter) continue;
+      const systemId = (e as any).systemId;
+      if(this.suppressedSystemId != null && systemId === this.suppressedSystemId) continue;
+      if(!bySystem.has(systemId)) bySystem.set(systemId, []);
+      // Coerce shape if coming from filtered feed (no timestamps). Provide minimal updatedAt for sort stability.
+      if(!(e as any).updatedAt){ (e as any).updatedAt = 0; }
+      bySystem.get(systemId)!.push(e as any);
     }
     this.systemIds = Array.from(bySystem.keys());
     // Sort marks in each system stable by updatedAt asc to stabilize cycle ordering
@@ -109,7 +118,7 @@ export class UserOverlayRings {
     }
     if(changed){ colorAttr.needsUpdate = true; }
   }
-  dispose(){ if(this.disposed) return; this.disposed=true; if(this.unsubscribe) this.unsubscribe(); if(this.unsubscribeFilter) this.unsubscribeFilter(); this.scene.remove(this.group); if(this.points){ this.points.geometry.dispose(); this.material?.dispose(); } }
+  dispose(){ if(this.disposed) return; this.disposed=true; if(this.unsubscribe) this.unsubscribe(); if(this.unsubscribeFilter) this.unsubscribeFilter(); if(this.unsubscribeFiltered) this.unsubscribeFiltered(); this.scene.remove(this.group); if(this.points){ this.points.geometry.dispose(); this.material?.dispose(); } }
   // Debug helper: logs current per-system color lists and active attribute values
   debugLog(){
     try {

@@ -675,11 +675,15 @@ const baseSections: SectionDef[] = [
         title: 'Overview',
         content: (
           <div>
-            <p>Create lightweight per‑system marks with an optional note and color. The panel gives you a sortable, filterable table plus bulk operations for fast curation (scouting targets, staging, bookmarks, troubleshooting waypoints, etc.). Marks are stored locally in your browser (no sync yet) and never leave your device unless you explicitly export.</p>
+            <p>Create lightweight per‑system marks (color + optional note + verification timestamp) and organize them with a left sidebar tree: <em>All Personal</em> (always present), your <em>personal folders</em>, and (if a member) a <em>Tribe</em> root with its folders. Selecting any folder instantly filters both the table <strong>and the rendered map halos</strong> to just that subset—ideal for focusing on a specific operation list without visual noise.</p>
             <ul style={{ paddingLeft:'18px', margin:'6px 0' }}>
-              <li><strong>Visibility:</strong> Halo rings render only while the panel is open (keeps map uncluttered when closed).</li>
-              <li><strong>Persistence:</strong> Local storage; clearing site data removes them.</li>
-              <li><strong>Performance:</strong> Scales to dozens+ smoothly; UI operations are incremental.</li>
+              <li><strong>Folders:</strong> Single level. Drag personal marks between personal folders; drag tribe marks into tribe folders. Personal → tribe requires the Share button (explicit).</li>
+              <li><strong>Tribe Shared Folder:</strong> The tribe root lists every shared mark; create tribe folders (when root selected) to segment shared bookmarks (e.g. logistics, scouting). Moving a mark to <em>No folder</em> returns it to the root list.</li>
+              <li><strong>All Personal Node:</strong> Always visible even with zero folders, so new users can immediately see and filter their marks.</li>
+              <li><strong>Filtering:</strong> Active folder selection drives ring rendering (empty folder = no halos) and updates live as you edit, recolor, or move marks.</li>
+              <li><strong>Parity:</strong> Tribe marks support inline note editing, color changes, and verification just like personal marks (within tribe limits & optimistic concurrency).</li>
+              <li><strong>Storage:</strong> Personal marks stay local (no sync). Tribe marks live in a shared document (KV) with optimistic conflict retries; only aggregate, non‑PII data for usage metrics is collected.</li>
+              <li><strong>Performance:</strong> Filtering is in‑memory; ring layer rebuild is incremental and fast for typical list sizes.</li>
             </ul>
           </div>
         )
@@ -689,10 +693,13 @@ const baseSections: SectionDef[] = [
         title: 'Adding & Selecting',
         content: (
           <div>
-            <p>Select a system on the map then press <em>Add Mark</em>. You can also right‑click a system in the overlay table context menu (Add Another Mark) to duplicate with a fresh timestamp. Clicking the system name in the table re‑selects it on the map (no camera jump suppression logic applies—normal select rules).</p>
+            <p>Select a system on the map then press <em>Add Mark</em>. Right‑click an existing row for <em>Add Another Mark</em> (duplicates with a new timestamp). Clicking a system name recenters/selects it on the map using standard selection rules.</p>
             <ul style={{ paddingLeft:'18px', margin:'6px 0' }}>
               <li><strong>Soft Hover:</strong> Moving the mouse over a row gently highlights the system (no camera move).</li>
-              <li><strong>Duplicate Merge:</strong> Use <em>Merge Dups</em> to consolidate identical System+Color pairs (keeps the newest note).</li>
+              <li><strong>Duplicate Merge:</strong> <em>Merge Dups</em> consolidates identical System+Color pairs (keeps newest note & latest verification).</li>
+              <li><strong>Share to Tribe:</strong> Button copies color + note into tribe marks (if member). After sharing, inline edits in tribe context affect the shared copy only.</li>
+              <li><strong>Drag & Drop (Personal):</strong> Drag selected personal rows (or a single row) into a personal folder in the sidebar to reassign.</li>
+              <li><strong>Drag & Drop (Tribe):</strong> Drag a tribe row into a tribe folder (or use its folder select). Tribe → personal requires manual re‑adding (no reverse share).</li>
             </ul>
           </div>
         )
@@ -702,7 +709,7 @@ const baseSections: SectionDef[] = [
         title: 'Colors & Legend Drag',
         content: (
           <div>
-            <p>The legend aggregates colors currently in use (pill with count). Drag a color pill onto any row to recolor it. Clicking a row’s color dot opens a mini palette (recent colors + custom input).</p>
+            <p>The legend lists colors in use (pill + count). Drag a pill onto a row to recolor instantly, or click the row’s color dot for a mini palette (recent + custom hex). Recoloring a tribe mark triggers an optimistic update; conflicts retry with the latest document.</p>
             <ul style={{ paddingLeft:'18px', margin:'6px 0' }}>
               <li><strong>Counts:</strong> Quick visual load; helps decide consolidation (e.g. too many one‑off colors).</li>
               <li><strong>Recolor via drag:</strong> No extra confirmation; immediate update & timestamp.</li>
@@ -716,11 +723,12 @@ const baseSections: SectionDef[] = [
         title: 'Filtering & Sorting',
         content: (
           <div>
-            <p>Use the color filter dropdown, text search (system or note substring), and preset sort buttons to pivot quickly. Sort state persists between sessions.</p>
+            <p>Use the sidebar folder selection (primary filter), color filter dropdown, text search (system or note substring), and preset sort buttons to pivot quickly. Sort state & last non‑tribe folder selection persist between sessions (folder filter itself resets on reload).</p>
             <ul style={{ paddingLeft:'18px', margin:'6px 0' }}>
               <li><strong>Presets:</strong> A‑Z, Newest, Updated, Color, Has Note.</li>
               <li><strong>Column Sort:</strong> Click any header to toggle ascending/descending.</li>
-              <li><strong>Live Search:</strong> Debounced instantly on keystroke (simple substring match).</li>
+              <li><strong>Live Search:</strong> Debounced substring match across system name & note.</li>
+              <li><strong>Folder Filter → Rings:</strong> Ring layer always reflects only the active folder’s marks.</li>
             </ul>
           </div>
         )
@@ -730,11 +738,11 @@ const baseSections: SectionDef[] = [
         title: 'Notes & Aging',
         content: (
           <div>
-            <p>Each mark tracks <em>Created</em>, <em>Updated</em>, optional <em>Note</em>, and a separate <em>Verified</em> timestamp (manual checkmark). The <em>Aging</em> control dims marks whose last update is older than N days—useful for pruning stale scouting intel without deleting immediately.</p>
+            <p>Each mark tracks <em>Created</em>, <em>Updated</em>, optional <em>Note</em>, <em>Verified</em> timestamp (manual ✔), and (tribe only) shared folder id. Inline editing applies to both personal and tribe notes. The <em>Aging</em> slider dims marks whose last update is older than N days (visual only).</p>
             <ul style={{ paddingLeft:'18px', margin:'6px 0' }}>
-              <li><strong>Edit Note:</strong> Click the note cell; Save or Cancel.</li>
-              <li><strong>Verify:</strong> ✔ button stamps <em>lastVerified</em> (doesn’t affect Updated unless you change something else).</li>
-              <li><strong>Aging Threshold:</strong> Visual only; data untouched.</li>
+              <li><strong>Inline Note:</strong> Click note cell → edit → Save/Cancel (tribe edits retry on conflict).</li>
+              <li><strong>Verify:</strong> ✔ stamps <em>lastVerified</em> (doesn’t bump Updated unless other fields change).</li>
+              <li><strong>Aging:</strong> Dimming only; underlying data unchanged.</li>
             </ul>
           </div>
         )
@@ -759,7 +767,7 @@ const baseSections: SectionDef[] = [
         title: 'Export / Import / Copy',
         content: (
           <div>
-            <p><strong>Export</strong> downloads a JSON file of all marks (includes timestamps & notes). <strong>Import</strong> merges entries (skips duplicates). <strong>Copy Text</strong> places a plain text list (System [Color] - Note) on the clipboard—useful for sharing externally or quick paste into notes.</p>
+            <p><strong>Export</strong> downloads a JSON file of all personal marks (includes timestamps & notes). <strong>Import</strong> merges (skips duplicates). <strong>Copy Text</strong> places a plain text list (System [Color] - Note) on the clipboard—useful for external sharing. Tribe marks are not exported/imported here (shared server doc source of truth).</p>
             <ul style={{ paddingLeft:'18px', margin:'6px 0' }}>
               <li><strong>Safety:</strong> Always inspect imported JSON if you didn’t create it (only local effects, but good hygiene).</li>
               <li><strong>After Import:</strong> “Verify” what you actually checked; imported rows keep original timestamps.</li>
@@ -774,11 +782,11 @@ const baseSections: SectionDef[] = [
         content: (
           <div>
             <ul style={{ paddingLeft:'18px', margin:'6px 0' }}>
-              <li>Keep color meaning consistent (e.g. green = confirmed, orange = pending) to reduce note verbosity.</li>
-              <li>Use the Aging dim to surface which intel may need re‑verification.</li>
-              <li>Drag recolor clusters after strategy changes instead of recreating marks.</li>
-              <li>Export before major browser cleanup or switching machines.</li>
-              <li>Panel closed = halos hidden; reopen to review without permanently cluttering the starfield.</li>
+              <li>Adopt a clear color legend (e.g. green=secure, amber=review) and stick to it—fewer verbose notes needed.</li>
+              <li>Use folder filtering to stage operation-specific subsets (logistics vs scouting).</li>
+              <li>Merge Dups after large imports or bulk recolors to keep the list lean.</li>
+              <li>Export occasionally as a safety snapshot before clearing browser data.</li>
+              <li>Close panel to hide halos temporarily without deleting or changing filters.</li>
             </ul>
           </div>
         )

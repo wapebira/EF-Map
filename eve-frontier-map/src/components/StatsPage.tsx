@@ -353,6 +353,16 @@ const StatsPage: React.FC = () => {
             <StatRow label="Algo (A*/Dij)" value={( ()=>{ const a=data.counters.p2p_algo_astar||0; const d=data.counters.p2p_algo_dijkstra||0; if(!a&&!d) return '—'; const t=a+d; return `${((a/t)*100).toFixed(0)}% / ${((d/t)*100).toFixed(0)}%`; })()} />
             <StatRow label="Mode (Fuel/Jumps/Explore)" value={( ()=>{ const f=data.counters.p2p_mode_fuel||0; const j=data.counters.p2p_mode_jumps||0; const x=data.counters.p2p_mode_explore||0; const t=f+j+x; if(!t) return '—'; const pf=((f/t)*100).toFixed(0); const pj=((j/t)*100).toFixed(0); const px=((x/t)*100).toFixed(0); return `${pf}% / ${pj}% / ${px}%`; })()} />
           </section>
+          {/* Smart Gates */}
+          <section style={{ background:'rgba(255,255,255,0.06)', padding:'16px 18px', border:'1px solid rgba(255,255,255,0.15)', borderRadius:10, boxShadow:'0 2px 4px rgba(0,0,0,0.45)' }}>
+            <h2 style={{ margin:'0 0 8px 0', fontSize:'15px', letterSpacing:'.5px', textTransform:'uppercase', opacity:0.85 }}>Smart Gates</h2>
+            <StatRow label="Routes using SG (any)" value={data.counters.sg_route_any||0} />
+            <StatRow label="Public-mode SG routes" value={data.counters.sg_route_unrestricted||0} />
+            <StatRow label="Authorized SG routes" value={data.counters.sg_route_authorized||0} />
+            <StatRow label="SG adoption share" value={( ()=>{ const total=data.counters.p2p_routes||0; const any=data.counters.sg_route_any||0; if(!total) return '—'; return ((any/total)*100).toFixed(1)+'%'; })()} />
+            <StatRow label="Authorized share of SG" value={( ()=>{ const any=data.counters.sg_route_any||0; const auth=data.counters.sg_route_authorized||0; if(!any) return '—'; return ((auth/any)*100).toFixed(1)+'%'; })()} />
+            <StatRow label="Avg SG hops (SG routes)" value={( ()=>{ const sum=data.sums.sg_hops_sum||0; const cnt=data.sums.sg_hops_count||0; if(!sum||!cnt) return '—'; return (sum/cnt).toFixed(2); })()} />
+          </section>
           {/* Scout Optimization */}
           <section style={{ background:'rgba(255,255,255,0.06)', padding:'16px 18px', border:'1px solid rgba(255,255,255,0.15)', borderRadius:10, boxShadow:'0 2px 4px rgba(0,0,0,0.45)' }}>
             <h2 style={{ margin:'0 0 8px 0', fontSize:'15px', letterSpacing:'.5px', textTransform:'uppercase', opacity:0.85 }}>Scout Optimization</h2>
