@@ -25,8 +25,10 @@ RUN if [ -f pnpm-lock.yaml ]; then \
 
 # Copy exporter source and cron specs
 COPY tools/snapshot-exporter/exporter.js /app/exporter.js
+COPY tools/snapshot-exporter/structure_snapshot_exporter.js /app/structure_snapshot_exporter.js
 COPY tools/snapshot-exporter/inspect_schema.js /app/inspect_schema.js
 COPY tools/snapshot-exporter/cron.d/snapshot-exporter /etc/cron.d/snapshot-exporter
+RUN sed -i 's/\r$//' /etc/cron.d/snapshot-exporter
 
 # Minimal cron runner: use supercronic for reliability
 RUN curl -fsSL -o /usr/local/bin/supercronic \

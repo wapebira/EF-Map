@@ -2065,6 +2065,87 @@ export default {
       if(forceBypass) h.set('X-Cache-Bypass','1');
       return new Response(bodyText,{ status:200, headers:h });
     }
+    if(p === '/api/structure-snapshot'){
+      const prefer = url.searchParams.get('source')||'';
+      const forceBypass = url.searchParams.get('force') === '1';
+      const systemParam = (url.searchParams.get('system') || url.searchParams.get('systemId') || '').trim();
+      const metaOnly = url.searchParams.get('meta') === '1' || (url.searchParams.get('mode')||'').toLowerCase() === 'meta';
+      let text=null; let source='kv';
+      if(prefer !== 'asset'){
+        try { if(env.EF_SNAPSHOTS){ text = await env.EF_SNAPSHOTS.get('structure_snapshot_v1'); source='kv:snapshots'; } } catch{ text=null; }
+        if(!text){ try { if(env.EF_STATS){ text = await env.EF_STATS.get('structure_snapshot_v1'); source='kv:stats'; } } catch{ text=null; } }
+      }
+      if(!text){
+        try {
+          const assetUrl = new URL('/snapshots/structure_snapshot_v1.json', url);
+          const resp = await env.ASSETS.fetch(assetUrl.toString());
+          if(resp.ok){ text = await resp.text(); source='asset'; }
+        } catch { /* ignore */ }
+      }
+      if(!text){
+        return new Response(JSON.stringify({ status:'empty' }),{ status:200, headers:{ 'Content-Type':'application/json','Cache-Control':'no-store' } });
+      }
+      let sanitized = text;
+      if(sanitized.charCodeAt(0) === 0xFEFF) sanitized = sanitized.slice(1);
+      const trimmed = sanitized.trimStart();
+      if(!trimmed || (trimmed[0] !== '{' && trimmed[0] !== '[')){
+        const payload = JSON.stringify({ status:'empty', reason:'non_json_snapshot' });
+        const headers = new Headers({ 'Content-Type':'application/json','Cache-Control':'no-store','ETag': await computeEtag(payload) });
+        headers.set('X-Cache-Bypass', forceBypass ? '1' : '0');
+        headers.set('X-Structure-Source', source);
+        headers.set('X-Structure-Mode', 'empty');
+        headers.set('X-Structure-Systems', '0');
+        return new Response(payload,{ status:200, headers });
+      }
+      let payloadText = sanitized;
+      let mode='full';
+      let parseOk=false;
+      let systemCount=0;
+      let snapshotMeta=null;
+      try {
+        const snapshot = JSON.parse(sanitized);
+        parseOk = true;
+        snapshotMeta = snapshot && typeof snapshot.meta === 'object' ? snapshot.meta : null;
+        const systems = snapshot && typeof snapshot.systems === 'object' ? snapshot.systems : {};
+        systemCount = Object.keys(systems).length;
+        if(systemParam){
+          const key = Object.prototype.hasOwnProperty.call(systems, systemParam) ? systemParam : String(Number(systemParam));
+          const entry = systems && Object.prototype.hasOwnProperty.call(systems, key) ? systems[key] : null;
+          const meta = snapshotMeta || {};
+          payloadText = JSON.stringify({ meta, system: entry ? { systemId: key, counts: entry.counts||{}, tribes: entry.tribes||{} } : null });
+          mode = 'system';
+        } else if(metaOnly){
+          const meta = snapshotMeta || {};
+          const generatedAt = meta.generatedAt || meta.updatedAt || snapshot.updatedAt || null;
+          payloadText = JSON.stringify({ meta, generatedAt, systems: systemCount, totalAssemblies: meta.totalAssemblies || null });
+          mode = 'meta';
+        } else {
+          payloadText = sanitized;
+          mode = 'full';
+        }
+      } catch {
+        parseOk = false;
+        mode = 'raw';
+        systemCount = 0;
+      }
+      const etag = await computeEtag(payloadText);
+      if(!forceBypass && req.headers.get('If-None-Match') === etag){
+        return new Response(null,{ status:304, headers:{ 'ETag': etag } });
+      }
+      const cacheControl = forceBypass ? 'no-store' : 'public, max-age=60, s-maxage=120, stale-while-revalidate=300';
+      const headers = new Headers({ 'Content-Type':'application/json','Cache-Control': cacheControl,'ETag': etag });
+      headers.set('X-Cache-Bypass', forceBypass ? '1' : '0');
+      headers.set('X-Structure-Source', source);
+      headers.set('X-Structure-Mode', mode);
+      if(parseOk){
+        headers.set('X-Structure-Systems', String(systemCount));
+        if(snapshotMeta && snapshotMeta.totalAssemblies!=null){ headers.set('X-Structure-Total', String(snapshotMeta.totalAssemblies)); }
+        if(snapshotMeta && snapshotMeta.generatedAt){ headers.set('X-Structure-Generated', String(snapshotMeta.generatedAt)); }
+      } else {
+        headers.set('X-Structure-Systems', '0');
+      }
+      return new Response(payloadText,{ status:200, headers });
+    }
     if(p === '/api/system-overlays'){
       const view = (url.searchParams.get('v')||'tribe').toLowerCase();
       let text=null; let source='kv';
