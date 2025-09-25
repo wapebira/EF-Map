@@ -302,7 +302,6 @@ if(typeof window !== 'undefined'){
     if(firstRouteStart===undefined){ firstRouteStart = performance.now(); }
   };
   (window as any).__efTrackP2PRouteMeta = (algo:'astar'|'dijkstra', mode:'fuel'|'jumps', hops:number, waypoints:number)=>{
-    try { track({ type:'p2p_route' }); } catch {}
     try { track({ type:'p2p_algo', algo }); } catch {}
     try { track({ type:'p2p_opt_mode', mode }); } catch {}
     const hb = hops<10? 'hops_lt_10' : hops<30? 'hops_10_30' : hops<60? 'hops_30_60' : 'hops_gt_60';

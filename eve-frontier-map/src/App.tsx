@@ -6271,7 +6271,6 @@ function App() {
         } catch {}
         setReplayCounter(c=>c+1);
         setShowTransmission(true);
-        try { track({ type:'transmission_replay' }); } catch {}; 
       }}
       aria-label="Replay transmission"
     >Replay Transmission</button>

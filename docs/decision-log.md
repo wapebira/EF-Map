@@ -70,6 +70,10 @@ Older entries and legacy indexer details have been archived: [archive\decision-l
 - Preview URLs
   - Pattern: `https://<branch-or-alias>.ef-map.pages.dev` (project `ef-map`).
 
+## 2025-09-25 – Telemetry dedup for P2P route + transmission replay
+- Goal: Remove duplicate client-side emits for `p2p_route` (meta helper) and `transmission_replay` (Incoming Transmission replay handler) to keep usage stats accurate while preserving existing batchi…
+- Risk: low (client-only telemetry tightening; no API/KV schema impact). Rollback: revert App + usage helper edits.
+- Gates: `npm run build` ✅ | Preview deploy (`wrangler pages deploy dist --project-name ef-map --branch feature-telemetry-dedup`) ✅ | Smoke: pages.dev preview `/api/stats?history=2` returns JSON; rep…
 ## 2025-09-25 – Reachability telemetry guardrails
 - Goal: Ensure reachability toggle analytics (`reachability_enable`/`reachability_disable`) reflect deliberate user actions and suppress default slider bucket noise.
 - Risk: low (client-side telemetry only; no server/KV interaction)
