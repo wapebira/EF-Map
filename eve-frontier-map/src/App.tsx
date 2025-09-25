@@ -591,6 +591,8 @@ function App() {
   const reachableSetRef = useRef<Set<number>|null>(null);
   const rangeBubbleRef = useRef<import('./modules/JumpRangeBubble').JumpRangeBubbleHandle|null>(null);
   const inRangeSetRef = useRef<Set<number>|null>(null);
+  const reachDimPrevRef = useRef<boolean|null>(null);
+  const reachRangeEditedRef = useRef(false);
   // External trigger for expanding Support section in Help
   const [supportExpandRequestId, setSupportExpandRequestId] = useState(0);
   const [cryptoModalOpen, setCryptoModalOpen] = useState(false);
@@ -2467,7 +2469,23 @@ function App() {
   // Reapply gradient if reachability dimming changes underlying colors (clear highlight when deselected)
   useEffect(()=>{ if(!highlightedSystem) return; }, [reachDim]);
 
-  useEffect(()=>{ if(!reachDim) { clearReachabilityDimming(); try { track({ type:'reachability_disable' }); } catch {} } else { if(reachableSetRef.current) { applyReachabilityDimming(); try { track({ type:'reachability_enable' }); } catch {} } } }, [reachDim]);
+  useEffect(()=>{
+    const prev = reachDimPrevRef.current;
+    reachDimPrevRef.current = reachDim;
+    if(prev === null){
+      if(reachDim && reachableSetRef.current){ applyReachabilityDimming(); }
+      if(!reachDim){ clearReachabilityDimming(); }
+      return;
+    }
+    if(prev === reachDim) return;
+    if(!reachDim){
+      clearReachabilityDimming();
+      try { track({ type:'reachability_disable' }); } catch {}
+    } else {
+      if(reachableSetRef.current){ applyReachabilityDimming(); }
+      try { track({ type:'reachability_enable' }); } catch {}
+    }
+  }, [reachDim]);
   // Stations sprite management
   useEffect(()=>{
     // Cleanup helper
@@ -2800,12 +2818,13 @@ function App() {
     if(reachAuto && origin){ computeReachability(origin, reachRange); }
   };
   const handleReachRangeChange = (r:number)=>{
+    reachRangeEditedRef.current = true;
     setReachRange(r);
     if(reachAuto && highlightedSystem){ computeReachability(highlightedSystem.name, r); }
   };
   // Track range bucket on stable changes (debounced)
   useEffect(()=>{
-    if(!reachRange) return;
+    if(!reachRangeEditedRef.current || !reachRange) return;
     const id = setTimeout(()=>{
       const r = reachRange;
       let bucket:string;
@@ -3271,6 +3290,7 @@ function App() {
       fetchShortShare(qShareId).then(full=>{
         if(!full) return;
         const share = decodeShare('#'+full);
+        if(!share) return;
         apply(share);
         try { track({ type:'share_resolved' }); } catch {}
         // Do NOT rewrite to long form; simply drop the query param to keep canonical short form semantics minimal
@@ -3283,6 +3303,7 @@ function App() {
       fetchShortShare(pathMatch).then(full=>{
         if(!full) return;
         const share = decodeShare('#'+full);
+        if(!share) return;
         apply(share);
         try { track({ type:'share_resolved' }); } catch {}
         // Intentionally do NOT rewrite URL to long hash; keep /s/<id> visible for sharing consistency
@@ -3295,6 +3316,7 @@ function App() {
         fetchShortShare(id).then(full=>{
           if(!full) return;
           const share = decodeShare('#'+full);
+          if(!share) return;
           apply(share);
           try { track({ type:'share_resolved' }); } catch {}
           // Replace short hash with long form for consistency
@@ -3302,8 +3324,11 @@ function App() {
         }).catch(()=>{/* ignore */});
       }
     } else {
-  apply(decodeShare(hash));
-  try { track({ type:'share_resolved' }); } catch {}
+  const share = decodeShare(hash);
+  if(share){
+    apply(share);
+    try { track({ type:'share_resolved' }); } catch {}
+  }
     }
   }, [isLoaded, mapData, selectSystem]);
 

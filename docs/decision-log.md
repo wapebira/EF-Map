@@ -1,8 +1,8 @@
-<!-- Curated on 2025-09-24. This log keeps entries relevant to: Primordium indexer (World API via Docker), Postgres, Grafana, Docker, and the Cloudflare-hosted website (KV stats/snapshots/overlays). Older/legacy D1 indexer & cron/decoder content moved to archive. -->
+<!-- Curated on 2025-09-25. This log keeps entries relevant to: Primordium indexer (World API via Docker), Postgres, Grafana, Docker, and the Cloudflare-hosted website (KV stats/snapshots/overlays). Older/legacy D1 indexer & cron/decoder content moved to archive. -->
 
 Older entries and legacy indexer details have been archived: [archive\decision-log\decision-log-legacy-2025-09-23.md](./archive/decision-log/decision-log-legacy-2025-09-23.md)
 
-## Current Environment Quick Reference (as of 2025-09-24)
+## Current Environment Quick Reference (as of 2025-09-25)
 - Hosting/runtime
   - Cloudflare Pages + Worker (Pages serves assets; `_worker.js` handles `/api/*`). Netlify code removed post-cutover.
   - Preview detection: hosts ending with `.pages.dev`; admin endpoints allow preview bypass with `?openPreview=1` when token is absent/mismatched.
@@ -70,6 +70,10 @@ Older entries and legacy indexer details have been archived: [archive\decision-l
 - Preview URLs
   - Pattern: `https://<branch-or-alias>.ef-map.pages.dev` (project `ef-map`).
 
+## 2025-09-25 – Reachability telemetry guardrails
+- Goal: Ensure reachability toggle analytics (`reachability_enable`/`reachability_disable`) reflect deliberate user actions and suppress default slider bucket noise.
+- Risk: low (client-side telemetry only; no server/KV interaction)
+- Gates: typecheck ✅ | build ✅ (`npm run build`)
 ## 2025-09-24 – Smart Assemblies colour parity
 - Goal: Align Smart Assemblies overlay colour modes with Smart Gates (theme accent, opposite accent, tribe legend/filter) and push tribe filtering through halo rendering plus panel metrics.
 - Risk: medium (core scene update loop + overlay UI wiring).
