@@ -14,7 +14,12 @@ export const IndexerStatusBadge: React.FC<IndexerStatusBadgeProps> = ({ inline }
       setSnapshots({ links: j?.links || null, acl: j?.acl || null });
     } catch { /* ignore */ }
   };
-  useEffect(()=>{ fetchSnapshots(); timerRef.current = setInterval(()=>{ fetchSnapshots(); }, 30000); return ()=> clearInterval(timerRef.current); }, []);
+  useEffect(()=>{
+    const INTERVAL_MS = 2 * 60 * 1000; // mirrors snapshot cadence (~2 minutes)
+    fetchSnapshots();
+    timerRef.current = setInterval(()=>{ fetchSnapshots(); }, INTERVAL_MS);
+    return ()=> clearInterval(timerRef.current);
+  }, []);
 
   // Classify Smart Gates freshness: green if any snapshot within last 10 minutes
   const gatesState: BadgeState = (()=>{

@@ -70,6 +70,26 @@ Older entries and legacy indexer details have been archived: [archive\decision-l
 - Preview URLs
   - Pattern: `https://<branch-or-alias>.ef-map.pages.dev` (project `ef-map`).
 
+## 2025-09-26 – Cinematic orbit query fixes
+- Goal: Ensure `orbit=1` deep links immediately enter cinematic mode, keep custom zoom distances, and re-seed cinematic bloom/palette visuals once the starfield rebuilds.
+- Risk: medium (camera animation + cinematic initialization)
+- Gates: typecheck ✅ | build ✅ (`npm run build`)
+## 2025-09-26 – Cinematic haze regression fix
+- Goal: Restore default cinematic visuals after orbit auto-init by reapplying shader slider uniforms whenever the scene rebuilds (previous run left radial glow at default, causing a bright white wash…
+- Risk: low (dependency array tweaks only)
+- Gates: typecheck ✅ | build ✅ (`npm run build`)
+## 2025-09-26 – Embed zoom minimum parity
+- Goal: Let deep links and embeds zoom as tightly as manual controls by lowering the clamp to the OrbitControls minimum distance.
+- Risk: low (constant + docs)
+- Gates: typecheck ✅ | build ✅ (`npm run build`)
+## 2025-09-26 – Gates badge polling cadence
+- Goal: Reduce `/api/debug-snapshots` polling frequency for the Gates status pill to align with snapshot cadence while keeping freshness checks.
+- Risk: low (interval constant only)
+- Gates: typecheck ✅ | build ✅ (`npm run build`)
+## 2025-09-26 – Cinematic orbit embed flag
+- Goal: Add an `orbit=1` query flag that auto-enables cinematic mode, keeps labels visible, and orbits the camera around the selected system until the viewer interacts.
+- Risk: medium (render loop adjustments + query parsing)
+- Gates: typecheck ✅ | build ✅ (`npm run build`)
 ## 2025-09-26 – Embed zoom parameter + label persistence
 - Goal: Restore automatic labels for deep-linked selections, add a sanitized `zoom` query for camera distance, and trim embed chrome to the essentials.
 - Risk: medium (App initialization + embed wiring)
