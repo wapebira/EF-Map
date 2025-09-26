@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">EF-Map emblem</title>
+  <desc id="desc">Stylised warp ring encircling EF letters on a deep space background.</desc>
+  <defs>
+    <linearGradient id="ring" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f97316" />
+      <stop offset="100%" stop-color="#facc15" />
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="64" fill="#0b0f17" />
+  <circle cx="128" cy="128" r="90" fill="none" stroke="url(#ring)" stroke-width="22" />
+  <path d="M92 86h42c14 0 24 8 24 22 0 12-8 20-18 21v1c12 1 20 9 20 22 0 15-11 26-29 26H92V86zm38 34c7 0 11-4 11-10s-4-10-11-10h-21v20h21zm3 56c8 0 13-5 13-12s-5-12-13-12h-24v24h24z" fill="#f8fafc" />
+</svg>

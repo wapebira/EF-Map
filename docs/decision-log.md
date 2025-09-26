@@ -70,6 +70,10 @@ Older entries and legacy indexer details have been archived: [archive\decision-l
 - Preview URLs
   - Pattern: `https://<branch-or-alias>.ef-map.pages.dev` (project `ef-map`).
 
+## 2025-09-26 – Search result favicon alignment
+- Goal: Align public favicons, touch icons, and structured data with the EF-Map logo so Google Search shows the branded round icon instead of the blank placeholder, and expose manifest/browserconfig …
+- Risk: low (static assets + head metadata only).
+- Gates: typecheck ✅ (n/a) | build ✅ (`npm run build`)
 ## 2025-09-26 – Cinematic orbit query fixes
 - Goal: Ensure `orbit=1` deep links immediately enter cinematic mode, keep custom zoom distances, and re-seed cinematic bloom/palette visuals once the starfield rebuilds.
 - Risk: medium (camera animation + cinematic initialization)

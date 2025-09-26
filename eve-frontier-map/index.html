@@ -3,14 +3,20 @@
   <head>
     <meta charset="UTF-8" />
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
-    <link rel="apple-touch-icon" href="/apple-touch-icon.png">
-    <link rel="icon" href="/favicon.ico" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+    <link rel="manifest" href="/site.webmanifest">
+    <link rel="mask-icon" href="/safari-pinned-tab.svg" color="#f97316">
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0b0f17" />
+    <meta name="msapplication-TileColor" content="#0b0f17" />
+    <meta name="msapplication-config" content="/browserconfig.xml" />
     <!-- Primary SEO -->
     <title>EVE Frontier Map & Smart Gate Route Planner (EF‑Map)</title>
     <meta name="description" content="Interactive EVE Frontier map with Smart Gate routing, region stats, system search, and shared tribe tactical marks. Fast, privacy‑respecting web tool." />
   <link rel="canonical" href="https://ef-map.com/" />
-    <meta name="theme-color" content="#0b0f17" />
     <meta name="keywords" content="EVE Frontier map, EVE Frontier route planner, Smart Gates, EF Map, EVE Frontier tools" />
     
     <!-- Open Graph / Facebook -->
@@ -38,6 +44,16 @@
   "target": "https://ef-map.com/?q={search_term}",
         "query-input": "required name=search_term"
       }
+    }
+    </script>
+    <!-- JSON-LD: Organization logo for search result favicon -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Organization",
+      "name": "EF-Map",
+      "url": "https://ef-map.com/",
+      "logo": "https://ef-map.com/ef-map-logo.png"
     }
     </script>
     
