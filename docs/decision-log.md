@@ -70,6 +70,10 @@ Older entries and legacy indexer details have been archived: [archive\decision-l
 - Preview URLs
   - Pattern: `https://<branch-or-alias>.ef-map.pages.dev` (project `ef-map`).
 
+## 2025-09-26 – Embed zoom parameter + label persistence
+- Goal: Restore automatic labels for deep-linked selections, add a sanitized `zoom` query for camera distance, and trim embed chrome to the essentials.
+- Risk: medium (App initialization + embed wiring)
+- Gates: typecheck ✅ | build ✅ (`npm run build`)
 ## 2025-09-26 – System deep links & embed preset
 - Goal: Support direct system selection via numeric queries/paths and introduce an embed-focused UI preset for iframe integrations, including an in-frame "Open on EF Map" escape hatch.
 - Risk: high (core App initialization & selection flows).

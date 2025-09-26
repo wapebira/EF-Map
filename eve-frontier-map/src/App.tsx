@@ -277,6 +277,9 @@ function App() {
   const [layoutResetToken, setLayoutResetToken] = useState(0); // layout-only reset for panel positions
   // UI visibility + scaling
   const [hideUI, setHideUI] = useState(false);
+  const ZOOM_MIN_DISTANCE = 250;
+  const ZOOM_MAX_DISTANCE = 50000;
+  const ZOOM_DEFAULT_DISTANCE = 5000;
   const embedMode = useMemo(() => {
     if (typeof window === 'undefined') return false;
     if (window.location.pathname === '/embed') return true;
@@ -323,10 +326,16 @@ function App() {
   const [highlightedSystem, setHighlightedSystem] = useState<SolarSystem | null>(null);
   const [lastSelectedSystemName, setLastSelectedSystemName] = useState<string>(''); // propagate to modules
   const [lastSelectedSystemId, setLastSelectedSystemId] = useState<number | null>(null);
+  const [initialZoomParam, setInitialZoomParam] = useState<number | null>(null);
   const openOnSiteUrl = useMemo(() => {
     if(!embedMode || typeof window === 'undefined' || lastSelectedSystemId == null) return null;
-    return `${window.location.origin}/?system=${lastSelectedSystemId}`;
-  }, [embedMode, lastSelectedSystemId]);
+    const params = new URLSearchParams();
+    params.set('system', String(lastSelectedSystemId));
+    if(initialZoomParam != null){
+      params.set('zoom', String(initialZoomParam));
+    }
+    return `${window.location.origin}/?${params.toString()}`;
+  }, [embedMode, lastSelectedSystemId, initialZoomParam]);
   const [lastDestinationSystemName, setLastDestinationSystemName] = useState<string>(''); // right-click destination propagation
   const [waypoints, setWaypoints] = useState<string[]>([]); // ordered list (max 10)
   const [avoidSystems, setAvoidSystems] = useState<string[]>([]);
@@ -730,6 +739,10 @@ function App() {
   const contextMenuObjRef = useRef<CSS2DObject | null>(null);
   const contextMenuSystemRef = useRef<SolarSystem | null>(null);
   const labelRendererRef = useRef<CSS2DRenderer | null>(null); // store CSS2DRenderer for pointerEvents toggling
+  const pendingZoomDistanceRef = useRef<number | null>(null);
+  const clampZoomDistance = useCallback((value: number) => {
+    return THREE.MathUtils.clamp(value, ZOOM_MIN_DISTANCE, ZOOM_MAX_DISTANCE);
+  }, [ZOOM_MIN_DISTANCE, ZOOM_MAX_DISTANCE]);
   // Waypoint / avoid helpers
   const addWaypoint = useCallback((name: string) => {
     setWaypoints(prev => prev.includes(name) ? prev : (prev.length < 10 ? [...prev, name] : prev));
@@ -2345,6 +2358,54 @@ function App() {
 
   }, [createSystemLabelElement, setLabelText, getTransformedPosition, isPlanetCountActive, isRegionHighlighterActive, accentIsBlue, reachAuto, reachRange]);
 
+  useEffect(() => {
+    if (!highlightedSystem) {
+      return;
+    }
+    if (cinematicModeRef.current && !cinematicLabelsRef.current) {
+      return;
+    }
+    const scene = sceneRef.current;
+    if (!scene) {
+      return;
+    }
+
+    let label = selectedLabelObj.current;
+    let parent: THREE.Object3D | null = null;
+    if (label && label.parent instanceof THREE.Object3D) {
+      parent = label.parent;
+    }
+
+    if (!parent) {
+      parent = new THREE.Object3D();
+      scene.add(parent);
+      if (label) {
+        parent.add(label);
+      }
+    } else if (parent.parent !== scene) {
+      scene.add(parent);
+    }
+
+    const pos = getTransformedPosition(highlightedSystem.position);
+    parent.position.set(pos.x, pos.y, pos.z);
+
+    if (!label) {
+      const el = createSystemLabelElement(highlightedSystem.name, true, highlightedSystem.planets);
+      label = new CSS2DObject(el);
+      label.position.set(0, 0, 0);
+      parent.add(label);
+      selectedLabelObj.current = label;
+    } else {
+      setLabelText(label, highlightedSystem.name, highlightedSystem.planets);
+      label.position.set(0, 0, 0);
+      if (label.parent !== parent) {
+        parent.add(label);
+      }
+    }
+
+    label.visible = true;
+  }, [highlightedSystem, sceneReadyToken, cinematicMode, cinematicLabels, createSystemLabelElement, getTransformedPosition, setLabelText]);
+
   // Reachability: init worker lazily
   const ensureReachWorker = () => {
     if(!reachabilityWorkerRef.current){
@@ -3281,6 +3342,13 @@ function App() {
     initialHashAppliedRef.current = true;
     const params = new URLSearchParams(window.location.search);
     let shareApplied = false;
+    const parseZoomParam = (raw: string | null): number | null => {
+      if(raw == null) return null;
+      const parsed = Number(raw);
+      if(!Number.isFinite(parsed)) return null;
+      return clampZoomDistance(parsed);
+    };
+    const zoomOverrideFromQuery = parseZoomParam(params.get('zoom'));
   const qShareId = params.get('share');
   const hash = window.location.hash;
   const pathMatch = window.location.pathname.startsWith('/s/') ? window.location.pathname.slice(3).replace(/[^A-Za-z0-9_-]/g,'') : '';
@@ -3378,10 +3446,16 @@ function App() {
       const key = String(systemId);
       const lookup = (mapData.solar_systems as Record<string, SolarSystem | undefined>)[key];
       if(lookup){
+        pendingZoomDistanceRef.current = zoomOverrideFromQuery;
+        setInitialZoomParam(zoomOverrideFromQuery);
         selectSystem(lookup);
+      } else {
+        setInitialZoomParam(null);
       }
+    } else {
+      setInitialZoomParam(null);
     }
-  }, [isLoaded, mapData, selectSystem]);
+  }, [isLoaded, mapData, selectSystem, clampZoomDistance]);
 
   // Stop / cancel the current calculation: terminate worker and recreate a fresh one
   const stopCalculation = useCallback(() => {
@@ -5408,9 +5482,16 @@ function App() {
       anim.endTarget.copy(newTarget);
 
       const offset = new THREE.Vector3().subVectors(anim.startPos, anim.startTarget);
-      anim.endPos.copy(newTarget).add(offset);
+      if(pendingZoomDistanceRef.current != null){
+        const desired = clampZoomDistance(pendingZoomDistanceRef.current);
+        const direction = offset.lengthSq() > 1e-6 ? offset.clone().normalize() : new THREE.Vector3(0, 0, 1);
+        anim.endPos.copy(newTarget).add(direction.multiplyScalar(desired));
+        pendingZoomDistanceRef.current = null;
+      } else {
+        anim.endPos.copy(newTarget).add(offset.lengthSq() > 0 ? offset : new THREE.Vector3(0, 0, ZOOM_DEFAULT_DISTANCE));
+      }
     }
-  }, [highlightedSystem, getTransformedPosition]);
+  }, [highlightedSystem, getTransformedPosition, clampZoomDistance]);
 
   // Handle Hover Effect
   useEffect(() => {
@@ -6815,10 +6896,11 @@ function App() {
   <div ref={mountRef} style={{ width: '100vw', height: '100vh' }} />
   <div className="ef-vignette" />
   {/* Small persistent logo and indexer status */}
-  {/* Persistent logo (always visible even when UI hidden) */}
-  <img src={logo} alt="EF Map" className="ef-small-logo" />
-  {/* Read-only Indexer status badge; appears bottom-right by default. */}
-  <IndexerStatusBadge />
+  {/* Persistent logo and status badge suppressed in embed mode */}
+  {!embedMode && (
+    <img src={logo} alt="EF Map" className="ef-small-logo" />
+  )}
+  {!embedMode && <IndexerStatusBadge />}
     </>
   );
 }

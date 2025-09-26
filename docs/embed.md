@@ -3,7 +3,7 @@
 ## Query-based system highlight
 - Format: `https://ef-map.com/?system=<solarSystemId>`
 - `<solarSystemId>` must match the numeric identifier used in the Datacore/World exports (e.g., `30000001`).
-- On load the map zooms/selects the system just as if a user left-clicked it.
+- On load the map selects the system, shows the in-map label, and applies the same highlight used when a user left-clicks it.
 - Additional parameters (for example `share` hashes) still take priority; the system query runs only when no shared route is applied.
 
 ## Numeric path variant (optional)
@@ -12,7 +12,7 @@
 
 ## Embed mode (iframe friendly)
 - Format: `https://ef-map.com/embed?system=<solarSystemId>` or append `&embed=1` to any map URL.
-- UI chrome, panels, and quick controls start hidden; only the starfield, selection highlight, small logo, and indexer badge remain.
+- UI chrome, panels, quick controls, persistent logo, and the "Gates OK" badge are hidden; the embed shows only the starfield, active selection, and the escape-pill CTA.
 - Intended for partner sites to embed a focused view of a single system.
 - An "Open on EF Map" pill appears in the top-right so viewers can launch the full experience in a new tab with the same system pre-selected.
 
@@ -30,8 +30,9 @@
 
 ### Optional query parameters
 - `system`: numeric system id to highlight (recommended).
+- `zoom`: camera distance in map units. Default is `5000`, minimum `250`, maximum `50000`. Smaller numbers zoom in tighter on the selected star.
 - `embed=1`: activates the embed preset without needing the `/embed` path.
-- Future extensions may add `zoom`, `autoRotate`, or `labels`; these will be documented here when available.
+- Future extensions may add `autoRotate` or `labels`; these will be documented here when available.
 
 ## Notes & limitations
 - The embedded view disables toolbar/UI controls; hosts should provide their own context or link to the full map.
