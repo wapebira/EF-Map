@@ -2,12 +2,16 @@
 
 ## Query-based system highlight
 - Format: `https://ef-map.com/?system=<solarSystemId>`
+- Example (default zoom): `https://ef-map.com/?system=30000001` – keeps the default camera distance (`5000`).
+- Example with zoom override: `https://ef-map.com/?system=30000001&zoom=2500` – starts closer than the default zoom.
 - `<solarSystemId>` must match the numeric identifier used in the Datacore/World exports (e.g., `30000001`).
 - On load the map selects the system, shows the in-map label, and applies the same highlight used when a user left-clicks it.
 - Additional parameters (for example `share` hashes) still take priority; the system query runs only when no shared route is applied.
 
 ## Numeric path variant (optional)
 - Format: `https://ef-map.com/<solarSystemId>`
+- Example (default zoom): `https://ef-map.com/30000001`
+- Example with zoom override: `https://ef-map.com/30000001?zoom=7500` – starts farther out than the default zoom.
 - Behaves the same as the query parameter and exists for parity with external tools already storing numeric URLs.
 
 ## Embed mode (iframe friendly)
@@ -19,7 +23,7 @@
 ### Example iframe snippet
 ```html
 <iframe
-  src="https://ef-map.com/embed?system=30000001"
+  src="https://ef-map.com/embed?system=30000001&zoom=5000"
   width="640"
   height="360"
   frameborder="0"
