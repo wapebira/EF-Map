@@ -277,6 +277,12 @@ function App() {
   const [layoutResetToken, setLayoutResetToken] = useState(0); // layout-only reset for panel positions
   // UI visibility + scaling
   const [hideUI, setHideUI] = useState(false);
+  const embedMode = useMemo(() => {
+    if (typeof window === 'undefined') return false;
+    if (window.location.pathname === '/embed') return true;
+    const params = new URLSearchParams(window.location.search);
+    return params.get('embed') === '1';
+  }, []);
   // Feature flag: allow hiding the promotional Transmission UI while retaining code for future use
   const TRANSMISSION_ENABLED = false; // flip to true to re-enable promotional transmission UI
   const [showTransmission, setShowTransmission] = useState(()=>{
@@ -316,6 +322,11 @@ function App() {
   const [uiScale, setUiScale] = useState(initialScale); // active scale (applies only to main panels + toolbar)
   const [highlightedSystem, setHighlightedSystem] = useState<SolarSystem | null>(null);
   const [lastSelectedSystemName, setLastSelectedSystemName] = useState<string>(''); // propagate to modules
+  const [lastSelectedSystemId, setLastSelectedSystemId] = useState<number | null>(null);
+  const openOnSiteUrl = useMemo(() => {
+    if(!embedMode || typeof window === 'undefined' || lastSelectedSystemId == null) return null;
+    return `${window.location.origin}/?system=${lastSelectedSystemId}`;
+  }, [embedMode, lastSelectedSystemId]);
   const [lastDestinationSystemName, setLastDestinationSystemName] = useState<string>(''); // right-click destination propagation
   const [waypoints, setWaypoints] = useState<string[]>([]); // ordered list (max 10)
   const [avoidSystems, setAvoidSystems] = useState<string[]>([]);
@@ -570,7 +581,20 @@ function App() {
     } catch {/* ignore */}
   }, [uiScale]);
   // Hide UI toggle – count only when enabling
-  useEffect(()=>{ if(hideUI){ try { track({ type:'ui_hide' }); } catch {} } }, [hideUI]);
+  useEffect(()=>{
+    if(embedMode) return;
+    if(hideUI){ try { track({ type:'ui_hide' }); } catch {} }
+  }, [hideUI, embedMode]);
+  useEffect(()=>{
+    if(!embedMode) return;
+    setHideUI(true);
+  }, [embedMode]);
+  useEffect(()=>{
+    if(!embedMode) return;
+    if(typeof document === 'undefined') return;
+    document.body.classList.add('ef-embed');
+    return () => { document.body.classList.remove('ef-embed'); };
+  }, [embedMode]);
   // Show Distance – count only when user turns it on
   useEffect(()=>{ if(showDistance){ try { track({ type:'show_distance' }); } catch {} } }, [showDistance]);
   const [minPlanets, setMinPlanets] = useState(0);
@@ -2233,7 +2257,8 @@ function App() {
 
   const selectSystem = useCallback((system: SolarSystem) => {
   // Set the highlighted system for camera animation and the main rendering effect.
-    setHighlightedSystem(system);
+  setHighlightedSystem(system);
+  setLastSelectedSystemId(system.id);
   // Store name for external consumers (P2P / Scout)
   try { setLastSelectedSystemName(system.name); } catch {/* ignore */}
     // Clear any open context menu when a new system is selected via left-click
@@ -3086,6 +3111,7 @@ function App() {
 
   // Load persisted prefs once
   useEffect(()=>{
+    if(embedMode) return;
     // Effect still syncs open panels from prefs (order is reconstructed in same sequence)
     const prefs = loadPrefs();
     if(prefs.openPanels?.length){
@@ -3097,7 +3123,7 @@ function App() {
   // (Scout ship max range persistence removed; ignore any existing value)
     if(prefs.optimizeFor){ lastP2PParamsRef.current.optimize = prefs.optimizeFor; setPersistedOptimize(prefs.optimizeFor); }
     if(prefs.algorithm){ lastP2PParamsRef.current.algo = prefs.algorithm; setPersistedAlgo(prefs.algorithm); }
-  },[]);
+  },[embedMode]);
 
   // Persist accent & open panels
   useEffect(()=>{ setAccent(accentIsBlue ? 'blue' : 'orange'); }, [accentIsBlue]);
@@ -3254,12 +3280,14 @@ function App() {
     if(initialHashAppliedRef.current) return;
     initialHashAppliedRef.current = true;
     const params = new URLSearchParams(window.location.search);
+    let shareApplied = false;
   const qShareId = params.get('share');
   const hash = window.location.hash;
   const pathMatch = window.location.pathname.startsWith('/s/') ? window.location.pathname.slice(3).replace(/[^A-Za-z0-9_-]/g,'') : '';
     const systemsByLower = new Map<string, SolarSystem>(Object.values(mapData.solar_systems).map(s=> [s.name.toLowerCase(), s]));
     const apply = (share:any)=>{
       if(!share) return;
+      shareApplied = true;
       const allExist = share.path.every((p:string)=> systemsByLower.has(p.toLowerCase()));
       if(!allExist || share.path.length < 2) return;
       if(share.type==='p'){
@@ -3329,6 +3357,29 @@ function App() {
     apply(share);
     try { track({ type:'share_resolved' }); } catch {}
   }
+    }
+
+    if(shareApplied) return;
+
+    let systemId: number | null = null;
+    const systemParam = params.get('system');
+    if(systemParam && /^\d{3,}$/.test(systemParam)){
+      const parsed = Number(systemParam);
+      if(Number.isFinite(parsed)) systemId = parsed;
+    }
+    if(systemId === null){
+      const pathParts = window.location.pathname.split('/').filter(Boolean);
+      if(pathParts.length === 1 && /^\d{3,}$/.test(pathParts[0])){
+        const parsed = Number(pathParts[0]);
+        if(Number.isFinite(parsed)) systemId = parsed;
+      }
+    }
+    if(systemId !== null){
+      const key = String(systemId);
+      const lookup = (mapData.solar_systems as Record<string, SolarSystem | undefined>)[key];
+      if(lookup){
+        selectSystem(lookup);
+      }
     }
   }, [isLoaded, mapData, selectSystem]);
 
@@ -6275,6 +6326,31 @@ function App() {
       aria-label="Replay transmission"
     >Replay Transmission</button>
   )}
+  {embedMode && openOnSiteUrl && (
+    <div style={{ position:'absolute', top:16, right:16, zIndex:3300 }}>
+      <a
+        href={openOnSiteUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        style={{
+          display:'inline-flex',
+          alignItems:'center',
+          gap:6,
+          padding:'8px 14px',
+          borderRadius:999,
+          background:'rgba(0,0,0,0.65)',
+          color:'#fff',
+          textDecoration:'none',
+          fontSize:13,
+          fontWeight:600,
+          letterSpacing:0.3,
+          border:'1px solid rgba(255,255,255,0.35)',
+          backdropFilter:'blur(10px) saturate(150%)'
+        }}
+        aria-label="Open this system on ef-map.com"
+      >Open on EF Map ↗</a>
+    </div>
+  )}
   {/* Top-left controls row: Search box + Identity box side-by-side */}
   {!hideUI && (
     <div style={{ position:'absolute', top:10, left:10, zIndex:1405, display:'flex', gap:4, alignItems:'stretch', transform:`scale(${uiScale})`, transformOrigin:'top left' }}>
@@ -6711,7 +6787,8 @@ function App() {
           {/* StationsPanel removed: feature rail toggle directly controls icon sprites without extra popup */}
         </>
       )}
-      {/* Persistent quick controls (never hidden so user can un-hide UI; not scaled for pointer stability) */}
+  {/* Persistent quick controls (suppressed in embed mode; otherwise let users restore UI or adjust scale) */}
+      {!embedMode && (
       <div style={{ position: 'fixed', left: 10, bottom: 10, zIndex: 2000 }}>
         <div style={{ display:'flex', gap:'10px', alignItems:'center', flexWrap:'wrap' }}>
           <label style={{ color: 'white', backgroundColor: 'rgba(0,0,0,0.5)', padding: '6px 8px', borderRadius: '6px', display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -6734,6 +6811,7 @@ function App() {
           </div>
         </div>
       </div>
+      )}
   <div ref={mountRef} style={{ width: '100vw', height: '100vh' }} />
   <div className="ef-vignette" />
   {/* Small persistent logo and indexer status */}

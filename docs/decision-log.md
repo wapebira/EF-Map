@@ -1,8 +1,8 @@
-<!-- Curated on 2025-09-25. This log keeps entries relevant to: Primordium indexer (World API via Docker), Postgres, Grafana, Docker, and the Cloudflare-hosted website (KV stats/snapshots/overlays). Older/legacy D1 indexer & cron/decoder content moved to archive. -->
+<!-- Curated on 2025-09-26. This log keeps entries relevant to: Primordium indexer (World API via Docker), Postgres, Grafana, Docker, and the Cloudflare-hosted website (KV stats/snapshots/overlays). Older/legacy D1 indexer & cron/decoder content moved to archive. -->
 
 Older entries and legacy indexer details have been archived: [archive\decision-log\decision-log-legacy-2025-09-23.md](./archive/decision-log/decision-log-legacy-2025-09-23.md)
 
-## Current Environment Quick Reference (as of 2025-09-25)
+## Current Environment Quick Reference (as of 2025-09-26)
 - Hosting/runtime
   - Cloudflare Pages + Worker (Pages serves assets; `_worker.js` handles `/api/*`). Netlify code removed post-cutover.
   - Preview detection: hosts ending with `.pages.dev`; admin endpoints allow preview bypass with `?openPreview=1` when token is absent/mismatched.
@@ -70,6 +70,10 @@ Older entries and legacy indexer details have been archived: [archive\decision-l
 - Preview URLs
   - Pattern: `https://<branch-or-alias>.ef-map.pages.dev` (project `ef-map`).
 
+## 2025-09-26 – System deep links & embed preset
+- Goal: Support direct system selection via numeric queries/paths and introduce an embed-focused UI preset for iframe integrations, including an in-frame "Open on EF Map" escape hatch.
+- Risk: high (core App initialization & selection flows).
+- Gates: `npm run build` ✅
 ## 2025-09-25 – Telemetry dedup for P2P route + transmission replay
 - Goal: Remove duplicate client-side emits for `p2p_route` (meta helper) and `transmission_replay` (Incoming Transmission replay handler) to keep usage stats accurate while preserving existing batchi…
 - Risk: low (client-only telemetry tightening; no API/KV schema impact). Rollback: revert App + usage helper edits.
