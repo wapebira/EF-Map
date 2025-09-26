@@ -277,7 +277,7 @@ function App() {
   const [layoutResetToken, setLayoutResetToken] = useState(0); // layout-only reset for panel positions
   // UI visibility + scaling
   const [hideUI, setHideUI] = useState(false);
-  const ZOOM_MIN_DISTANCE = 250;
+  const ZOOM_MIN_DISTANCE = 10;
   const ZOOM_MAX_DISTANCE = 50000;
   const ZOOM_DEFAULT_DISTANCE = 5000;
   const embedMode = useMemo(() => {
@@ -286,6 +286,19 @@ function App() {
     const params = new URLSearchParams(window.location.search);
     return params.get('embed') === '1';
   }, []);
+  const initialOrbitRequested = useMemo(() => {
+    if (typeof window === 'undefined') return false;
+    const params = new URLSearchParams(window.location.search);
+    const raw = params.get('orbit');
+    if (raw == null) return false;
+    const normalized = raw.trim().toLowerCase();
+    if (normalized === '' || normalized === '1' || normalized === 'true' || normalized === 'yes') return true;
+    if (normalized === '0' || normalized === 'false' || normalized === 'no') return false;
+    return true;
+  }, []);
+  const [cinematicOrbitRequested, setCinematicOrbitRequested] = useState(initialOrbitRequested);
+  const cinematicOrbitRef = useRef(cinematicOrbitRequested);
+  useEffect(() => { cinematicOrbitRef.current = cinematicOrbitRequested; }, [cinematicOrbitRequested]);
   // Feature flag: allow hiding the promotional Transmission UI while retaining code for future use
   const TRANSMISSION_ENABLED = false; // flip to true to re-enable promotional transmission UI
   const [showTransmission, setShowTransmission] = useState(()=>{
@@ -324,6 +337,8 @@ function App() {
   const initialScale = (():number=>{ const p=getPrefs(); return (p as any).uiScale && typeof (p as any).uiScale==='number'? (p as any).uiScale : 1; })();
   const [uiScale, setUiScale] = useState(initialScale); // active scale (applies only to main panels + toolbar)
   const [highlightedSystem, setHighlightedSystem] = useState<SolarSystem | null>(null);
+  const highlightedSystemRef = useRef<SolarSystem | null>(null);
+  useEffect(()=> { highlightedSystemRef.current = highlightedSystem; }, [highlightedSystem]);
   const [lastSelectedSystemName, setLastSelectedSystemName] = useState<string>(''); // propagate to modules
   const [lastSelectedSystemId, setLastSelectedSystemId] = useState<number | null>(null);
   const [initialZoomParam, setInitialZoomParam] = useState<number | null>(null);
@@ -609,7 +624,19 @@ function App() {
   const [minPlanets, setMinPlanets] = useState(0);
   const [maxPlanets, setMaxPlanets] = useState(0);
   // Cinematic mode active flag (enables scene post-processing & behavior changes)
-  const [cinematicMode, setCinematicMode] = useState(false);
+  const [cinematicMode, setCinematicMode] = useState(() => initialOrbitRequested);
+  useEffect(()=>{
+    if(initialOrbitRequested){
+      setCinematicMode(true);
+    }
+  }, [initialOrbitRequested]);
+  const prevCinematicModeRef = useRef(false);
+  useEffect(()=>{
+    if(!cinematicMode && prevCinematicModeRef.current && cinematicOrbitRequested){
+      setCinematicOrbitRequested(false);
+    }
+    prevCinematicModeRef.current = cinematicMode;
+  }, [cinematicMode, cinematicOrbitRequested]);
   // Reachability feature state
   const [reachRange, setReachRange] = useState<number>(120);
   const [reachAuto, setReachAuto] = useState(false);
@@ -709,9 +736,14 @@ function App() {
   const [hazeRadiusDraft, setHazeRadiusDraft] = useState(250);
   const [aberrationAmt, setAberrationAmt] = useState(0.002);
   // Optional display of labels while in cinematic mode
-  const [cinematicLabels, setCinematicLabels] = useState(false); // Toggle to optionally show hover & selection labels during cinematic mode
+  const [cinematicLabels, setCinematicLabels] = useState(()=> initialOrbitRequested ? true : false); // Toggle to optionally show hover & selection labels during cinematic mode
   const cinematicLabelsRef = useRef(false);
   useEffect(()=>{ cinematicLabelsRef.current = cinematicLabels; }, [cinematicLabels]);
+  useEffect(()=>{
+    if(cinematicOrbitRequested && !cinematicLabels){
+      setCinematicLabels(true);
+    }
+  }, [cinematicOrbitRequested, cinematicLabels]);
   // Autonomous cluster tour (camera glides to random dense cluster centroids)
   const [autoClusterTour, setAutoClusterTour] = useState(false);
   const autoClusterTourRef = useRef(false); useEffect(()=>{ autoClusterTourRef.current = autoClusterTour; }, [autoClusterTour]);
@@ -980,6 +1012,8 @@ function App() {
   const routeAnimUpdatersRef = useRef<Array<() => void>>([]);
   // Dynamic route thickness scaling refs (for pulse sphere sync with pixel cap)
   // (Legacy tube radius refs removed; ribbon handles pixel sizing in shader.)
+
+  const cinematicOrbitStateRef = useRef<{ targetId: number | null; radius: number; theta: number; verticalOffset: number }>({ targetId: null, radius: 6000, theta: 0, verticalOffset: 0 });
 
   // New refs for managing overlays
   const selectedStarHaloRef = useRef<THREE.Points | null>(null);
@@ -2405,6 +2439,43 @@ function App() {
 
     label.visible = true;
   }, [highlightedSystem, sceneReadyToken, cinematicMode, cinematicLabels, createSystemLabelElement, getTransformedPosition, setLabelText]);
+
+  useEffect(() => {
+    if (!highlightedSystem || !cameraRef.current) return;
+    const transformed = getTransformedPosition(highlightedSystem.position);
+    const focus = new THREE.Vector3(transformed.x, transformed.y, transformed.z);
+    const camera = cameraRef.current;
+    const offset = camera.position.clone().sub(focus);
+    const offsetLength = offset.length();
+    const state = cinematicOrbitStateRef.current;
+    const prevRadius = state.radius || 0;
+    const prevVertical = state.verticalOffset || 0;
+
+  let desiredRadius = clampZoomDistance(offsetLength);
+    if (pendingZoomDistanceRef.current != null) {
+      desiredRadius = clampZoomDistance(pendingZoomDistanceRef.current);
+    } else if (initialOrbitRequested && initialZoomParam != null) {
+      desiredRadius = clampZoomDistance(initialZoomParam);
+    }
+
+    let theta = state.theta || 0;
+    let verticalOffset = prevVertical;
+    if (offsetLength > 1e-3) {
+      theta = Math.atan2(offset.z, offset.x);
+      const direction = offset.clone().normalize();
+      verticalOffset = direction.y * desiredRadius;
+    } else if (prevRadius > 1e-3) {
+      const ratio = prevVertical / prevRadius;
+      verticalOffset = ratio * desiredRadius;
+    } else {
+      verticalOffset = 0;
+    }
+
+    state.targetId = highlightedSystem.id;
+    state.radius = desiredRadius;
+    state.theta = theta;
+    state.verticalOffset = verticalOffset;
+  }, [highlightedSystem, getTransformedPosition, clampZoomDistance, initialOrbitRequested, initialZoomParam]);
 
   // Reachability: init worker lazily
   const ensureReachWorker = () => {
@@ -4158,6 +4229,17 @@ function App() {
          controlsRef.current?.target.lerpVectors(anim.startTarget, anim.endTarget, progress);
          if (progress >= 1) {
            anim.isAnimating = false;
+           if (cinematicOrbitRef.current && cinematicModeRef.current && highlightedSystemRef.current && cameraRef.current && controlsRef.current) {
+             const currentTarget = controlsRef.current.target.clone();
+             const currentPos = cameraRef.current.position.clone();
+             const delta = currentPos.sub(currentTarget);
+             const radius = clampZoomDistance(delta.length());
+             const state = cinematicOrbitStateRef.current;
+             state.targetId = highlightedSystemRef.current.id;
+             state.radius = radius;
+             state.theta = Math.atan2(delta.z, delta.x);
+             state.verticalOffset = delta.y;
+           }
          }
        }
        // Run route animation updaters
@@ -4239,8 +4321,8 @@ function App() {
          }
          // Bloom pulse
          if(bloomPassRef.current){ const base = bloomStrengthRef.current; bloomPassRef.current.strength = base * (1 + (bloomPulseEnabled? bloomPulseAmp:0)*Math.sin(performance.now()/1000*0.35)); }
-         // Camera idle drift
-         if(cameraDriftEnabled && !autoCamPausedRef.current && !(clusterAnimRef.current)){ const idleTime = (Date.now() - lastInteractionRef.current)/1000; if(idleTime > 6 && cameraRef.current){ const t = performance.now()/1000; cameraRef.current.position.x += Math.sin(t*0.07)*0.3; cameraRef.current.position.y += Math.cos(t*0.05)*0.25; cameraRef.current.position.z += Math.sin(t*0.04)*0.15; } }
+  // Camera idle drift
+  if(cameraDriftEnabled && !cinematicOrbitRef.current && !autoCamPausedRef.current && !(clusterAnimRef.current)){ const idleTime = (Date.now() - lastInteractionRef.current)/1000; if(idleTime > 6 && cameraRef.current){ const t = performance.now()/1000; cameraRef.current.position.x += Math.sin(t*0.07)*0.3; cameraRef.current.position.y += Math.cos(t*0.05)*0.25; cameraRef.current.position.z += Math.sin(t*0.04)*0.15; } }
          // Rotate dust layers
          if (dustPointsRef.current) dustPointsRef.current.rotation.y += 0.0004;
          if (secondDustEnabled && secondDustRef.current) secondDustRef.current.rotation.y -= 0.00025;
@@ -4248,8 +4330,9 @@ function App() {
          const tSec = performance.now()/1000;
          if(dustPointsRef.current){ const mat:any = dustPointsRef.current.material; if(mat.userData?.shader){ mat.userData.shader.uniforms.uTime.value = tSec; } }
          if(secondDustRef.current){ const mat:any = secondDustRef.current.material; if(mat.userData?.shader){ mat.userData.shader.uniforms.uTime.value = tSec; } }
-         const nowPerf = performance.now();
-         lastFrameTimeRef.current = nowPerf;
+  const nowPerf = performance.now();
+  const deltaSec = Math.max(0, Math.min(0.25, (nowPerf - lastFrameTimeRef.current)/1000));
+  lastFrameTimeRef.current = nowPerf;
          // Autonomous cluster tour logic (no user selection required)
          if(autoClusterTourRef.current && cinematicModeRef.current && mapData){
            const nowMs = Date.now();
@@ -4344,6 +4427,34 @@ function App() {
          } else if(!autoClusterTourRef.current){
            clusterAnimRef.current = null; // reset if disabled
          }
+            if(cinematicOrbitRef.current && cinematicModeRef.current && !autoCamPausedRef.current && !clusterAnimRef.current && !animationRef.current.isAnimating && !isDraggingRef.current){
+              const targetSystem = highlightedSystemRef.current;
+              if(targetSystem && cameraRef.current && controlsRef.current){
+                if(cinematicOrbitStateRef.current.targetId !== targetSystem.id){
+                  const refreshed = getTransformedPosition(targetSystem.position);
+                  const pivotInit = new THREE.Vector3(refreshed.x, refreshed.y, refreshed.z);
+                  const offset = cameraRef.current.position.clone().sub(pivotInit);
+                  cinematicOrbitStateRef.current.targetId = targetSystem.id;
+                  cinematicOrbitStateRef.current.radius = clampZoomDistance(offset.length());
+                  cinematicOrbitStateRef.current.theta = Math.atan2(offset.z, offset.x);
+                  cinematicOrbitStateRef.current.verticalOffset = offset.y;
+                }
+                const transformed = getTransformedPosition(targetSystem.position);
+                const pivot = new THREE.Vector3(transformed.x, transformed.y, transformed.z);
+                const orbitState = cinematicOrbitStateRef.current;
+                const speed = 0.18;
+                const step = Math.max(deltaSec, 0.016);
+                orbitState.theta += speed * step;
+                const bob = Math.sin(orbitState.theta * 0.5) * Math.min(400, orbitState.radius * 0.08);
+                const desiredPos = new THREE.Vector3(
+                  pivot.x + Math.cos(orbitState.theta) * orbitState.radius,
+                  pivot.y + orbitState.verticalOffset + bob,
+                  pivot.z + Math.sin(orbitState.theta) * orbitState.radius
+                );
+                cameraRef.current.position.lerp(desiredPos, 0.08);
+                controlsRef.current.target.lerp(pivot, 0.15);
+              }
+            }
          // Meteors (shooting stars)
          const now = performance.now();
          if(shootingStarsEnabled && meteorsGroupRef.current){
@@ -4501,7 +4612,7 @@ function App() {
       smartAssemblyHalosRef.current?.dispose();
       smartAssemblyHalosRef.current = null;
     };
-  }, [isLoaded, ringTexture, cinematicMode]);
+  }, [isLoaded, ringTexture, cinematicMode, clampZoomDistance]);
   // FXAA pipeline removed
 
   // Create and update starfield and stargates
@@ -4545,8 +4656,9 @@ function App() {
   pointsGeometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
   pointsGeometry.setAttribute('aSize', new THREE.Float32BufferAttribute(sizes, 1));
 
-    starFieldRef.current = new THREE.Points(pointsGeometry, pointsMaterial);
-    sceneRef.current.add(starFieldRef.current);
+  starFieldRef.current = new THREE.Points(pointsGeometry, pointsMaterial);
+  sceneRef.current.add(starFieldRef.current);
+  setSceneReadyToken((token) => token + 1);
 
     if (stargateLinesRef.current) {
       sceneRef.current.remove(stargateLinesRef.current);
@@ -4842,7 +4954,7 @@ function App() {
     if(cinematicMode) enable(); else disable();
     return ()=>{ if(cinematicMode) disable(); };
   // Cinematic enable/disable lifecycle (exclude bloomStrength so slider changes don't recreate composer)
-  }, [cinematicMode, /* bloomStrength removed */ dustAmount, cinExposure]);
+  }, [cinematicMode, /* bloomStrength removed */ dustAmount, cinExposure, sceneReadyToken]);
 
   // Star palette application via geometry colors (overrides any previous per-star coloring while in cinematic mode)
   const applyStarPalette = useCallback((mode: typeof starColorMode)=>{
@@ -4873,7 +4985,7 @@ function App() {
   }, [cinematicMode]);
 
   // Re-apply palette when mode changes or when cinematic toggles on
-  useEffect(()=>{ applyStarPalette(starColorMode); }, [starColorMode, cinematicMode, applyStarPalette]);
+  useEffect(()=>{ applyStarPalette(starColorMode); }, [starColorMode, cinematicMode, applyStarPalette, sceneReadyToken]);
   // Retint background & aurora when palette changes (if present)
   useEffect(()=>{
     if(!cinematicMode) return;
@@ -4886,21 +4998,21 @@ function App() {
       const auroraTintForMode = (mode:string)=>{ switch(mode){ case 'purple': return new THREE.Color(0x8b6dff); case 'white': return new THREE.Color(0xbccfff); case 'blue': return new THREE.Color(0x5d8fff); case 'red': return new THREE.Color(0xff6b4b); case 'yellow': return new THREE.Color(0xffdd66); case 'random': return new THREE.Color(0x6fbaff); default: return new THREE.Color(0x5d8fff);} };
       if(auroraMatRef.current.uniforms.uTint) auroraMatRef.current.uniforms.uTint.value = auroraTintForMode(starColorMode);
     }
-  }, [starColorMode, cinematicMode]);
+  }, [starColorMode, cinematicMode, sceneReadyToken]);
 
   // Respond to user cinematic color control changes
   useEffect(()=>{
     if(!cinematicMode) return;
     if(advancedPassRef.current){ const u = advancedPassRef.current.uniforms; if(u.uHazeColor) u.uHazeColor.value.set(hazeColor); if(u.uHazeIntensity) u.uHazeIntensity.value = hazeIntensity; if(u.uHazeRadius) u.uHazeRadius.value = hazeRadius; if(u.uAberration) u.uAberration.value.set(aberrationAmt,aberrationAmt); }
-  }, [cinematicMode, hazeColor, hazeIntensity, hazeRadius, aberrationAmt]);
+  }, [cinematicMode, hazeColor, hazeIntensity, hazeRadius, aberrationAmt, sceneReadyToken]);
 
   // Live slider updates
   // Update bloom strength when committed value changes
-  useEffect(()=>{ if(!cinematicMode) return; bloomStrengthRef.current = bloomStrength; if(bloomPassRef.current) bloomPassRef.current.strength = bloomStrength; }, [bloomStrength, cinematicMode]);
+  useEffect(()=>{ if(!cinematicMode) return; bloomStrengthRef.current = bloomStrength; if(bloomPassRef.current) bloomPassRef.current.strength = bloomStrength; }, [bloomStrength, cinematicMode, sceneReadyToken]);
   // Other live updates that are still fine to apply immediately
-  useEffect(()=>{ if(!cinematicMode) return; if(rendererRef.current) (rendererRef.current as any).toneMappingExposure = cinExposure; if(dustPointsRef.current) (dustPointsRef.current.material as THREE.PointsMaterial).opacity = 0.28*dustAmount; if(secondDustRef.current) (secondDustRef.current.material as THREE.PointsMaterial).opacity = 0.12*dustAmount * (secondDustEnabled?1:0); if(backgroundMeshRef.current){ const mat = backgroundMeshRef.current.material as THREE.ShaderMaterial; if(mat.uniforms.uStrength){ const _n=Math.min(Math.max(bgIntensity/1.5,0),1); const mapped = _n < 0.025 ? 0 : 1.5 * Math.pow(_n, 2.8); mat.uniforms.uStrength.value = mapped; } } }, [dustAmount, cinExposure, bgIntensity, secondDustEnabled, cinematicMode]);
+  useEffect(()=>{ if(!cinematicMode) return; if(rendererRef.current) (rendererRef.current as any).toneMappingExposure = cinExposure; if(dustPointsRef.current) (dustPointsRef.current.material as THREE.PointsMaterial).opacity = 0.28*dustAmount; if(secondDustRef.current) (secondDustRef.current.material as THREE.PointsMaterial).opacity = 0.12*dustAmount * (secondDustEnabled?1:0); if(backgroundMeshRef.current){ const mat = backgroundMeshRef.current.material as THREE.ShaderMaterial; if(mat.uniforms.uStrength){ const _n=Math.min(Math.max(bgIntensity/1.5,0),1); const mapped = _n < 0.025 ? 0 : 1.5 * Math.pow(_n, 2.8); mat.uniforms.uStrength.value = mapped; } } }, [dustAmount, cinExposure, bgIntensity, secondDustEnabled, cinematicMode, sceneReadyToken]);
 
-  useEffect(()=>{ if(!cinematicMode) return; const vis = showAurora; if(backgroundMeshRef.current) backgroundMeshRef.current.visible = vis; if(auroraMeshRef.current) auroraMeshRef.current.visible = vis; }, [showAurora, cinematicMode]);
+  useEffect(()=>{ if(!cinematicMode) return; const vis = showAurora; if(backgroundMeshRef.current) backgroundMeshRef.current.visible = vis; if(auroraMeshRef.current) auroraMeshRef.current.visible = vis; }, [showAurora, cinematicMode, sceneReadyToken]);
 
   // Suppress labels & hover ring during cinematic mode unless cinematicLabels enabled; restore after
   useEffect(()=>{
@@ -4939,13 +5051,13 @@ function App() {
       }
     }
   }, [cinematicMode, cinematicLabels, highlightedSystem, getTransformedPosition, createSystemLabelElement]);
-  useEffect(()=>{ if(!cinematicMode) return; if(auroraMatRef.current){ auroraMatRef.current.uniforms.uGlobalAlpha.value = auroraIntensity; } }, [auroraIntensity, cinematicMode]);
+  useEffect(()=>{ if(!cinematicMode) return; if(auroraMatRef.current){ auroraMatRef.current.uniforms.uGlobalAlpha.value = auroraIntensity; } }, [auroraIntensity, cinematicMode, sceneReadyToken]);
 
   // Update custom pass uniforms when sliders change
-  useEffect(()=>{ if(!cinematicMode) return; if(advancedPassRef.current){ const u=advancedPassRef.current.uniforms; u.uVignette.value = vignette; u.uGrain.value = grain; u.uAberration.value.set(aberration,aberration); u.uRadialGlow.value = radialGlow; } }, [vignette, grain, aberration, radialGlow, cinematicMode]);
+  useEffect(()=>{ if(!cinematicMode) return; if(advancedPassRef.current){ const u=advancedPassRef.current.uniforms; u.uVignette.value = vignette; u.uGrain.value = grain; u.uAberration.value.set(aberration,aberration); u.uRadialGlow.value = radialGlow; } }, [vignette, grain, aberration, radialGlow, cinematicMode, sceneReadyToken]);
 
   // Handle creating/destroying second dust on toggle while active
-  useEffect(()=>{ if(!cinematicMode) return; if(!sceneRef.current) return; if(secondDustEnabled && !secondDustRef.current){ const count2=400; const pos2=new Float32Array(count2*3); const col2=new Float32Array(count2*3); for(let i=0;i<count2;i++){ const r=30000*Math.cbrt(Math.random()); const th=Math.random()*Math.PI*2; const ph=Math.acos(2*Math.random()-1); pos2[i*3]=r*Math.sin(ph)*Math.cos(th); pos2[i*3+1]=r*Math.sin(ph)*Math.sin(th); pos2[i*3+2]=r*Math.cos(ph); const tint=new THREE.Color().setHSL(0.70+Math.random()*0.15,0.35,0.35+Math.random()*0.15); col2[i*3]=tint.r; col2[i*3+1]=tint.g; col2[i*3+2]=tint.b; } const g2=new THREE.BufferGeometry(); g2.setAttribute('position', new THREE.BufferAttribute(pos2,3)); g2.setAttribute('color', new THREE.BufferAttribute(col2,3)); const dMat2=new THREE.PointsMaterial({ size:24, sizeAttenuation:true, transparent:true, opacity:0.12*dustAmount, depthWrite:false, vertexColors:true, blending:THREE.AdditiveBlending }); secondDustRef.current=new THREE.Points(g2,dMat2); sceneRef.current.add(secondDustRef.current); } else if(!secondDustEnabled && secondDustRef.current){ secondDustRef.current.geometry.dispose(); (secondDustRef.current.material as THREE.Material).dispose(); sceneRef.current.remove(secondDustRef.current); secondDustRef.current=null; } }, [secondDustEnabled, cinematicMode, dustAmount]);
+  useEffect(()=>{ if(!cinematicMode) return; if(!sceneRef.current) return; if(secondDustEnabled && !secondDustRef.current){ const count2=400; const pos2=new Float32Array(count2*3); const col2=new Float32Array(count2*3); for(let i=0;i<count2;i++){ const r=30000*Math.cbrt(Math.random()); const th=Math.random()*Math.PI*2; const ph=Math.acos(2*Math.random()-1); pos2[i*3]=r*Math.sin(ph)*Math.cos(th); pos2[i*3+1]=r*Math.sin(ph)*Math.sin(th); pos2[i*3+2]=r*Math.cos(ph); const tint=new THREE.Color().setHSL(0.70+Math.random()*0.15,0.35,0.35+Math.random()*0.15); col2[i*3]=tint.r; col2[i*3+1]=tint.g; col2[i*3+2]=tint.b; } const g2=new THREE.BufferGeometry(); g2.setAttribute('position', new THREE.BufferAttribute(pos2,3)); g2.setAttribute('color', new THREE.BufferAttribute(col2,3)); const dMat2=new THREE.PointsMaterial({ size:24, sizeAttenuation:true, transparent:true, opacity:0.12*dustAmount, depthWrite:false, vertexColors:true, blending:THREE.AdditiveBlending }); secondDustRef.current=new THREE.Points(g2,dMat2); sceneRef.current.add(secondDustRef.current); } else if(!secondDustEnabled && secondDustRef.current){ secondDustRef.current.geometry.dispose(); (secondDustRef.current.material as THREE.Material).dispose(); sceneRef.current.remove(secondDustRef.current); secondDustRef.current=null; } }, [secondDustEnabled, cinematicMode, dustAmount, sceneReadyToken]);
 
   // This useLayoutEffect handles all dynamic star and stargate line coloring based on the pipeline.
   useLayoutEffect(() => {
@@ -5738,7 +5850,13 @@ function App() {
       // Track initial position/time for any button to better detect drags (panning/right, middle)
       isDraggingRef.current = false;
       mouseDownPosRef.current.set(event.clientX, event.clientY);
-      mouseDownTimeRef.current = Date.now();
+      const nowTs = Date.now();
+      mouseDownTimeRef.current = nowTs;
+      lastInteractionRef.current = nowTs;
+      if(cinematicOrbitRef.current){
+        cinematicOrbitRef.current = false;
+        setCinematicOrbitRequested(false);
+      }
     };
 
   const onPointerUp = (event: PointerEvent) => {
@@ -6049,7 +6167,7 @@ function App() {
   window.removeEventListener('mousedown', closeOnLeftClick);
   window.removeEventListener('keydown', escHandler);
     };
-  }, [isLoaded, hoveredSystem, isDraggingRef, mouseDownPosRef, mouseDownTimeRef, createSystemLabelElement, selectSystem, isPlanetCountActive, showDistance, highlightedSystem, cinematicMode, cinematicLabels, openPanels, ensurePanel, lastSelectedSystemName]);
+  }, [isLoaded, hoveredSystem, isDraggingRef, mouseDownPosRef, mouseDownTimeRef, createSystemLabelElement, selectSystem, isPlanetCountActive, showDistance, highlightedSystem, cinematicMode, cinematicLabels, openPanels, ensurePanel, lastSelectedSystemName, setCinematicOrbitRequested]);
 
   const handleSearch = (event: React.KeyboardEvent<HTMLInputElement>, systemNameFromSelection?: string) => {
     if (event.key === 'Enter' && mapData) {
