@@ -263,6 +263,7 @@ interface P2PRoutingProps {
   smartGateItemByPair?: Record<string, number> | null;
   usedSmartGatePairs?: Set<string> | null;
   isLoggedIn?: boolean;
+  onStartSystemChange?: (name: string) => void;
 }
 
 // Minimal neutral custom select (no accent colors) for consistent option highlight across platforms
@@ -382,7 +383,9 @@ const NeutralSelect = <T extends string>({ value, onChange, options, ariaLabel, 
   );
 };
 
-const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeResult, mapData, systemNames, progress, routeCalcTimeMs, open, onToggle, resetToken, selectedSystemName, selectedDestinationSystemName, waypoints = [], avoidSystems = [], onRemoveWaypoint, onRemoveAvoidSystem, waypointOptimize = false, onWaypointOptimizeChange, embedded = false, initialJumpDistance=60, initialOptimizeFor='fuel', initialAlgorithm='astar', onParamChange, smartGateItemByPair = null, usedSmartGatePairs = null, isLoggedIn = false }: P2PRoutingProps) => {
+const SESSION_KEY_SMART_GATE = 'efmap:session:p2p:smartGateMode';
+
+const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeResult, mapData, systemNames, progress, routeCalcTimeMs, open, onToggle, resetToken, selectedSystemName, selectedDestinationSystemName, waypoints = [], avoidSystems = [], onRemoveWaypoint, onRemoveAvoidSystem, waypointOptimize = false, onWaypointOptimizeChange, embedded = false, initialJumpDistance=60, initialOptimizeFor='fuel', initialAlgorithm='astar', onParamChange, smartGateItemByPair = null, usedSmartGatePairs = null, isLoggedIn = false, onStartSystemChange }: P2PRoutingProps) => {
   const [fromSystem, setFromSystem] = useState('');
   const [toSystem, setToSystem] = useState('');
   const [jumpDistance, setJumpDistance] = useState(String(initialJumpDistance)); // editing this must not reset from/to
@@ -418,12 +421,27 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
   const [summary, setSummary] = useState<RouteSummary | null>(null);
   const [activeNotePage, setActiveNotePage] = useState(0);
   const [copyButtonText, setCopyButtonText] = useState('Copy');
-  const [smartGateMode, setSmartGateMode] = useState<'none'|'public'|'authorized'>(()=> 'none');
+  const [smartGateMode, setSmartGateModeState] = useState<'none'|'public'|'authorized'>(()=> {
+    if(typeof window==='undefined') return 'none';
+    try {
+      const stored = sessionStorage.getItem(SESSION_KEY_SMART_GATE);
+      if(stored==='none' || stored==='public' || stored==='authorized') return stored;
+    } catch {/* ignore sessionStorage issues */}
+    return 'none';
+  });
+  const setSmartGateMode = useCallback((mode:'none'|'public'|'authorized')=>{
+    setSmartGateModeState(mode);
+    if(typeof window==='undefined') return;
+    try {
+      if(mode==='none') sessionStorage.removeItem(SESSION_KEY_SMART_GATE);
+      else sessionStorage.setItem(SESSION_KEY_SMART_GATE, mode);
+    } catch {/* ignore */}
+  }, []);
 
   // If user is not logged in, silently downgrade 'authorized' selection to 'public'
   useEffect(()=>{
     if(!isLoggedIn && smartGateMode==='authorized') setSmartGateMode('public');
-  }, [isLoggedIn, smartGateMode]);
+  }, [isLoggedIn, smartGateMode, setSmartGateMode]);
 
   useEffect(() => {
     if (routeResult?.path && mapData) {
@@ -502,7 +520,8 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
   useEffect(() => {
     if(firstMountRef.current){ firstMountRef.current=false; return; }
     if(resetToken === undefined) return;
-    setFromSystem('');
+  setFromSystem('');
+    onStartSystemChange && onStartSystemChange('');
     setToSystem('');
     setJumpDistance(String(initialJumpDistance));
     setOptimizeFor(initialOptimizeFor);
@@ -513,11 +532,15 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
     setCopyButtonText('Copy');
     setIncludeLegend(true);
     setIncludeStats(false);
+    setSmartGateMode('none');
   }, [resetToken]);
 
   // Update From system when an external system selection occurs
-  // Always reflect latest selected system as From (user request); removing previous 'only if empty' guard
-  useEffect(()=>{ if(selectedSystemName){ setFromSystem(selectedSystemName); } }, [selectedSystemName]);
+  // Always reflect latest selected system as From (user request); allow blanks to propagate
+  useEffect(()=>{
+    if(selectedSystemName === undefined) return;
+    setFromSystem(selectedSystemName);
+  }, [selectedSystemName]);
 
   // Update To system when external destination selection occurs (always override to stay in sync with context menu)
   useEffect(()=>{
@@ -570,8 +593,8 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
             <label htmlFor="from-system">From</label>
             <AutoCompleteInput
               value={fromSystem}
-              onChange={setFromSystem}
-              onSelect={setFromSystem}
+              onChange={(value)=>{ setFromSystem(value); onStartSystemChange && onStartSystemChange(value); }}
+              onSelect={(value)=>{ setFromSystem(value); onStartSystemChange && onStartSystemChange(value); }}
               dataSource={systemNames}
               placeholder="Enter start system"
             />
@@ -586,7 +609,14 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
                 type="button"
                 title="Swap From/To"
                 aria-label="Swap From and To"
-                onClick={()=>{ setFromSystem(prev=>{ const next=toSystem; setToSystem(prev); return next; }); }}
+                onClick={()=>{
+                  setFromSystem(prev=>{
+                    const next = toSystem;
+                    setToSystem(prev);
+                    onStartSystemChange && onStartSystemChange(next);
+                    return next;
+                  });
+                }}
                 style={{
                   marginLeft:8,
                   padding:'2px 6px',

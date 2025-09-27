@@ -3029,6 +3029,8 @@ function App() {
   }, [reachRange, highlightedSystem, reachBubble, accentIsBlue]);
 
   // Public handlers passed to routing panel reachability tab via props (added later)
+  const updateManualStartSystem = useCallback((name:string)=>{ setLastSelectedSystemName(name); }, []);
+
   const handleReachCompute = useCallback((origin:string, range:number)=>{ computeReachability(origin, range); // center if not already selected
     if(mapData){
       const systems = Object.values(mapData.solar_systems);
@@ -3039,6 +3041,7 @@ function App() {
 
   // Reachability origin manual change (from tab input)
   const handleReachOriginChange = (origin:string)=>{
+    updateManualStartSystem(origin);
     if(reachAuto && origin){ computeReachability(origin, reachRange); }
   };
   const handleReachRangeChange = (r:number)=>{
@@ -3277,7 +3280,24 @@ function App() {
   const bringToFront = (id:string) => {
     setPanelZ(prev=> { const next={...prev}; topZRef.current +=1; next[id]= topZRef.current; return next; });
   };
-  const [returnToStart, setReturnToStart] = useState(false);
+  const RETURN_TO_START_SESSION_KEY = 'efmap:session:scout:returnToStart';
+  const [returnToStart, setReturnToStartState] = useState<boolean>(()=>{
+    if(typeof window==='undefined') return false;
+    try {
+      const raw = sessionStorage.getItem(RETURN_TO_START_SESSION_KEY);
+      if(raw === '1') return true;
+      if(raw === '0') return false;
+    } catch {/* ignore sessionStorage access issues */}
+    return false;
+  });
+  const setReturnToStart = useCallback((value:boolean)=>{
+    setReturnToStartState(value);
+    if(typeof window==='undefined') return;
+    try {
+      if(value) sessionStorage.setItem(RETURN_TO_START_SESSION_KEY, '1');
+      else sessionStorage.setItem(RETURN_TO_START_SESSION_KEY, '0');
+    } catch {/* ignore sessionStorage write issues */}
+  }, []);
   // Unified baseline for panel alignment (persisted once discovered)
   const [alignedBase, setAlignedBase] = useState<{ x:number; y:number }>(()=>{
     if(typeof window==='undefined') return { x:128, y:84 };
@@ -6681,6 +6701,7 @@ function App() {
               setAvoidSystems([]);
               setWaypointOptimize(false);
               setResetToken(t=> t+1);
+              updateManualStartSystem('');
             }}
             aria-label="Reset all inputs"
           >Reset</button>
@@ -6832,6 +6853,7 @@ function App() {
           onBubbleChange: handleReachBubbleChange,
           onInRangeChange: handleReachInRangeChange
         }}
+              onStartSystemChange={updateManualStartSystem}
               />
             </PanelDrawer>
           )}

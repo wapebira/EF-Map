@@ -1,9 +1,51 @@
 import { useCallback, useRef, useState, useEffect } from 'react';
 import { track, trackImmediate, flushNow } from '../../utils/usage';
-// Persistence of ship max range removed per request (always starts at default)
 import '../P2PRouting/P2PRouting.css';
 import './ScoutOptimizer.css';
 import AutoCompleteInput from '../AutoCompleteInput/AutoCompleteInput';
+
+const SCOUT_SESSION_PREFIX = 'efmap:session:scout:';
+const readSessionString = (key:string, fallback:string):string => {
+	if(typeof window==='undefined') return fallback;
+	try {
+		const raw = sessionStorage.getItem(SCOUT_SESSION_PREFIX+key);
+		return raw ?? fallback;
+	} catch {
+		return fallback;
+	}
+};
+const readSessionBool = (key:string, fallback:boolean):boolean => {
+	const raw = readSessionString(key, fallback ? '1' : '');
+	if(raw === '1') return true;
+	if(raw === '0') return false;
+	return fallback;
+};
+const writeSessionString = (key:string, value:string, fallback:string):void => {
+	if(typeof window==='undefined') return;
+	try {
+		const storageKey = SCOUT_SESSION_PREFIX+key;
+		if(value === fallback || value === '') sessionStorage.removeItem(storageKey);
+		else sessionStorage.setItem(storageKey, value);
+	} catch {/* ignore */}
+};
+const writeSessionBool = (key:string, value:boolean, fallback:boolean):void => {
+	if(typeof window==='undefined') return;
+	try {
+		const storageKey = SCOUT_SESSION_PREFIX+key;
+		if(value === fallback) sessionStorage.removeItem(storageKey);
+		else sessionStorage.setItem(storageKey, value ? '1' : '0');
+	} catch {/* ignore */}
+};
+const clearScoutSessionKeys = ():void => {
+	if(typeof window==='undefined') return;
+	const keys = ['radius','useRegion','gateReachableOnly','usePlanetCount','maxOptimizeTime','stallTimeout','workerCount','shipMaxRange','shipTradeDistance','minGateHopsSaved','hideInputsPref'];
+	try { keys.forEach(k=> sessionStorage.removeItem(SCOUT_SESSION_PREFIX+k)); } catch {/* ignore */}
+};
+const computeDefaultWorkerCount = ():string => {
+	if(typeof navigator === 'undefined') return '2';
+	const cores = navigator.hardwareConcurrency || 4;
+	return Math.max(1, cores - 2).toString();
+};
 
 interface SolarSystem { id:number; name:string; position:{x:number;y:number;z:number}; region_id:number; constellation_id:number; planets:number }
 interface Stargate { source_system_id:number; destination_system_id:number }
@@ -28,29 +70,31 @@ interface ScoutOptimizerProps {
 	planetBinsActive?: boolean[]; // length 5, all true by default in parent
 	minPlanets?: number; // global min planet count (for bin calc)
 	maxPlanets?: number; // global max planet count
+	onStartSystemChange?: (name:string)=>void;
 }
 
 const MAX_SYSTEMS_WARNING = 300;
 
-const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, onReturnToStartChange, onBaselineRoute, onOptimizedRoute, onClearRoute, invalidateToken, importedRoutePath, resetToken, selectedSystemName, embedded = false, planetBinsActive, minPlanets, maxPlanets }: ScoutOptimizerProps) => {
+const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, onReturnToStartChange, onBaselineRoute, onOptimizedRoute, onClearRoute, invalidateToken, importedRoutePath, resetToken, selectedSystemName, embedded = false, planetBinsActive, minPlanets, maxPlanets, onStartSystemChange }: ScoutOptimizerProps) => {
 	const [startSystem, setStartSystem] = useState('');
-	const [radius, setRadius] = useState(''); // empty default so placeholder is visible
-	const [useRegion, setUseRegion] = useState(false);
-	const [gateReachableOnly, setGateReachableOnly] = useState(false);
+	const [radius, setRadius] = useState(()=> readSessionString('radius',''));
+	const [useRegion, setUseRegion] = useState(()=> readSessionBool('useRegion', false));
+	const [gateReachableOnly, setGateReachableOnly] = useState(()=> readSessionBool('gateReachableOnly', false));
 	// Apply planet count legend filter (user toggle). When active, collected systems restricted to active legend bins.
-	const [usePlanetCount, setUsePlanetCount] = useState(false);
+	const [usePlanetCount, setUsePlanetCount] = useState(()=> readSessionBool('usePlanetCount', false));
 	// Continuous optimization controls
-	const [maxOptimizeTime, setMaxOptimizeTime] = useState('60');
-	const [stallTimeout, setStallTimeout] = useState('10');
+	const [maxOptimizeTime, setMaxOptimizeTime] = useState(()=> readSessionString('maxOptimizeTime','60'));
+	const [stallTimeout, setStallTimeout] = useState(()=> readSessionString('stallTimeout','10'));
 	// Debug mode removed for production build (was used for verbose worker diagnostics)
 	// Minimum required ship range (computed when baseline error received)
 	const [minRequiredShipRange, setMinRequiredShipRange] = useState<number|null>(null);
 	// Ship vs Gate preference inputs
 	// Ship max jump range (no persistence)
-	const [shipMaxRange, setShipMaxRange] = useState('60');
-	const [shipTradeDistance, setShipTradeDistance] = useState('0');
-	const [minGateHopsSaved, setMinGateHopsSaved] = useState('999');
-	const [workerCount, setWorkerCount] = useState(()=> Math.max(1,(navigator.hardwareConcurrency||4)-2).toString());
+	const [shipMaxRange, setShipMaxRange] = useState(()=> readSessionString('shipMaxRange','60'));
+	const [shipTradeDistance, setShipTradeDistance] = useState(()=> readSessionString('shipTradeDistance','0'));
+	const [minGateHopsSaved, setMinGateHopsSaved] = useState(()=> readSessionString('minGateHopsSaved','999'));
+	const defaultWorkerCountRef = useRef<string>(computeDefaultWorkerCount());
+	const [workerCount, setWorkerCount] = useState(()=> readSessionString('workerCount', defaultWorkerCountRef.current));
 	// Logs split: activity (high-level events) & worker (per-thread progress)
 	const [activityLog, setActivityLog] = useState<string[]>([]);
 	const [workerLog, setWorkerLog] = useState<string[]>([]);
@@ -62,7 +106,19 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	const log = useCallback((line:string)=> appendActivity(line),[appendActivity]);
 	const [isCalculating, setIsCalculating] = useState(false);
 	// User toggles
-	const [hideInputsPref, setHideInputsPref] = useState(false); // persists after optimization
+	const [hideInputsPref, setHideInputsPref] = useState(()=> readSessionBool('hideInputsPref', false));
+
+	const updateRadius = (value:string)=>{ setRadius(value); writeSessionString('radius', value, ''); };
+	const updateUseRegion = (value:boolean)=>{ setUseRegion(value); writeSessionBool('useRegion', value, false); };
+	const updateGateReachable = (value:boolean)=>{ setGateReachableOnly(value); writeSessionBool('gateReachableOnly', value, false); };
+	const updateUsePlanetCount = (value:boolean)=>{ setUsePlanetCount(value); writeSessionBool('usePlanetCount', value, false); };
+	const updateMaxOptimizeTime = (value:string)=>{ setMaxOptimizeTime(value); writeSessionString('maxOptimizeTime', value, '60'); };
+	const updateStallTimeout = (value:string)=>{ setStallTimeout(value); writeSessionString('stallTimeout', value, '10'); };
+	const updateShipMaxRange = (value:string)=>{ setShipMaxRange(value); writeSessionString('shipMaxRange', value, '60'); };
+	const updateShipTradeDistance = (value:string)=>{ setShipTradeDistance(value); writeSessionString('shipTradeDistance', value, '0'); };
+	const updateMinGateHops = (value:string)=>{ setMinGateHopsSaved(value); writeSessionString('minGateHopsSaved', value, '999'); };
+	const updateWorkerCount = (value:string)=>{ setWorkerCount(value); writeSessionString('workerCount', value, defaultWorkerCountRef.current); };
+	const updateHideInputsPref = (value:boolean)=>{ setHideInputsPref(value); writeSessionBool('hideInputsPref', value, false); };
 	const [smallViewport, setSmallViewport] = useState(false);
 	const effectiveHideInputs = hideInputsPref; // inputs hidden only if user chose so
 	// Macro path = optimization path (visited target systems order)
@@ -145,20 +201,22 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 	useEffect(()=>{
 		if(resetToken === undefined) return;
 		setStartSystem('');
-		setRadius('');
-		setUseRegion(false);
-		setGateReachableOnly(false);
-		setUsePlanetCount(false);
-		setMaxOptimizeTime('60');
-		setStallTimeout('10');
+		onStartSystemChange && onStartSystemChange('');
+		clearScoutSessionKeys();
+		updateRadius('');
+		updateUseRegion(false);
+		updateGateReachable(false);
+		updateUsePlanetCount(false);
+		updateMaxOptimizeTime('60');
+		updateStallTimeout('10');
 		setMinRequiredShipRange(null);
-		setShipMaxRange('60');
-		setShipTradeDistance('0');
-		setMinGateHopsSaved('999');
-		setWorkerCount(Math.max(1,(navigator.hardwareConcurrency||4)-2).toString());
+		updateShipMaxRange('60');
+		updateShipTradeDistance('0');
+		updateMinGateHops('999');
+		updateWorkerCount(defaultWorkerCountRef.current);
 		setActivityLog([]); setWorkerLog([]); setActiveLogTab('activity');
 		setIsCalculating(false);
-		setHideInputsPref(false);
+		updateHideInputsPref(false);
 		setChampionPath(null); championPathRef.current=null;
 		setChampionDisplayPath(null); championDisplayPathRef.current=null;
 		setChampionDistance(null);
@@ -175,7 +233,8 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 
 	// Update start system when external system selection occurs
 	useEffect(()=>{
-		if(selectedSystemName){ setStartSystem(selectedSystemName); }
+			if(selectedSystemName === undefined) return;
+			setStartSystem(selectedSystemName);
 	}, [selectedSystemName]);
 
 	// (persistence now handled inline in input onChange, mirroring P2P debounce pattern)
@@ -477,7 +536,7 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		baselineAwaitingOptRef.current = false;
 		const total = parseFloat(maxOptimizeTime)||0; const stall = parseFloat(stallTimeout)||0;
 		setIsCalculating(true);
-		setHideInputsPref(true); // auto-hide inputs (but allow user to re-show if they uncheck)
+		updateHideInputsPref(true); // auto-hide inputs (but allow user to re-show if they uncheck)
 		appendActivity(`Starting optimization: max ${total||'∞'}s, global stall ${stall||'∞'}s on ${workersRef.current.length||1} workers.`);
 		try { track({ type:'scout_opt_start' }); } catch {}
 		try { (window as any).__efTrackScoutWorkers && (window as any).__efTrackScoutWorkers(workersRef.current.length||1); } catch {}
@@ -923,46 +982,46 @@ const ScoutOptimizer = ({ open, onToggle, mapData, systemNames, returnToStart, o
 		<div className={`scout-optimizer-panel ${embedded? 'embedded':''} ${effectiveHideInputs? 'hide-inputs':''}`}>
 					<div style={{display:'flex', gap:'10px', flexWrap:'wrap', alignItems:'center'}}>
 						<label style={{fontSize:'0.7rem', display:'flex', gap:4, alignItems:'center'}}>
-							<input type="checkbox" checked={effectiveHideInputs} onChange={(e)=> setHideInputsPref(e.target.checked)} /> Hide Inputs
+							<input type="checkbox" checked={effectiveHideInputs} onChange={(e)=> updateHideInputsPref(e.target.checked)} /> Hide Inputs
 						</label>
 						{smallViewport && <span style={{fontSize:'0.6rem', opacity:0.7}}>Small viewport</span>}
 					</div>
 					{(!effectiveHideInputs) && <div className="scout-input-row">
 						<label>Start System</label>
-						<AutoCompleteInput value={startSystem} onChange={setStartSystem} onSelect={setStartSystem} dataSource={systemNames} placeholder="Enter start system" />
+						<AutoCompleteInput value={startSystem} onChange={(value)=>{ setStartSystem(value); onStartSystemChange && onStartSystemChange(value); }} onSelect={(value)=>{ setStartSystem(value); onStartSystemChange && onStartSystemChange(value); }} dataSource={systemNames} placeholder="Enter start system" />
 						</div>}
 					{(!effectiveHideInputs) && <div className="scout-input-row">
-						<label><input type="checkbox" checked={useRegion} onChange={e=> setUseRegion(e.target.checked)} /> Use Region Instead of Radius</label>
+						<label><input type="checkbox" checked={useRegion} onChange={e=> updateUseRegion(e.target.checked)} /> Use Region Instead of Radius</label>
 						{!useRegion && (
-							<input type="number" className="p2p-input" value={radius} onChange={e=> setRadius(e.target.value)} placeholder="Max Radius (LY)" />
+							<input type="number" className="p2p-input" value={radius} onChange={e=> updateRadius(e.target.value)} placeholder="Max Radius (LY)" />
 						)}
 					</div>}
 					{(!effectiveHideInputs) && <div className="scout-input-row">
-							<label><input type="checkbox" checked={gateReachableOnly} onChange={e=> setGateReachableOnly(e.target.checked)} /> Only Gate-Reachable From Start</label>
+							<label><input type="checkbox" checked={gateReachableOnly} onChange={e=> updateGateReachable(e.target.checked)} /> Only Gate-Reachable From Start</label>
 						</div>}
 							{(!effectiveHideInputs) && <div className="scout-input-row">
-									<label><input type="checkbox" checked={usePlanetCount} onChange={e=> setUsePlanetCount(e.target.checked)} /> Apply Planet Count Filter</label>
+								<label><input type="checkbox" checked={usePlanetCount} onChange={e=> updateUsePlanetCount(e.target.checked)} /> Apply Planet Count Filter</label>
 								</div>}
 					{(!effectiveHideInputs) && <div className="scout-input-row">
 						<label>Optimize Time / Stall Timeout (s)</label>
 						<div style={{ display:'flex', gap:'6px' }}>
-							<input type="number" className="p2p-input" value={maxOptimizeTime} onChange={e=> setMaxOptimizeTime(e.target.value)} />
-							<input type="number" className="p2p-input" value={stallTimeout} onChange={e=> setStallTimeout(e.target.value)} />
+							<input type="number" className="p2p-input" value={maxOptimizeTime} onChange={e=> updateMaxOptimizeTime(e.target.value)} />
+							<input type="number" className="p2p-input" value={stallTimeout} onChange={e=> updateStallTimeout(e.target.value)} />
 						</div>
 						</div>}
 					{(!effectiveHideInputs) && <div className="scout-input-row">
 						<label>Worker Threads</label>
-						<input type="number" className="p2p-input" value={workerCount} disabled={isCalculating} title={isCalculating? 'Worker count locked during run' : 'Set number of optimizer workers'} onChange={e=> setWorkerCount(e.target.value)} />
+						<input type="number" className="p2p-input" value={workerCount} disabled={isCalculating} title={isCalculating? 'Worker count locked during run' : 'Set number of optimizer workers'} onChange={e=> updateWorkerCount(e.target.value)} />
 					</div>}
 					{(!effectiveHideInputs) && <div className="scout-input-row">
 						<label>Ship Max Jump Range (LY)</label>
-						<input type="number" className="p2p-input" value={shipMaxRange} onChange={e=> setShipMaxRange(e.target.value)} />
+						<input type="number" className="p2p-input" value={shipMaxRange} onChange={e=> updateShipMaxRange(e.target.value)} />
 					</div>}
 					{(!effectiveHideInputs) && <div className="scout-input-row">
 						<label>Gate Trade Rule (Ship LY / Min Gate Hops)</label>
 						<div style={{ display:'flex', gap:'6px' }}>
-							<input type="number" className="p2p-input" value={shipTradeDistance} onChange={e=> setShipTradeDistance(e.target.value)} placeholder="Max Ship LY" />
-							<input type="number" className="p2p-input" value={minGateHopsSaved} onChange={e=> setMinGateHopsSaved(e.target.value)} placeholder="Min Gate Hops" />
+							<input type="number" className="p2p-input" value={shipTradeDistance} onChange={e=> updateShipTradeDistance(e.target.value)} placeholder="Max Ship LY" />
+							<input type="number" className="p2p-input" value={minGateHopsSaved} onChange={e=> updateMinGateHops(e.target.value)} placeholder="Min Gate Hops" />
 						</div>
 						</div>}
 					{(!effectiveHideInputs) && <div className="scout-input-row">

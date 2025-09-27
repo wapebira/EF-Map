@@ -52,6 +52,7 @@ interface RoutingPanelProps {
   planetBinsActive?: boolean[];
   minPlanets?: number;
   maxPlanets?: number;
+  onStartSystemChange?: (name:string)=>void;
   reachabilityProps?: {
     originSystemName?: string;
     range: number;
@@ -74,16 +75,54 @@ interface RoutingPanelProps {
 
 const RoutingPanel: React.FC<RoutingPanelProps> = (props) => {
   const [tab, setTab] = useState<'p2p'|'scout'|'reach'>('p2p');
+  const tabIds = {
+    p2p: 'routing-tab-p2p',
+    scout: 'routing-tab-scout',
+    reach: 'routing-tab-reach'
+  } as const;
+  const panelIds = {
+    p2p: 'routing-panel-p2p',
+    scout: 'routing-panel-scout',
+    reach: 'routing-panel-reach'
+  } as const;
+
   return (
     <div>
       <div className="ef-tabs" role="tablist">
-        <button className={`ef-tab-btn ${tab==='p2p'?'active':''}`} role="tab" aria-selected={tab==='p2p'} onClick={()=> setTab('p2p')}>Point to Point</button>
-        <button className={`ef-tab-btn ${tab==='scout'?'active':''}`} role="tab" aria-selected={tab==='scout'} onClick={()=> setTab('scout')}>Scout Optimizer</button>
-  <button className={`ef-tab-btn ${tab==='reach'?'active':''}`} role="tab" aria-selected={tab==='reach'} onClick={()=> { setTab('reach'); try { track({ type:'reachability_tab_open' }); } catch {} }}>Reachability</button>
+        <button
+          id={tabIds.p2p}
+          className={`ef-tab-btn ${tab==='p2p'?'active':''}`}
+          role="tab"
+          aria-selected={tab==='p2p'}
+          aria-controls={panelIds.p2p}
+          onClick={()=> setTab('p2p')}
+        >Point to Point</button>
+        <button
+          id={tabIds.scout}
+          className={`ef-tab-btn ${tab==='scout'?'active':''}`}
+          role="tab"
+          aria-selected={tab==='scout'}
+          aria-controls={panelIds.scout}
+          onClick={()=> setTab('scout')}
+        >Scout Optimizer</button>
+        <button
+          id={tabIds.reach}
+          className={`ef-tab-btn ${tab==='reach'?'active':''}`}
+          role="tab"
+          aria-selected={tab==='reach'}
+          aria-controls={panelIds.reach}
+          onClick={()=> { setTab('reach'); try { track({ type:'reachability_tab_open' }); } catch {} }}
+        >Reachability</button>
       </div>
-      {tab==='p2p' && (
+
+      <div
+        role="tabpanel"
+        id={panelIds.p2p}
+        aria-labelledby={tabIds.p2p}
+        hidden={tab!=='p2p'}
+      >
         <P2PRouting
-          open={true}
+          open={tab==='p2p'}
           onToggle={()=>{}}
           embedded
           onCalculateRoute={props.onCalculateRoute}
@@ -110,11 +149,18 @@ const RoutingPanel: React.FC<RoutingPanelProps> = (props) => {
           initialOptimizeFor={props.initialOptimizeFor}
           initialAlgorithm={props.initialAlgorithm}
           onParamChange={props.onRoutingParamChange}
+          onStartSystemChange={props.onStartSystemChange}
         />
-      )}
-      {tab==='scout' && (
+      </div>
+
+      <div
+        role="tabpanel"
+        id={panelIds.scout}
+        aria-labelledby={tabIds.scout}
+        hidden={tab!=='scout'}
+      >
         <ScoutOptimizer
-          open={true}
+          open={tab==='scout'}
           onToggle={()=>{}}
           embedded
           mapData={props.mapData}
@@ -131,28 +177,37 @@ const RoutingPanel: React.FC<RoutingPanelProps> = (props) => {
           planetBinsActive={props.planetBinsActive}
           minPlanets={props.minPlanets}
           maxPlanets={props.maxPlanets}
+          onStartSystemChange={props.onStartSystemChange}
         />
-      )}
-      {tab==='reach' && props.reachabilityProps && (
-        <ReachabilitySection
-          originSystemName={props.reachabilityProps.originSystemName}
-          systemNames={props.systemNames}
-          onCompute={props.reachabilityProps.onCompute}
-          onRangeChange={props.reachabilityProps.onRangeChange}
-          onOriginChange={props.reachabilityProps.onOriginChange}
-          range={props.reachabilityProps.range}
-          auto={props.reachabilityProps.auto}
-          onAutoChange={props.reachabilityProps.onAutoChange}
-          dim={props.reachabilityProps.dim}
-          onDimChange={props.reachabilityProps.onDimChange}
-          bubble={props.reachabilityProps.bubble}
-          onBubbleChange={props.reachabilityProps.onBubbleChange}
-          inRange={props.reachabilityProps.inRange}
-          onInRangeChange={props.reachabilityProps.onInRangeChange}
-          lastStats={props.reachabilityProps.stats}
-          disabledReason={props.reachabilityProps.disabled}
-          computing={props.reachabilityProps.computing}
-        />
+      </div>
+
+      {props.reachabilityProps && (
+        <div
+          role="tabpanel"
+          id={panelIds.reach}
+          aria-labelledby={tabIds.reach}
+          hidden={tab!=='reach'}
+        >
+          <ReachabilitySection
+            originSystemName={props.reachabilityProps.originSystemName}
+            systemNames={props.systemNames}
+            onCompute={props.reachabilityProps.onCompute}
+            onRangeChange={props.reachabilityProps.onRangeChange}
+            onOriginChange={props.reachabilityProps.onOriginChange}
+            range={props.reachabilityProps.range}
+            auto={props.reachabilityProps.auto}
+            onAutoChange={props.reachabilityProps.onAutoChange}
+            dim={props.reachabilityProps.dim}
+            onDimChange={props.reachabilityProps.onDimChange}
+            bubble={props.reachabilityProps.bubble}
+            onBubbleChange={props.reachabilityProps.onBubbleChange}
+            inRange={props.reachabilityProps.inRange}
+            onInRangeChange={props.reachabilityProps.onInRangeChange}
+            lastStats={props.reachabilityProps.stats}
+            disabledReason={props.reachabilityProps.disabled}
+            computing={props.reachabilityProps.computing}
+          />
+        </div>
       )}
     </div>
   );

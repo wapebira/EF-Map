@@ -78,6 +78,10 @@ Older entries and legacy indexer details have been archived: [archive\decision-l
 - Goal: Finalize cinematic embed polish (palette-aware labels, smaller CTA, orbit cancel on wheel, aurora scaling) and push the feature live.
 - Risk: medium (embed UX + cinematic rendering).
 - Gates: typecheck ✅ (via build) | build ✅ `npm run build` | smoke ✅ (embed preview/manual).
+## 2025-09-27 – Scout optimizer session persistence
+- Goal: Preserve key Scout Optimizer form inputs within the session (radius/region toggle, gate filter, planet filter, optimizer timers, worker count, ship/gate trade settings, hide inputs) so switch…
+- Risk: low (client-side state persistence only).
+- Gates: typecheck ✅ (via build) | build ✅ `npm run build` | smoke ➖ (pending manual panel retest).
 ## 2025-09-26 – Search result favicon alignment
 - Goal: Align public favicons, touch icons, and structured data with the EF-Map logo so Google Search shows the branded round icon instead of the blank placeholder, and expose manifest/browserconfig …
 - Risk: low (static assets + head metadata only).
