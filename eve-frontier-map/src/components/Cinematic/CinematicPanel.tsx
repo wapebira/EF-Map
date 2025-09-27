@@ -29,6 +29,7 @@ const CinematicPanel: React.FC<CinematicPanelProps> = (p) => {
           <option value="purple">Purple / Blue</option>
           <option value="white">White</option>
           <option value="blue">Blue</option>
+          <option value="green">Green</option>
           <option value="red">Red / Warm</option>
           <option value="yellow">Yellow / Gold</option>
           <option value="random">Mixed (Random)</option>

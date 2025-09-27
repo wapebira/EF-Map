@@ -21,6 +21,7 @@ Useful entry points:
 - Frontend root: `eve-frontier-map/` (see `src/App.tsx`, `src/utils/usage.ts`)
 - Cloudflare Worker (API, KV, routing): `_worker.js` (+ any sibling worker files)
  - Data Exposure Plan (current initiative): `docs/initiatives/DATA_EXPOSURE_PLAN.md`
+- Overlay helper partnership: see sibling repo **ef-map-overlay** for `AGENTS.md` and `.github/copilot-instructions.md` (native helper + DX12 overlay live there; keep shared docs in sync).
 
 ## Agent operating rules (must follow)
 1) Prefer smallest safe change; don’t refactor broadly without explicit approval.
@@ -32,6 +33,11 @@ Useful entry points:
 7) Sensitive edits: Treat worker files (`*_worker.js`, `_worker.js`) and production config as sensitive; ask before structural changes.
 8) Database access: Use the VS Code Postgres extension (configured for the local Docker Postgres) for schema inspection and routine queries. Prefer this path over PowerShell `docker exec` to avoid nested quoting issues.
 9) Preview-only rule: Any website/Worker/API changes must be tested via Cloudflare Pages Preview deployments first; do not modify production (main) unless explicitly approved.
+
+## Overlay helper coordination
+- Native helper / DirectX overlay code has its own repository (see sibling repo **ef-map-overlay**). When a change impacts both repos, document cross-links in each decision log and keep initiative plans synchronized.
+- Web-facing integrations (helper detection endpoints, overlay payload schema) continue to be developed here; helper-side implementations live in the overlay repo.
+- Before updating shared docs (guardrails, roadmap) make sure the overlay copy stays aligned or include an explicit note about divergence.
 
 ## Fast context to load on start
 - Read `.github/copilot-instructions.md` (source of truth for patterns & guardrails)

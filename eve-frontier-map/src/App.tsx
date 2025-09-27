@@ -211,6 +211,25 @@ const SMART_TRIBE_PALETTE: number[] = [
 
 const SMART_TRIBE_OTHER_COLOR = 0xffb000;
 
+type StarColorMode = 'purple'|'white'|'blue'|'green'|'red'|'yellow'|'random';
+const STAR_COLOR_MODE_SET = new Set<StarColorMode>(['purple','white','blue','green','red','yellow','random']);
+const normalizeStarColorParam = (raw: string | null): StarColorMode | null => {
+  if(!raw) return null;
+  const normalized = raw.trim().toLowerCase() as StarColorMode;
+  return STAR_COLOR_MODE_SET.has(normalized) ? normalized : null;
+};
+const STAR_LABEL_ACCENT: Record<StarColorMode, string> = {
+  purple: '#8b6dff',
+  white: '#bccfff',
+  blue: '#5d8fff',
+  green: '#4dffb0',
+  red: '#ff6b4b',
+  yellow: '#ffdd66',
+  random: '#6fbaff'
+};
+const getStarLabelAccent = (mode: StarColorMode): string => STAR_LABEL_ACCENT[mode] ?? '#5d8fff';
+const AURORA_BASE_ASPECT = 16 / 9;
+
 interface StructureSnapshotMeta {
   generatedAt?: string;
   updatedAt?: string;
@@ -286,6 +305,11 @@ function App() {
     const params = new URLSearchParams(window.location.search);
     return params.get('embed') === '1';
   }, []);
+  const initialStarColorFromUrl = useMemo<StarColorMode | null>(() => {
+    if (typeof window === 'undefined') return null;
+    const params = new URLSearchParams(window.location.search);
+    return normalizeStarColorParam(params.get('color'));
+  }, []);
   const initialOrbitRequested = useMemo(() => {
     if (typeof window === 'undefined') return false;
     const params = new URLSearchParams(window.location.search);
@@ -349,8 +373,11 @@ function App() {
     if(initialZoomParam != null){
       params.set('zoom', String(initialZoomParam));
     }
+    if(initialStarColorFromUrl){
+      params.set('color', initialStarColorFromUrl);
+    }
     return `${window.location.origin}/?${params.toString()}`;
-  }, [embedMode, lastSelectedSystemId, initialZoomParam]);
+  }, [embedMode, lastSelectedSystemId, initialZoomParam, initialStarColorFromUrl]);
   const [lastDestinationSystemName, setLastDestinationSystemName] = useState<string>(''); // right-click destination propagation
   const [waypoints, setWaypoints] = useState<string[]>([]); // ordered list (max 10)
   const [avoidSystems, setAvoidSystems] = useState<string[]>([]);
@@ -727,8 +754,35 @@ function App() {
   // Experimental aurora veil refs
   const auroraMeshRef = useRef<THREE.Mesh|null>(null);
   const auroraMatRef = useRef<THREE.ShaderMaterial|null>(null);
+  const updateAuroraScale = useCallback(() => {
+    if(!auroraMeshRef.current || !rendererRef.current) return;
+    try {
+      const canvas = rendererRef.current.domElement;
+      const width = canvas?.clientWidth ?? window.innerWidth ?? 0;
+      const height = canvas?.clientHeight ?? window.innerHeight ?? 0;
+      if(height <= 0 || width <= 0) return;
+      const aspect = width / height;
+      const widthScale = Math.max(1, aspect / AURORA_BASE_ASPECT);
+      const heightScale = Math.max(1, AURORA_BASE_ASPECT / aspect);
+      auroraMeshRef.current.scale.set(widthScale, heightScale, 1);
+    } catch {/* ignore scale errors */}
+  }, []);
   // Cinematic user-exposed controls (handled in drawer panel)
-  const [starColorMode, setStarColorMode] = useState<'purple'|'white'|'blue'|'red'|'yellow'|'random'>('blue');
+  const [starColorMode, setStarColorMode] = useState<StarColorMode>(() => initialStarColorFromUrl ?? 'blue');
+  const cinematicLabelAccent = useMemo(() => {
+    if(!cinematicMode) return null;
+    return getStarLabelAccent(starColorMode);
+  }, [cinematicMode, starColorMode]);
+  const applyLabelAccent = useCallback((labelEl: HTMLElement | null) => {
+    if(!labelEl){
+      return;
+    }
+    if(embedMode && cinematicLabelAccent){
+      labelEl.style.borderColor = cinematicLabelAccent;
+    } else {
+      labelEl.style.removeProperty('border-color');
+    }
+  }, [embedMode, cinematicLabelAccent]);
   // Haze: separate draft states to avoid perf spikes on continuous drag
   const [hazeColor, setHazeColor] = useState('#ff5555'); // default red from picker
   const [hazeIntensity, setHazeIntensity] = useState(0.05); // default lowered per request
@@ -2202,6 +2256,7 @@ function App() {
     const inner = document.createElement('div');            // Visible box
     inner.className = isPersistent ? 'system-label system-label--selected' : 'system-label';
     inner.textContent = name;
+    applyLabelAccent(inner);
 
     // Add planet count if available and DPC is active
     if (planets !== undefined && isPlanetCountActive) {
@@ -2214,7 +2269,18 @@ function App() {
     wrapper.appendChild(inner);
 
     return wrapper;
-  }, [isPlanetCountActive]);
+  }, [isPlanetCountActive, applyLabelAccent]);
+
+  useEffect(() => {
+    if(typeof document === 'undefined') return;
+    const labels = document.querySelectorAll<HTMLElement>('.system-label');
+    labels.forEach(label => applyLabelAccent(label));
+  }, [applyLabelAccent]);
+
+  useEffect(() => {
+    if(!cinematicMode) return;
+    updateAuroraScale();
+  }, [cinematicMode, updateAuroraScale, sceneReadyToken]);
 
   // Theme toggle effect: update CSS variable and three.js color constants
   useEffect(() => {
@@ -2299,8 +2365,9 @@ function App() {
         planetCountSpan.textContent = ` (${planets} planets)`;
         inner.appendChild(planetCountSpan);
       }
+      applyLabelAccent(inner);
     }
-  }, [isPlanetCountActive]);
+  }, [isPlanetCountActive, applyLabelAccent]);
 
   const selectSystem = useCallback((system: SolarSystem) => {
   // Set the highlighted system for camera animation and the main rendering effect.
@@ -4770,9 +4837,9 @@ function App() {
       };
       secondDustRef.current=new THREE.Points(g2,dMat2); sceneRef.current!.add(secondDustRef.current);
       // Aurora veil (experimental) + faint gradient background to help visibility
-      const auroraTintForMode = (mode:string)=>{ switch(mode){ case 'purple': return new THREE.Color(0x8b6dff); case 'white': return new THREE.Color(0xbccfff); case 'blue': return new THREE.Color(0x5d8fff); case 'red': return new THREE.Color(0xff6b4b); case 'yellow': return new THREE.Color(0xffdd66); case 'random': return new THREE.Color(0x6fbaff); default: return new THREE.Color(0x5d8fff);} };
+      const auroraTintForMode = (mode:string)=>{ switch(mode){ case 'purple': return new THREE.Color(0x8b6dff); case 'white': return new THREE.Color(0xbccfff); case 'blue': return new THREE.Color(0x5d8fff); case 'green': return new THREE.Color(0x4dffb0); case 'red': return new THREE.Color(0xff6b4b); case 'yellow': return new THREE.Color(0xffdd66); case 'random': return new THREE.Color(0x6fbaff); default: return new THREE.Color(0x5d8fff);} };
       if(!backgroundMeshRef.current){
-        const backgroundTintForMode = (mode:string)=>{ switch(mode){ case 'purple': return new THREE.Color(0x0c0820); case 'white': return new THREE.Color(0x0d1116); case 'blue': return new THREE.Color(0x06101c); case 'red': return new THREE.Color(0x190806); case 'yellow': return new THREE.Color(0x161307); case 'random': return new THREE.Color(0x0b101c); default: return new THREE.Color(0x06101c);} };
+        const backgroundTintForMode = (mode:string)=>{ switch(mode){ case 'purple': return new THREE.Color(0x0c0820); case 'white': return new THREE.Color(0x0d1116); case 'blue': return new THREE.Color(0x06101c); case 'green': return new THREE.Color(0x07140b); case 'red': return new THREE.Color(0x190806); case 'yellow': return new THREE.Color(0x161307); case 'random': return new THREE.Color(0x0b101c); default: return new THREE.Color(0x06101c);} };
         const bgGeo = new THREE.SphereGeometry(120000, 48, 32);
   // Aggressive easing so low slider values are almost black
   const _norm0 = Math.min(Math.max(bgIntensity/1.5,0),1);
@@ -4796,7 +4863,12 @@ function App() {
         fragmentShader: `varying vec2 vUv; uniform float uTime; uniform vec3 uTint; uniform float uGlobalAlpha;\nfloat hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7)))*43758.5453); }\nfloat noise(vec2 p){ vec2 i=floor(p); vec2 f=fract(p); float a=hash(i); float b=hash(i+vec2(1,0)); float c=hash(i+vec2(0,1)); float d=hash(i+vec2(1,1)); vec2 u=f*f*(3.0-2.0*f); return mix(a,b,u.x)+ (c-a)*u.y*(1.0-u.x)+(d-b)*u.x*u.y; }\nfloat fbm(vec2 p){ float v=0.0; float a=0.5; for(int i=0;i<5;i++){ v+=a*noise(p); p*=2.02; a*=0.52; } return v; }\nvoid main(){ vec2 uv=vUv*vec2(2.0,1.2); uv.x+=uTime*0.01; uv.y+=sin(uTime*0.05)*0.1; float n=fbm(uv); float band=smoothstep(0.25,0.85,n); float flick=0.5+0.5*sin(uTime*0.4); float alpha=band*(0.35+0.25*flick); alpha=pow(alpha,1.2); alpha*=uGlobalAlpha; alpha = max(alpha, 0.05); vec3 col = uTint*(0.25 + 0.75*(0.6+0.4*n)); gl_FragColor=vec4(col,alpha); }`,
         transparent:true, depthWrite:false, blending:THREE.AdditiveBlending, side:THREE.DoubleSide
       });
-      const auroraMesh = new THREE.Mesh(auroraGeo, auroraMat); auroraMesh.position.set(0,0,-30000); auroraMeshRef.current = auroraMesh; auroraMatRef.current = auroraMat; sceneRef.current!.add(auroraMesh);
+  const auroraMesh = new THREE.Mesh(auroraGeo, auroraMat);
+  auroraMesh.position.set(0,0,-30000);
+  auroraMeshRef.current = auroraMesh;
+  auroraMatRef.current = auroraMat;
+  sceneRef.current!.add(auroraMesh);
+  updateAuroraScale();
       // Meteors group
       meteorsGroupRef.current = new THREE.Group(); sceneRef.current!.add(meteorsGroupRef.current);
       lastMeteorSpawnRef.current = performance.now();
@@ -4851,7 +4923,9 @@ function App() {
   const customShader = { uniforms:{ tDiffuse:{value:null}, uTime:{value:0}, uGrain:{value:0.35}, uVignette:{value:0.85}, uAberration:{value:new THREE.Vector2(aberrationAmt,aberrationAmt)}, uRadialGlow:{value:0.15}, resolution:{value:new THREE.Vector2(window.innerWidth, window.innerHeight)}, uHazeColor:{value:new THREE.Color(hazeColor)}, uHazeIntensity:{value:hazeIntensity}, uHazeRadius:{value:hazeRadius}, uNebulaShimmerAmp:{value:0.18} }, vertexShader:`varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`, fragmentShader:`uniform sampler2D tDiffuse; uniform float uTime; uniform float uGrain; uniform float uVignette; uniform float uRadialGlow; uniform vec2 uAberration; uniform vec2 resolution; uniform vec3 uHazeColor; uniform float uHazeIntensity; uniform float uHazeRadius; uniform float uNebulaShimmerAmp; varying vec2 vUv; float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))+uTime*917.2)*43758.5453); } void main(){ vec2 centered = vUv - 0.5; float r = length(centered); vec2 offR = vUv + uAberration*vec2( 0.5 - vUv.y,  vUv.x-0.5); vec2 offB = vUv - uAberration*vec2( 0.5 - vUv.x,  vUv.y-0.5); vec3 col; col.r = texture2D(tDiffuse, offR).r; col.g = texture2D(tDiffuse, vUv).g; col.b = texture2D(tDiffuse, offB).b; float glow = smoothstep(0.7,0.0,r)*uRadialGlow; col += glow; float vig = smoothstep(0.8, uVignette, r); col *= (1.0 - 0.65*vig); float maxR = 0.70710678; float coverage = max(uHazeRadius/100.0, 0.0005); float rn = r / (maxR * coverage); float baseH = clamp(1.0 - rn, 0.0, 1.0); float shimmer = 1.0 + (sin(uTime*0.35 + centered.x*6.0 + centered.y*5.0) * 0.5 + 0.5 - 0.5) * uNebulaShimmerAmp * 0.35; shimmer += (hash(vUv*vec2(320.0,451.0)) - 0.5) * uNebulaShimmerAmp * 0.25; baseH *= shimmer; vec3 haze = uHazeColor * (uHazeIntensity * baseH); col += haze; float g = (hash(floor(gl_FragCoord.xy)) - 0.5)*uGrain; col += g/255.0; gl_FragColor = vec4(col,1.0); }`};
       const pass = new ShaderPass(customShader as any); composer.addPass(pass); advancedPassRef.current = pass;
       renderer.toneMapping = THREE.ACESFilmicToneMapping as any; (renderer as any).toneMappingExposure = cinExposure;
-      const onResize=()=>{ composer.setSize(window.innerWidth, window.innerHeight); bloom.setSize(window.innerWidth, window.innerHeight); }; window.addEventListener('resize', onResize); (enable as any)._resize = onResize;
+  const onResize=()=>{ composer.setSize(window.innerWidth, window.innerHeight); bloom.setSize(window.innerWidth, window.innerHeight); updateAuroraScale(); };
+  window.addEventListener('resize', onResize);
+  (enable as any)._resize = onResize;
     };
     const disable = () => {
       if(starFieldRef.current && originalStarMaterialRef.current) starFieldRef.current.material = originalStarMaterialRef.current;
@@ -4954,27 +5028,28 @@ function App() {
     if(cinematicMode) enable(); else disable();
     return ()=>{ if(cinematicMode) disable(); };
   // Cinematic enable/disable lifecycle (exclude bloomStrength so slider changes don't recreate composer)
-  }, [cinematicMode, /* bloomStrength removed */ dustAmount, cinExposure, sceneReadyToken]);
+  }, [cinematicMode, /* bloomStrength removed */ dustAmount, cinExposure, sceneReadyToken, updateAuroraScale]);
 
   // Star palette application via geometry colors (overrides any previous per-star coloring while in cinematic mode)
-  const applyStarPalette = useCallback((mode: typeof starColorMode)=>{
+  const applyStarPalette = useCallback((mode: StarColorMode)=>{
     if(!cinematicMode) return; // only apply in cinematic
     if(!starFieldRef.current) return;
     const geom = starFieldRef.current.geometry as THREE.BufferGeometry;
     const attr = geom.getAttribute('color') as THREE.BufferAttribute;
     if(!attr) return;
     const count = attr.count;
-    const palettes: Record<string, [number,number,number][]> = {
+  const palettes: Record<StarColorMode, [number,number,number][]> = {
       purple: [[0.70,0.55,1.0],[0.55,0.50,0.95],[0.85,0.60,1.0]],
       white:  [[0.95,0.95,0.95],[1.0,1.0,1.0],[0.95,0.95,0.95]],
   // Make blue palette visibly distinct (deeper blues)
   // Lighter, colder blue palette (soft stellar blues)
   blue:   [[0.65,0.80,1.0],[0.55,0.75,1.0],[0.75,0.88,1.0]],
+      green:  [[0.45,0.95,0.55],[0.35,0.85,0.50],[0.60,1.0,0.72]],
       red:    [[1.0,0.35,0.20],[1.0,0.50,0.28],[1.0,0.70,0.45]],
       yellow: [[1.0,0.82,0.05],[1.0,0.90,0.30],[1.0,0.97,0.60]],
       random: [[1.0,0.35,0.20],[0.55,0.65,1.0],[1.0,0.82,0.05]]
     };
-    const sel = palettes[mode]; if(!sel) return;
+  const sel = palettes[mode]; if(!sel) return;
     for(let i=0;i<count;i++){
       const h = (Math.sin(i*12.9898)*43758.5453) % 1; // deterministic pseudo-random
       let c: [number,number,number];
@@ -4990,12 +5065,12 @@ function App() {
   useEffect(()=>{
     if(!cinematicMode) return;
     if(backgroundMeshRef.current){
-      const backgroundTintForMode = (mode:string)=>{ switch(mode){ case 'purple': return new THREE.Color(0x0c0820); case 'white': return new THREE.Color(0x0d1116); case 'blue': return new THREE.Color(0x06101c); case 'red': return new THREE.Color(0x190806); case 'yellow': return new THREE.Color(0x161307); case 'random': return new THREE.Color(0x0b101c); default: return new THREE.Color(0x06101c);} };
+  const backgroundTintForMode = (mode:string)=>{ switch(mode){ case 'purple': return new THREE.Color(0x0c0820); case 'white': return new THREE.Color(0x0d1116); case 'blue': return new THREE.Color(0x06101c); case 'green': return new THREE.Color(0x07140b); case 'red': return new THREE.Color(0x190806); case 'yellow': return new THREE.Color(0x161307); case 'random': return new THREE.Color(0x0b101c); default: return new THREE.Color(0x06101c);} };
       const mat = backgroundMeshRef.current.material as THREE.ShaderMaterial;
       if(mat.uniforms.uTint) mat.uniforms.uTint.value = backgroundTintForMode(starColorMode);
     }
     if(auroraMatRef.current){
-      const auroraTintForMode = (mode:string)=>{ switch(mode){ case 'purple': return new THREE.Color(0x8b6dff); case 'white': return new THREE.Color(0xbccfff); case 'blue': return new THREE.Color(0x5d8fff); case 'red': return new THREE.Color(0xff6b4b); case 'yellow': return new THREE.Color(0xffdd66); case 'random': return new THREE.Color(0x6fbaff); default: return new THREE.Color(0x5d8fff);} };
+  const auroraTintForMode = (mode:string)=>{ switch(mode){ case 'purple': return new THREE.Color(0x8b6dff); case 'white': return new THREE.Color(0xbccfff); case 'blue': return new THREE.Color(0x5d8fff); case 'green': return new THREE.Color(0x4dffb0); case 'red': return new THREE.Color(0xff6b4b); case 'yellow': return new THREE.Color(0xffdd66); case 'random': return new THREE.Color(0x6fbaff); default: return new THREE.Color(0x5d8fff);} };
       if(auroraMatRef.current.uniforms.uTint) auroraMatRef.current.uniforms.uTint.value = auroraTintForMode(starColorMode);
     }
   }, [starColorMode, cinematicMode, sceneReadyToken]);
@@ -5878,10 +5953,20 @@ function App() {
       isDraggingRef.current = false;
     };
 
+    const onWheel = () => {
+      const nowTs = Date.now();
+      lastInteractionRef.current = nowTs;
+      if(cinematicOrbitRef.current){
+        cinematicOrbitRef.current = false;
+        setCinematicOrbitRequested(false);
+      }
+    };
+
     currentRenderer.domElement.addEventListener('pointermove', onPointerMove);
     currentRenderer.domElement.addEventListener('pointerdown', onPointerDown);
   currentRenderer.domElement.addEventListener('pointerup', onPointerUp);
   currentRenderer.domElement.addEventListener('pointerleave', onPointerLeave);
+    currentRenderer.domElement.addEventListener('wheel', onWheel);
     // Right-click context menu for setting destination
   const onContextMenu = (event: MouseEvent) => {
       if(!hoveredSystem) return; // only active when a star is hovered
@@ -6163,6 +6248,7 @@ function App() {
       currentRenderer.domElement.removeEventListener('pointerdown', onPointerDown);
   currentRenderer.domElement.removeEventListener('pointerup', onPointerUp);
   currentRenderer.domElement.removeEventListener('pointerleave', onPointerLeave);
+  currentRenderer.domElement.removeEventListener('wheel', onWheel);
   currentRenderer.domElement.removeEventListener('contextmenu', onContextMenu);
   window.removeEventListener('mousedown', closeOnLeftClick);
   window.removeEventListener('keydown', escHandler);
@@ -6526,7 +6612,7 @@ function App() {
     >Replay Transmission</button>
   )}
   {embedMode && openOnSiteUrl && (
-    <div style={{ position:'absolute', top:16, right:16, zIndex:3300 }}>
+    <div style={{ position:'absolute', top:12, right:12, zIndex:3300 }}>
       <a
         href={openOnSiteUrl}
         target="_blank"
@@ -6534,15 +6620,15 @@ function App() {
         style={{
           display:'inline-flex',
           alignItems:'center',
-          gap:6,
-          padding:'8px 14px',
+          gap:4,
+          padding:'6px 10px',
           borderRadius:999,
           background:'rgba(0,0,0,0.65)',
           color:'#fff',
           textDecoration:'none',
-          fontSize:13,
+          fontSize:11,
           fontWeight:600,
-          letterSpacing:0.3,
+          letterSpacing:0.2,
           border:'1px solid rgba(255,255,255,0.35)',
           backdropFilter:'blur(10px) saturate(150%)'
         }}

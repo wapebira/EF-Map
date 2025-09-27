@@ -1,8 +1,8 @@
-<!-- Curated on 2025-09-26. This log keeps entries relevant to: Primordium indexer (World API via Docker), Postgres, Grafana, Docker, and the Cloudflare-hosted website (KV stats/snapshots/overlays). Older/legacy D1 indexer & cron/decoder content moved to archive. -->
+<!-- Curated on 2025-09-27. This log keeps entries relevant to: Primordium indexer (World API via Docker), Postgres, Grafana, Docker, and the Cloudflare-hosted website (KV stats/snapshots/overlays). Older/legacy D1 indexer & cron/decoder content moved to archive. -->
 
 Older entries and legacy indexer details have been archived: [archive\decision-log\decision-log-legacy-2025-09-23.md](./archive/decision-log/decision-log-legacy-2025-09-23.md)
 
-## Current Environment Quick Reference (as of 2025-09-26)
+## Current Environment Quick Reference (as of 2025-09-27)
 - Hosting/runtime
   - Cloudflare Pages + Worker (Pages serves assets; `_worker.js` handles `/api/*`). Netlify code removed post-cutover.
   - Preview detection: hosts ending with `.pages.dev`; admin endpoints allow preview bypass with `?openPreview=1` when token is absent/mismatched.
@@ -70,6 +70,14 @@ Older entries and legacy indexer details have been archived: [archive\decision-l
 - Preview URLs
   - Pattern: `https://<branch-or-alias>.ef-map.pages.dev` (project `ef-map`).
 
+## 2025-09-26 – Overlay repository bootstrap & guardrail sync
+- Goal: Create the dedicated `ef-map-overlay` repository for native helper + DX12 overlay work and mirror the shared guardrail docs between projects.
+- Risk: low (documentation updates).
+- Gates: typecheck n/a | build n/a (docs only) | smoke n/a.
+## 2025-09-27 – Embed palette polish & production deploy
+- Goal: Finalize cinematic embed polish (palette-aware labels, smaller CTA, orbit cancel on wheel, aurora scaling) and push the feature live.
+- Risk: medium (embed UX + cinematic rendering).
+- Gates: typecheck ✅ (via build) | build ✅ `npm run build` | smoke ✅ (embed preview/manual).
 ## 2025-09-26 – Search result favicon alignment
 - Goal: Align public favicons, touch icons, and structured data with the EF-Map logo so Google Search shows the branded round icon instead of the blank placeholder, and expose manifest/browserconfig …
 - Risk: low (static assets + head metadata only).

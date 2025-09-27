@@ -2,6 +2,8 @@
 
 Purpose: This repo hosts (1) map data processing scripts (Python) for EVE Frontier star/region data, and (2) a deployable interactive web app (`eve-frontier-map/`) built with React + TypeScript + Vite now served on Cloudflare Pages + Worker (Cloudflare KV for sharing + anonymous usage stats). Netlify function fallbacks have been removed after cutover. Follow the patterns below when adding or modifying code. This file is optimized for a "Vibe coding" workflow: the human provides intent (non‑coder) and the AI agent converts intent into safe, minimal, verifiable changes.
 
+**Overlay helper coordination:** Native helper and DirectX overlay work now lives in the sibling repository **ef-map-overlay**. Keep shared documentation (this file, `AGENTS.md`, `docs/initiatives/GAME_OVERLAY_PLAN.md`, and decision logs) synchronized across both repos. When a task touches both projects, include cross-repo notes in each decision log entry and clarify where code changes belong.
+
 ## Operator Quick Start (Non‑Coder)
 1. Describe goal in plain language (what you want to see changed / added / fixed).
 2. Assistant replies with: checklist, assumptions (≤2), risk class, plan.
@@ -31,6 +33,7 @@ If stuck: ask for "safer alternative" or "explain tradeoffs". Avoid giving line-
 - Cinematic mode: toggled global via `window.__efSetCinematic(bool)` (set inside `App.tsx`), tracked for enter/session/time metrics.
 
 Reference index: see `docs/README.md` for links to broader specs (`PROJECT_REQUIREMENTS.md`, cinematic spec, operational playbooks).
+- Overlay initiative roadmap is mirrored in `docs/initiatives/GAME_OVERLAY_PLAN.md` (and in the overlay repo under the same path). Update both copies when the plan changes.
 
 Cloud Platform: Cloudflare (Pages + Worker + KV) is authoritative. Netlify is deprecated and retained only as historical reference in the repo until final purge. Do not add new Netlify code; any persistence change must target the existing Cloudflare Worker & KV abstraction. See `docs/archive/migration/MIGRATION_PLAN.md` for archival context only.
 
@@ -51,6 +54,7 @@ Cloud Platform: Cloudflare (Pages + Worker + KV) is authoritative. Netlify is de
 
 ## Conventions & Patterns
 - State bridging to globals: When a feature needs instrumentation (cinematic), expose a single global setter (e.g. `__efSetCinematic`) rather than sprinkling tracking calls. Extend this pattern for new mode-level timers.
+- Overlay helper interactions: Keep protocol contracts and payload schemas in this repo. Implement helper/DX12 logic in `ef-map-overlay`; update both repos' guardrails when the contract evolves.
 - Usage metrics categories:
   - Counters: increment-only events (`cinematic_enter`).
   - First-in-session counters: fire a `*_first` event to also increment a separate `*_sessions` counter (see cinematic).
