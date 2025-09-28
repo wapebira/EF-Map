@@ -78,6 +78,10 @@ Older entries and legacy indexer details have been archived: [archive\decision-l
 - Goal: Preserve Smart Gate hops and mode selection in shared routes by bumping the client share schema to `r2` and restoring metadata during playback.
 - Risk: medium (share links + routing UI state)
 - Gates: typecheck ✅ `pnpm typecheck` | build ✅ `pnpm build` | test ✅ `pnpm test`
+## 2025-09-28 – Share worker accepts r2 payloads
+- Goal: Update the Cloudflare Pages worker validation so `create-share` accepts any versioned payload (`r<num>|`), restoring short-link copies for Smart Gate routes.
+- Risk: low (server-side validation only)
+- Gates: test ✅ `pnpm test` | typecheck ✅ `pnpm typecheck` | build ✅ `pnpm build` | preview smoke ✅ `wrangler pages deploy dist --project-name ef-map --branch preview-share-r2-fix --commit-dirty=true…
 ## 2025-09-26 – Overlay repository bootstrap & guardrail sync
 - Goal: Create the dedicated `ef-map-overlay` repository for native helper + DX12 overlay work and mirror the shared guardrail docs between projects.
 - Risk: low (documentation updates).

@@ -1707,7 +1707,7 @@ async function handleCreateShare(req, env){
   let body={}; try { if(req.headers.get('content-type')?.includes('application/json')) body = await req.json(); } catch { return json({ error:'Invalid JSON' },400); }
   const { data, preferId } = body||{};
   if(typeof data !== 'string' || !data.trim()) return json({ error:'Missing data' },400);
-  if(!data.startsWith('r1|')) return json({ error:'Invalid share payload' },400);
+  if(!/^r\d+\|/.test(data)) return json({ error:'Invalid share payload' },400);
   let id = typeof preferId==='string'? preferId.slice(0,16).replace(/[^A-Za-z0-9_-]/g,''):'';
   if(!id) id = crypto.randomUUID().replace(/-/g,'').slice(0,10);
   for(let i=0;i<5;i++){
