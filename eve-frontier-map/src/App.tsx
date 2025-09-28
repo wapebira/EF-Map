@@ -38,6 +38,7 @@ import HelpPanel from './components/HelpPanel/HelpPanel';
 import { loadPrefs, setAccent, setOpenPanels as persistOpenPanels, setRoutingPrefs, fullReset, getPrefs, softReset, setUiScale as persistUiScale, setShowStations as persistShowStations } from './utils/prefs';
 import { track } from './utils/usage';
 import { encodeShare, decodeShare } from './utils/share';
+import type { SmartGateMode, P2PShareData } from './utils/share';
 import { createShortShare, fetchShortShare, buildShortRedirectUrl } from './utils/shortShare';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 // FXAA removed; keep cinematic pipeline only
@@ -810,13 +811,13 @@ function App() {
   // State for P2P Routing
   const routingWorkerRef = useRef<Worker | null>(null);
   const [isCalculatingRoute, setIsCalculatingRoute] = useState(false);
-  const [routeResult, setRouteResult] = useState<{ path: string[] | null; error?: string; minRequiredShipRange?: number; meta?: { baselineCost?: number; finalCost?: number; baselineNodes?: number; finalNodes?: number }; usedSmartGatePairs?: string[] } | null>(null);
+  const [routeResult, setRouteResult] = useState<{ path: string[] | null; error?: string; minRequiredShipRange?: number; meta?: { baselineCost?: number; finalCost?: number; baselineNodes?: number; finalNodes?: number }; usedSmartGatePairs?: string[]; smartGateMode?: SmartGateMode } | null>(null);
   const [scoutRouteResult, setScoutRouteResult] = useState<{ path: string[] | null } | null>(null);
   const [scoutInvalidateToken, setScoutInvalidateToken] = useState(0);
   const [routeProgress, setRouteProgress] = useState<{ explored: number; frontier: number; elapsedMs: number; message: string } | null>(null);
   const [shareFeedback, setShareFeedback] = useState('');
   // Include 'explore' scaffold mode; behaves like 'fuel' until enrichment algorithm added.
-  const lastP2PParamsRef = useRef<{ jump:number; optimize:'fuel'|'jumps'|'explore'; algo:'astar'|'dijkstra'; from?:string; to?:string }>({ jump:60, optimize:'fuel', algo:'astar' });
+  const lastP2PParamsRef = useRef<{ jump:number; optimize:'fuel'|'jumps'|'explore'; algo:'astar'|'dijkstra'; from?:string; to?:string; smartGateMode?: SmartGateMode }>({ jump:60, optimize:'fuel', algo:'astar' });
 
   // New state for labels
   const hoverLabelObj = useRef<CSS2DObject | null>(null);
@@ -3154,10 +3155,10 @@ function App() {
           } else {
             alert(`Routing Error: ${error}`);
           }
-          setRouteResult({ path: null, error, minRequiredShipRange, meta });
+          setRouteResult({ path: null, error, minRequiredShipRange, meta, smartGateMode: lastP2PParamsRef.current?.smartGateMode ?? 'none' });
           return;
         }
-        setRouteResult({ path, error: undefined, meta });
+        setRouteResult({ path, error: undefined, meta, smartGateMode: lastP2PParamsRef.current?.smartGateMode ?? 'none' });
         try {
           const hops = path ? Math.max(0, path.length-1) : 0;
           const algoUsed = (lastP2PParamsRef.current?.algo) || 'astar';
@@ -3507,9 +3508,9 @@ function App() {
       return clampZoomDistance(parsed);
     };
     const zoomOverrideFromQuery = parseZoomParam(params.get('zoom'));
-  const qShareId = params.get('share');
-  const hash = window.location.hash;
-  const pathMatch = window.location.pathname.startsWith('/s/') ? window.location.pathname.slice(3).replace(/[^A-Za-z0-9_-]/g,'') : '';
+    const qShareId = params.get('share');
+    const hash = window.location.hash;
+    const pathMatch = window.location.pathname.startsWith('/s/') ? window.location.pathname.slice(3).replace(/[^A-Za-z0-9_-]/g,'') : '';
     const systemsByLower = new Map<string, SolarSystem>(Object.values(mapData.solar_systems).map(s=> [s.name.toLowerCase(), s]));
     const apply = (share:any)=>{
       if(!share) return;
@@ -3517,7 +3518,7 @@ function App() {
       const allExist = share.path.every((p:string)=> systemsByLower.has(p.toLowerCase()));
       if(!allExist || share.path.length < 2) return;
       if(share.type==='p'){
-        lastP2PParamsRef.current = { jump: share.jump, optimize: share.optimize, algo: share.algo, from: share.from, to: share.to };
+        lastP2PParamsRef.current = { jump: share.jump, optimize: share.optimize, algo: share.algo, from: share.from, to: share.to, smartGateMode: share.smartGateMode ?? 'none' };
         // Populate persisted UI state (jump/optimize/algo + destination) so inputs reflect shared settings
         try {
           setPersistedJump(share.jump);
@@ -3525,17 +3526,19 @@ function App() {
           setPersistedAlgo(share.algo);
           if(share.to){ setLastDestinationSystemName(share.to); }
         } catch { /* ignore */ }
-        setRouteResult({ path: share.path });
-  // (legacy setActivePanel call removed)
-  ensurePanel('routing');
+        const extra: { usedSmartGatePairs?: string[]; smartGateMode?: SmartGateMode } = {};
+        if(Array.isArray(share.smartGatePairs) && share.smartGatePairs.length){
+          extra.usedSmartGatePairs = share.smartGatePairs;
+        }
+        extra.smartGateMode = share.smartGateMode ?? 'none';
+        setRouteResult({ path: share.path, ...extra });
+        // (legacy setActivePanel call removed)
+        ensurePanel('routing');
       } else if(share.type==='s') {
-  setReturnToStart(share.returnToStart);
-  setReturnToStart(share.returnToStart);
-  setScoutRouteResult({ path: share.path });
-  ensurePanel('routing');
-          if(lastSelectedSystemName){ ensurePanel('routing'); }
-          if(lastSelectedSystemName){ ensurePanel('routing'); }
-          if(lastSelectedSystemName){ ensurePanel('routing'); }
+        setReturnToStart(share.returnToStart);
+        setScoutRouteResult({ path: share.path });
+        ensurePanel('routing');
+        if(lastSelectedSystemName){ ensurePanel('routing'); }
       }
       const startSys = systemsByLower.get(share.path[0].toLowerCase()); if(startSys) selectSystem(startSys);
     };
@@ -3689,8 +3692,9 @@ function App() {
   }, [mapData, selectSystem]);
 
   const calculateRoute = useCallback((fromSystemName: string, toSystemName: string, maxJumpDistance: number, optimizeFor: 'fuel' | 'jumps' | 'explore', algorithm: 'astar' | 'dijkstra', overheadPct?: number, exploreCorridorPct?: number, exploreProgressBiasPct?: number, smartGateMode?: 'none'|'public'|'authorized') => {
-  try { (window as any).__efMarkFirstRouteStarted && (window as any).__efMarkFirstRouteStarted(); } catch {}
-    try { (lastP2PParamsRef as any).current = { jump:maxJumpDistance, optimize:optimizeFor, algo:algorithm, from:fromSystemName, to:toSystemName }; } catch(e) { /* ignore */ }
+    const smartGateModeResolved: SmartGateMode = smartGateMode ?? 'none';
+    try { (window as any).__efMarkFirstRouteStarted && (window as any).__efMarkFirstRouteStarted(); } catch {}
+    try { (lastP2PParamsRef as any).current = { jump:maxJumpDistance, optimize:optimizeFor, algo:algorithm, from:fromSystemName, to:toSystemName, smartGateMode: smartGateModeResolved }; } catch(e) { /* ignore */ }
     if (!mapData) { alert('Map data is not loaded yet.'); return; }
     if(!fromSystemName || !toSystemName){ alert('Both From and To are required.'); return; }
 
@@ -3801,7 +3805,7 @@ function App() {
             combinedMeta = { baselineCost: bCost, finalCost: fCost, baselineNodes: Math.max(0, bNodes - junctions), finalNodes: Math.max(0, fNodes - junctions) };
           }
         }
-  setRouteResult({ path: fullPath, ...(combinedMeta ? { meta: combinedMeta } : {}), ...(usedSmartGatePairsGlobal.size ? { usedSmartGatePairs: Array.from(usedSmartGatePairsGlobal) } : {}) } as any);
+  setRouteResult({ path: fullPath, smartGateMode: smartGateModeResolved, ...(combinedMeta ? { meta: combinedMeta } : {}), ...(usedSmartGatePairsGlobal.size ? { usedSmartGatePairs: Array.from(usedSmartGatePairsGlobal) } : {}) } as any);
         try {
           const elapsed = routeCalcStartRef.current ? Date.now() - routeCalcStartRef.current : undefined;
           track({ type:'p2p_route' });
@@ -3821,7 +3825,7 @@ function App() {
               if(usedPairsArr.length){
                 // Count SG hops present in the final path (pairs are unique by design here)
                 track({ type:'sg_hops', count: usedPairsArr.length });
-                const mode = smartGateMode as ('none'|'public'|'authorized'|undefined);
+                const mode = smartGateModeResolved;
                 if(mode === 'public') track({ type:'sg_route_unrestricted' });
                 else if(mode === 'authorized') track({ type:'sg_route_authorized' });
                 // Aggregate any-mode adoption
@@ -3856,7 +3860,7 @@ function App() {
         }
   const { path, error, minRequiredShipRange, meta } = data;
         if(error || !path){
-          setIsCalculatingRoute(false); setRouteProgress(null); setRouteResult({ path:null, error: error || `No path for segment ${segFrom} → ${segTo}` , minRequiredShipRange }); return;
+          setIsCalculatingRoute(false); setRouteProgress(null); setRouteResult({ path:null, error: error || `No path for segment ${segFrom} → ${segTo}` , minRequiredShipRange, smartGateMode: smartGateModeResolved }); return;
         }
         // After a successful segment, emit a Smart Gate usage audit to the console.
         // Revised classification avoids false positives by distinguishing gate vs ship vs SG hops.
@@ -6559,8 +6563,21 @@ function App() {
             } catch { /* ignore */ }
           } else if(routeResult?.path){
             try {
-              const p=(lastP2PParamsRef as any).current||{jump:60,optimize:'fuel',algo:'astar'};
-              encoded = encodeShare({ type:'p', from:path[0], to:path[path.length-1], jump:p.jump, optimize:p.optimize, algo:p.algo, path });
+              const p = (lastP2PParamsRef as any).current || { jump:60, optimize:'fuel', algo:'astar', smartGateMode:'none' };
+              const payload: P2PShareData = {
+                type:'p',
+                from:path[0],
+                to:path[path.length-1],
+                jump:p.jump,
+                optimize:p.optimize,
+                algo:p.algo,
+                path,
+                smartGateMode: (routeResult.smartGateMode ?? p.smartGateMode ?? 'none') as SmartGateMode
+              };
+              if(routeResult.usedSmartGatePairs && routeResult.usedSmartGatePairs.length){
+                payload.smartGatePairs = Array.from(routeResult.usedSmartGatePairs);
+              }
+              encoded = encodeShare(payload);
             } catch { /* ignore */ }
           }
           if(!encoded){ setShareFeedback('Error'); setTimeout(()=>setShareFeedback(''),1500); return; }

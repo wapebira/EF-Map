@@ -1,8 +1,8 @@
-<!-- Curated on 2025-09-27. This log keeps entries relevant to: Primordium indexer (World API via Docker), Postgres, Grafana, Docker, and the Cloudflare-hosted website (KV stats/snapshots/overlays). Older/legacy D1 indexer & cron/decoder content moved to archive. -->
+<!-- Curated on 2025-09-28. This log keeps entries relevant to: Primordium indexer (World API via Docker), Postgres, Grafana, Docker, and the Cloudflare-hosted website (KV stats/snapshots/overlays). Older/legacy D1 indexer & cron/decoder content moved to archive. -->
 
-Older entries and legacy indexer details have been archived: [archive\decision-log\decision-log-legacy-2025-09-23.md](./archive/decision-log/decision-log-legacy-2025-09-23.md)
+Older entries and legacy indexer details have been archived: [archive\decision-log\decision-log-legacy-2025-09-27.md](./archive/decision-log/decision-log-legacy-2025-09-27.md)
 
-## Current Environment Quick Reference (as of 2025-09-27)
+## Current Environment Quick Reference (as of 2025-09-28)
 - Hosting/runtime
   - Cloudflare Pages + Worker (Pages serves assets; `_worker.js` handles `/api/*`). Netlify code removed post-cutover.
   - Preview detection: hosts ending with `.pages.dev`; admin endpoints allow preview bypass with `?openPreview=1` when token is absent/mismatched.
@@ -70,6 +70,14 @@ Older entries and legacy indexer details have been archived: [archive\decision-l
 - Preview URLs
   - Pattern: `https://<branch-or-alias>.ef-map.pages.dev` (project `ef-map`).
 
+## 2025-09-28 – Chrome DevTools MCP server registration
+- Goal: Register Google's Chrome DevTools MCP server with VS Code Copilot so agents can grab traces, screenshots, console logs, or scripted smoke runs without leaving the editor.
+- Risk: low (tool registration + docs update).
+- Gates: typecheck n/a | build n/a | smoke ✅ (`code --% --add-mcp "{\"name\":\"chrome-devtools\",\"command\":\"npx\",\"args\":[\"chrome-devtools-mcp@latest\"]}"` added the server; `node -v` → v22.19.…
+## 2025-09-28 – Share schema r2 smart gate metadata
+- Goal: Preserve Smart Gate hops and mode selection in shared routes by bumping the client share schema to `r2` and restoring metadata during playback.
+- Risk: medium (share links + routing UI state)
+- Gates: typecheck ✅ `pnpm typecheck` | build ✅ `pnpm build` | test ✅ `pnpm test`
 ## 2025-09-26 – Overlay repository bootstrap & guardrail sync
 - Goal: Create the dedicated `ef-map-overlay` repository for native helper + DX12 overlay work and mirror the shared guardrail docs between projects.
 - Risk: low (documentation updates).

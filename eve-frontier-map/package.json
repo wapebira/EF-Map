@@ -11,6 +11,7 @@
     "typecheck": "tsc -b",
     "lint": "eslint .",
     "preview": "vite preview",
+  "test": "vitest run",
     "test:scout-cost": "node tools/test_scout_cost.js",
     "cf:version": "wrangler --version",
     "cf:login": "wrangler login",
@@ -46,6 +47,7 @@
     "typescript": "~5.8.3",
     "typescript-eslint": "^8.39.1",
     "vite": "^7.1.2",
-    "wrangler": "^4.34.0"
+    "wrangler": "^4.34.0",
+    "vitest": "^2.1.4"
   }
 }

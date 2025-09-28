@@ -10,6 +10,8 @@
 
 import { compressToUint8Array, decompressFromUint8Array } from 'lz-string';
 
+export type SmartGateMode = 'none' | 'public' | 'authorized';
+
 export interface P2PShareData {
   type: 'p';
   from: string;
@@ -18,6 +20,8 @@ export interface P2PShareData {
   optimize: 'fuel'|'jumps'|'explore';
   algo: 'astar'|'dijkstra';
   path: string[]; // full path including endpoints
+  smartGateMode?: SmartGateMode;
+  smartGatePairs?: string[]; // directional "id-id" pairs used in the original route
 }
 
 export interface ScoutShareData {
@@ -29,7 +33,8 @@ export interface ScoutShareData {
 
 export type ShareData = P2PShareData | ScoutShareData;
 
-const PREFIX = 'r1';
+const CURRENT_PREFIX = 'r2';
+const SUPPORTED_PREFIXES = new Set(['r2', 'r1']);
 
 function base64FromBytes(bytes: Uint8Array): string {
   let binary = '';
@@ -48,15 +53,25 @@ function bytesFromBase64(b64: string): Uint8Array {
 
 export function encodeShare(data: ShareData): string {
   if (data.type === 'p') {
-    const raw = [data.from, data.to, data.jump.toString(), data.optimize, data.algo, data.path.join(';')].join(',');
-    return encodeRaw('p', raw);
+    const base = [
+      data.from,
+      data.to,
+      data.jump.toString(),
+      data.optimize,
+      data.algo,
+      data.path.join(';'),
+      data.smartGateMode ?? '',
+      data.smartGatePairs && data.smartGatePairs.length ? data.smartGatePairs.join(';') : ''
+    ];
+    const raw = base.join(',');
+    return encodeRaw('p', raw, CURRENT_PREFIX);
   } else {
     const raw = [data.start, data.returnToStart? '1':'0', data.path.join(';')].join(',');
-    return encodeRaw('s', raw);
+    return encodeRaw('s', raw, CURRENT_PREFIX);
   }
 }
 
-function encodeRaw(type: 'p'|'s', raw: string): string {
+function encodeRaw(type: 'p'|'s', raw: string, prefix: 'r1'|'r2'): string {
   // Decide compression
   let payload: string;
   if (raw.length > 120) {
@@ -66,16 +81,16 @@ function encodeRaw(type: 'p'|'s', raw: string): string {
     payload = 'n' + encodeURIComponent(raw);
   }
   const flags = '0'; // reserved hex flags
-  return `${PREFIX}|${type}|${flags}|${payload}`;
+  return `${prefix}|${type}|${flags}|${payload}`;
 }
 
 export function decodeShare(hash: string): ShareData | null {
   // Expect leading '#'
   const clean = hash.startsWith('#') ? hash.slice(1) : hash;
-  if (!clean.startsWith(PREFIX+'|')) return null;
   const parts = clean.split('|');
   if (parts.length !== 4) return null;
-  const [, type, _flags, payload] = parts;
+  const [prefix, type, _flags, payload] = parts;
+  if (!SUPPORTED_PREFIXES.has(prefix)) return null;
   if (type !== 'p' && type !== 's') return null;
   if (!payload) return null;
   let raw: string;
@@ -89,12 +104,28 @@ export function decodeShare(hash: string): ShareData | null {
   } else return null;
   if (!raw) return null;
   if (type === 'p') {
-  const [from, to, jumpStr, optimize, algo, pathStr] = raw.split(',');
+    const parts = raw.split(',');
+    const from = parts[0];
+    const to = parts[1];
+    const jumpStr = parts[2];
+    const optimize = parts[3];
+    const algo = parts[4];
+    const pathStr = parts[5];
+    const sgModeRaw = parts[6] ?? '';
+    const sgPairsRaw = parts[7] ?? '';
     if(!from || !to || !jumpStr || !optimize || !algo || pathStr===undefined) return null;
     const jump = parseFloat(jumpStr); if(!isFinite(jump)) return null;
     const path = pathStr ? pathStr.split(';').filter(Boolean) : [];
-  const optVal: 'fuel'|'jumps'|'explore' = optimize==='fuel' ? 'fuel' : (optimize==='explore' ? 'explore' : 'jumps');
-  return { type:'p', from, to, jump, optimize: optVal, algo: (algo==='dijkstra'?'dijkstra':'astar'), path };
+    const optVal: 'fuel'|'jumps'|'explore' = optimize==='fuel' ? 'fuel' : (optimize==='explore' ? 'explore' : 'jumps');
+    const base: P2PShareData = { type:'p', from, to, jump, optimize: optVal, algo: (algo==='dijkstra'?'dijkstra':'astar'), path };
+    if (sgModeRaw === 'none' || sgModeRaw === 'public' || sgModeRaw === 'authorized') {
+      base.smartGateMode = sgModeRaw;
+    }
+    if (sgPairsRaw) {
+      const pairs = sgPairsRaw.split(';').filter(Boolean);
+      if (pairs.length) base.smartGatePairs = pairs;
+    }
+    return base;
   } else {
     const [start, returnFlag, pathStr] = raw.split(',');
     if(!start || returnFlag===undefined || pathStr===undefined) return null;

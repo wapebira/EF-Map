@@ -13,6 +13,7 @@ Purpose: Provide persistent, high-signal context and guardrails for agent mode i
 - Frontend: `eve-frontier-map/` (React + TypeScript + Vite); served on Cloudflare Pages + Worker
 - Backend: Cloudflare Worker with KV (shares + anonymous usage stats). No Netlify fallbacks (post-cutover)
 - Data: Preprocessing scripts (Python) produce SQLite/JSON consumed by the app; local chain indexing via Primordium pg-indexer; Grafana (localhost:3000) is the canonical dashboard
+- Tooling: Chrome DevTools MCP server (`chrome-devtools`) is pre-installed for VS Code Copilot. It launches an isolated Chrome profile for traces/screenshots/automation—keep it clear of secrets and close sessions once finished.
 
 Useful entry points:
 - High-level rules and patterns: `.github/copilot-instructions.md`

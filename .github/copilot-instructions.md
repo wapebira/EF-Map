@@ -185,6 +185,7 @@ Environment is already provisioned. Prefer Wrangler CLI for all operations. If y
   - PostgreSQL (ckolkman.vscode-postgres)
   - SQLite (alexcvzz.vscode-sqlite)
   - Grafana Utils (yesoreyeram.grafana) and Grafana (grafana.grafana-vscode)
+- Chrome DevTools MCP server (`chrome-devtools`) is registered for Copilot; it can launch Chrome to capture traces, screenshots, console logs, and run automation. Use an isolated browsing profile (no secrets) and shut it down when finished.
 - Guidance: Proactively suggest using these when they improve ergonomics (e.g., browse Postgres via extension UI; author Grafana panels with JSON helpers; test HTTP endpoints with REST Client) and mention any setup assumptions if needed. Do not instruct manual installs unless the user requests more tools.
 
 ### Cloudflare Platform & CLI Preference

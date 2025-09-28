@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { track } from '../../utils/usage';
 import './P2PRouting.css';
 import AutoCompleteInput from '../AutoCompleteInput/AutoCompleteInput';
+import type { SmartGateMode } from '../../utils/share';
 
 // --- Note Formatter Logic (inlined to fix module resolution issue) ---
 
@@ -238,7 +239,7 @@ interface P2PRoutingProps {
   ) => void;
   onStopCalculation?: () => void;
   isCalculating: boolean;
-  routeResult: { path: string[] | null; error?: string; minRequiredShipRange?: number; meta?: { baselineCost?: number; finalCost?: number; baselineNodes?: number; finalNodes?: number } } | null;
+  routeResult: { path: string[] | null; error?: string; minRequiredShipRange?: number; meta?: { baselineCost?: number; finalCost?: number; baselineNodes?: number; finalNodes?: number }; smartGateMode?: SmartGateMode } | null;
   mapData: MapData | null;
   systemNames: string[];
   progress?: { explored: number; frontier: number; elapsedMs: number; message: string } | null;
@@ -442,6 +443,11 @@ const P2PRouting = ({ onCalculateRoute, onStopCalculation, isCalculating, routeR
   useEffect(()=>{
     if(!isLoggedIn && smartGateMode==='authorized') setSmartGateMode('public');
   }, [isLoggedIn, smartGateMode, setSmartGateMode]);
+
+  useEffect(()=>{
+    if(routeResult?.smartGateMode === undefined) return;
+    setSmartGateMode(routeResult.smartGateMode);
+  }, [routeResult?.smartGateMode, setSmartGateMode]);
 
   useEffect(() => {
     if (routeResult?.path && mapData) {

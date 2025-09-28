@@ -3,6 +3,7 @@ import { track } from '../../utils/usage';
 import P2PRouting from '../P2PRouting/P2PRouting';
 import ScoutOptimizer from '../ScoutOptimizer/ScoutOptimizer';
 import ReachabilitySection from './ReachabilitySection';
+import type { SmartGateMode } from '../../utils/share';
 
 interface RoutingPanelProps {
   onCalculateRoute: (
@@ -18,7 +19,7 @@ interface RoutingPanelProps {
   ) => void;
   onStopCalculation?: () => void;
   isCalculating: boolean;
-  routeResult: { path: string[] | null; error?: string; minRequiredShipRange?: number; meta?: { baselineCost?: number; finalCost?: number; baselineNodes?: number; finalNodes?: number } } | null;
+  routeResult: { path: string[] | null; error?: string; minRequiredShipRange?: number; meta?: { baselineCost?: number; finalCost?: number; baselineNodes?: number; finalNodes?: number }; usedSmartGatePairs?: string[]; smartGateMode?: SmartGateMode } | null;
   mapData: any;
   systemNames: string[];
   progress?: { explored: number; frontier: number; elapsedMs: number; message: string } | null;
