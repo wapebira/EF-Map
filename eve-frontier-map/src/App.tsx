@@ -17,6 +17,7 @@ import { OVERLAY_FEATURE_FLAG } from './utils/userOverlay.ts';
 import { UserOverlayRings } from './modules/UserOverlayRings';
 import { SmartAssemblyHalos, type SmartAssemblyHaloDatum } from './modules/SmartAssemblyHalos';
 import AddOverlayMarkModal from './components/UserOverlay/AddOverlayMarkModal';
+import PromptModal from './components/common/PromptModal';
 import { getDefaultAddFolderId, setEntryFolder } from './utils/overlayFolders';
 import logo from './assets/logo/logo.png';
 import { openDbFromArrayBuffer } from "./lib/sql";
@@ -41,6 +42,7 @@ import { encodeShare, decodeShare } from './utils/share';
 import type { SmartGateMode, P2PShareData } from './utils/share';
 import { createShortShare, fetchShortShare, buildShortRedirectUrl } from './utils/shortShare';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
+import { SMART_TRIBE_OTHER_COLOR, SMART_TRIBE_PALETTE, REGION_ATLAS_PALETTE } from './utils/palettes';
 // FXAA removed; keep cinematic pipeline only
 import DonateCryptoModal from './components/DonateCryptoModal';
 import { Suspense, lazy } from 'react';
@@ -197,21 +199,6 @@ const SMART_ASSEMBLY_STATUS_LABELS: Record<SmartAssemblyStatus, string> = {
   '3': 'Online',
   '4': 'Destroyed',
 };
-const SMART_TRIBE_PALETTE: number[] = [
-  0x00d1ff,
-  0xff8a00,
-  0x9d7dff,
-  0x2ef0a9,
-  0xff5b90,
-  0xf2ff61,
-  0x45c6ff,
-  0xff69b4,
-  0x00ff00,
-  0xff3b30,
-];
-
-const SMART_TRIBE_OTHER_COLOR = 0xffb000;
-
 type StarColorMode = 'purple'|'white'|'blue'|'green'|'red'|'yellow'|'random';
 const STAR_COLOR_MODE_SET = new Set<StarColorMode>(['purple','white','blue','green','red','yellow','random']);
 const normalizeStarColorParam = (raw: string | null): StarColorMode | null => {
@@ -295,6 +282,8 @@ function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [resetToken, setResetToken] = useState(0); // input/forms reset
   const [layoutResetToken, setLayoutResetToken] = useState(0); // layout-only reset for panel positions
+  const [showLayoutResetPrompt, setShowLayoutResetPrompt] = useState(false);
+  const [showSmartGateAccessPrompt, setShowSmartGateAccessPrompt] = useState(false);
   // UI visibility + scaling
   const [hideUI, setHideUI] = useState(false);
   const ZOOM_MIN_DISTANCE = 10;
@@ -1150,6 +1139,9 @@ function App() {
     });
     return mat;
   }, []);
+
+  const stargateUniformDefaultsRef = useRef<{ boost: number; opacityNear: number; opacityFar: number; minBright: number; maxBright: number } | null>(null);
+  const atlasGateUniformActiveRef = useRef(false);
 
   // Smart Gate material: preserve hue by using normal blending and overlay draw (no depth test)
   const smartGateMaterial = useMemo(() => {
@@ -2191,13 +2183,7 @@ function App() {
   // Handle layout reset request from Display Settings panel
   useEffect(()=>{
     const resetHandler = () => {
-      if(window.confirm('Reset panel positions and layout?')){
-        fullReset();
-        setOpenPanels(new Set());
-        setAccentIsBlue(false);
-        setResetToken(t=> t+1);
-        setLayoutResetToken(t=> t+1);
-      }
+      setShowLayoutResetPrompt(true);
     };
     window.addEventListener('ef-request-reset-layout', resetHandler);
     return ()=> window.removeEventListener('ef-request-reset-layout', resetHandler);
@@ -3199,6 +3185,24 @@ function App() {
   const [openPanels, setOpenPanels] = useState<Set<string>>(new Set());
   const smartAssembliesPanelOpen = openPanels.has('smart-assemblies');
 
+  const handleConfirmLayoutReset = useCallback(() => {
+    fullReset();
+    setOpenPanels(new Set());
+    setAccentIsBlue(false);
+    setResetToken(t=> t+1);
+    setLayoutResetToken(t=> t+1);
+    setHighlightedSystem(null);
+    setShowLayoutResetPrompt(false);
+  }, [setOpenPanels, setAccentIsBlue, setResetToken, setLayoutResetToken, setShowLayoutResetPrompt]);
+
+  const handleCancelLayoutReset = useCallback(() => {
+    setShowLayoutResetPrompt(false);
+  }, []);
+
+  const handleDismissSmartGateAccessPrompt = useCallback(() => {
+    setShowSmartGateAccessPrompt(false);
+  }, [setShowSmartGateAccessPrompt]);
+
   useEffect(() => {
     if ((smartAssembliesPanelOpen || smartAssemblyOverlayEnabled) && !smartAssemblySnapshot && !smartAssemblyLoading && !smartAssemblyError) {
       fetchSmartAssemblies(false);
@@ -3746,7 +3750,7 @@ function App() {
     if (smartGateMode && smartGateMode !== 'none') {
       const chosen = smartGateMode === 'authorized' ? traversableEdgeSet : publicEdgeSet;
       if (smartGateMode === 'authorized' && !chosen) {
-        alert('Checking your restricted Smart Gate access… please try again in a moment.');
+        setShowSmartGateAccessPrompt(true);
         return;
       }
       if (chosen && chosen.size) {
@@ -5161,12 +5165,14 @@ function App() {
   // This useLayoutEffect handles all dynamic star and stargate line coloring based on the pipeline.
   useLayoutEffect(() => {
     if (!mapData || !starFieldRef.current || !sceneRef.current) return;
+    const starField = starFieldRef.current!;
+    const scene = sceneRef.current!;
     // If cinematic mode active, skip planet/region color pipeline and rely on palette coloring
     if(cinematicMode){
       return; // palette applied elsewhere
     }
 
-    const starColorsAttribute = starFieldRef.current.geometry.attributes.color as THREE.BufferAttribute;
+    const starColorsAttribute = starField.geometry.attributes.color as THREE.BufferAttribute;
     const currentStarColors = starColorsAttribute.array as Float32Array;
 
     // --- Cleanup previous state (Step 0) ---
@@ -5175,7 +5181,7 @@ function App() {
     const cleanupVisuals = () => {
       // Cleanup RegionHighlighterModule effects
       RegionHighlighterModule.cleanup(
-        starFieldRef.current!,
+        starField,
         stargateLinesRef.current,
         highlightedSystem, // Pass for consistency, though not used for star color reset
         visibleSystemsRef.current,
@@ -5184,7 +5190,7 @@ function App() {
 
       // Remove selected star halo
       if (selectedStarHaloRef.current) {
-        sceneRef.current?.remove(selectedStarHaloRef.current);
+        scene.remove(selectedStarHaloRef.current);
         selectedStarHaloRef.current.geometry.dispose();
         (selectedStarHaloRef.current.material as THREE.Material).dispose();
         selectedStarHaloRef.current = null;
@@ -5192,7 +5198,7 @@ function App() {
 
       // Remove region outlines (if DPC was on)
       if (regionOutlineGroupRef.current) {
-        sceneRef.current?.remove(regionOutlineGroupRef.current);
+        scene.remove(regionOutlineGroupRef.current);
         regionOutlineGroupRef.current.children.forEach(child => {
           if (child instanceof THREE.Sprite) {
             child.geometry.dispose();
@@ -5281,6 +5287,132 @@ function App() {
     }
     starColorsAttribute.needsUpdate = true;
 
+    const baseGateColor = new THREE.Color(0x444444);
+    const stargateUniforms = stargateMaterial.uniforms as any;
+    if (stargateUniforms && !stargateUniformDefaultsRef.current) {
+      stargateUniformDefaultsRef.current = {
+        boost: stargateUniforms.uBoost?.value ?? 1,
+        opacityNear: stargateUniforms.uOpacityNear?.value ?? 0.6,
+        opacityFar: stargateUniforms.uOpacityFar?.value ?? 0.6,
+        minBright: stargateUniforms.uMinBright?.value ?? 1.8,
+        maxBright: stargateUniforms.uMaxBright?.value ?? 2.4,
+      };
+    }
+
+    if (isRegionHighlighterActive && !highlightedSystem) {
+      const uniqueRegionIds = Array.from(new Set(visibleSystemsRef.current.map(system => system.region_id))).sort((a, b) => a - b);
+      const regionColorMap = new Map<number, THREE.Color>();
+      const regionGateColorMap = new Map<number, THREE.Color>();
+      const atlasTintStrength = 0.6;
+      const targetMaxComponent = 0.32;
+      const minMaxComponent = 0.18;
+
+      if (stargateUniforms) {
+        if (stargateUniforms.uBoost) stargateUniforms.uBoost.value = 0.6;
+        if (stargateUniforms.uOpacityNear) stargateUniforms.uOpacityNear.value = 0.42;
+        if (stargateUniforms.uOpacityFar) stargateUniforms.uOpacityFar.value = 0.42;
+        if (stargateUniforms.uMinBright) stargateUniforms.uMinBright.value = 1.35;
+        if (stargateUniforms.uMaxBright) stargateUniforms.uMaxBright.value = 1.65;
+        atlasGateUniformActiveRef.current = true;
+      }
+
+      uniqueRegionIds.forEach((regionId, idx) => {
+        const paletteHex = REGION_ATLAS_PALETTE[idx % REGION_ATLAS_PALETTE.length];
+        const starColor = new THREE.Color(paletteHex);
+        regionColorMap.set(regionId, starColor);
+
+        const gateColor = baseGateColor.clone().lerp(starColor, atlasTintStrength);
+        let maxComponent = Math.max(gateColor.r, gateColor.g, gateColor.b);
+        if (maxComponent > targetMaxComponent) {
+          gateColor.multiplyScalar(targetMaxComponent / maxComponent);
+        }
+        maxComponent = Math.max(gateColor.r, gateColor.g, gateColor.b);
+        if (maxComponent < minMaxComponent && maxComponent > 0) {
+          gateColor.multiplyScalar(minMaxComponent / maxComponent);
+        }
+        gateColor.lerp(baseGateColor, 0.18);
+        maxComponent = Math.max(gateColor.r, gateColor.g, gateColor.b);
+        if (maxComponent > targetMaxComponent) {
+          gateColor.multiplyScalar(targetMaxComponent / Math.max(maxComponent, 1e-6));
+        }
+        regionGateColorMap.set(regionId, gateColor);
+      });
+
+      for (let i = 0; i < visibleSystemsRef.current.length; i++) {
+        const system = visibleSystemsRef.current[i];
+        const regionColor = regionColorMap.get(system.region_id);
+        if (!regionColor) continue;
+        regionColor.toArray(currentStarColors, i * 3);
+      }
+      starColorsAttribute.needsUpdate = true;
+
+      if (stargateLinesRef.current) {
+        const stargateGeometry = stargateLinesRef.current.geometry as THREE.BufferGeometry;
+        const stargateColorsAttribute = stargateGeometry.attributes.color as THREE.BufferAttribute | undefined;
+        const stargateData = stargateGeometry.userData?.stargateData as Array<{ source_system_id: number; destination_system_id: number }> | undefined;
+        if (stargateColorsAttribute && stargateData) {
+          const colorArray = stargateColorsAttribute.array as Float32Array;
+          for (let i = 0; i < stargateData.length; i++) {
+            const { source_system_id } = stargateData[i];
+            const sourceSystem = mapData.solar_systems[source_system_id] || mapData.solar_systems[String(source_system_id)];
+            const regionColor = (sourceSystem ? regionGateColorMap.get(sourceSystem.region_id) : undefined) || baseGateColor;
+
+            const baseIndex = i * 6;
+            colorArray[baseIndex] = regionColor.r;
+            colorArray[baseIndex + 1] = regionColor.g;
+            colorArray[baseIndex + 2] = regionColor.b;
+            colorArray[baseIndex + 3] = regionColor.r;
+            colorArray[baseIndex + 4] = regionColor.g;
+            colorArray[baseIndex + 5] = regionColor.b;
+          }
+          stargateColorsAttribute.needsUpdate = true;
+        }
+      }
+    } else if (atlasGateUniformActiveRef.current && stargateUniformDefaultsRef.current && stargateUniforms) {
+      const defaults = stargateUniformDefaultsRef.current;
+      if (stargateUniforms.uBoost) stargateUniforms.uBoost.value = defaults.boost;
+      if (stargateUniforms.uOpacityNear) stargateUniforms.uOpacityNear.value = defaults.opacityNear;
+      if (stargateUniforms.uOpacityFar) stargateUniforms.uOpacityFar.value = defaults.opacityFar;
+      if (stargateUniforms.uMinBright) stargateUniforms.uMinBright.value = defaults.minBright;
+      if (stargateUniforms.uMaxBright) stargateUniforms.uMaxBright.value = defaults.maxBright;
+      if (stargateLinesRef.current) {
+        const stargateGeometry = stargateLinesRef.current.geometry as THREE.BufferGeometry;
+        const stargateColorsAttribute = stargateGeometry.attributes.color as THREE.BufferAttribute | undefined;
+        if (stargateColorsAttribute) {
+          const colorArray = stargateColorsAttribute.array as Float32Array;
+          for (let i = 0; i < colorArray.length; i += 3) {
+            colorArray[i] = baseGateColor.r;
+            colorArray[i + 1] = baseGateColor.g;
+            colorArray[i + 2] = baseGateColor.b;
+          }
+          stargateColorsAttribute.needsUpdate = true;
+        }
+      }
+      if (reachDim && reachableSetRef.current && stargateLinesRef.current) {
+        const geometry = stargateLinesRef.current.geometry as THREE.BufferGeometry;
+        const colorAttr = geometry.getAttribute('color') as THREE.BufferAttribute | undefined;
+        const stargateData = geometry.userData?.stargateData as { source_system_id: number; destination_system_id: number }[] | undefined;
+        if (colorAttr && stargateData) {
+          const dimGate = new THREE.Color(0x4f0d0d);
+          const arr = colorAttr.array as Float32Array;
+          for (let i = 0; i < stargateData.length; i++) {
+            const { source_system_id, destination_system_id } = stargateData[i];
+            const unreachable = !reachableSetRef.current.has(source_system_id) && !reachableSetRef.current.has(destination_system_id);
+            const baseIdx = i * 6;
+            const col = unreachable ? dimGate : baseGateColor;
+            arr[baseIdx] = col.r;
+            arr[baseIdx + 1] = col.g;
+            arr[baseIdx + 2] = col.b;
+            arr[baseIdx + 3] = col.r;
+            arr[baseIdx + 4] = col.g;
+            arr[baseIdx + 5] = col.b;
+          }
+          colorAttr.needsUpdate = true;
+        }
+      }
+      atlasGateUniformActiveRef.current = false;
+    }
+
     if (smartAssemblyOverlayEnabled && smartAssemblyFiltered.perSystem.size > 0 && smartAssemblyFiltered.maxPerSystem > 0) {
       const perSystem = smartAssemblyFiltered.perSystem;
       const maxPerSystem = smartAssemblyFiltered.maxPerSystem > 0 ? smartAssemblyFiltered.maxPerSystem : 1;
@@ -5327,9 +5459,9 @@ function App() {
     // --- Step 2: Region Overlay (if HR && selectedStar) ---
     if (isRegionHighlighterActive && highlightedSystem) {
       RegionHighlighterModule.init(
-        sceneRef.current!,
+        scene,
         mapData,
-        starFieldRef.current,
+        starField,
         stargateLinesRef.current,
         highlightedSystem,
         visibleSystemsRef.current,
@@ -5343,7 +5475,7 @@ function App() {
 
         if (!regionOutlineGroupRef.current) {
           regionOutlineGroupRef.current = new THREE.Group();
-          sceneRef.current.add(regionOutlineGroupRef.current);
+          scene.add(regionOutlineGroupRef.current);
         }
 
         systemsInRegion.forEach(system => {
@@ -5390,19 +5522,23 @@ function App() {
     smartAssemblyOppositeColor,
     smartAssemblyTribeFilters,
     smartAssemblyTribeFilterSet,
+    stargateMaterial,
+    reachDim,
   ]);
 
   // Ensure toggling the Highlight Region checkbox applies or removes highlights immediately
   useEffect(() => {
     if (!mapData || !starFieldRef.current || !sceneRef.current) return;
+    const starField = starFieldRef.current!;
+    const scene = sceneRef.current!;
 
     // Apply highlight
     if (isRegionHighlighterActive && highlightedSystem) {
       try {
         RegionHighlighterModule.init(
-          sceneRef.current!,
+          scene,
           mapData,
-          starFieldRef.current,
+          starField,
           stargateLinesRef.current,
           highlightedSystem,
           visibleSystemsRef.current,
@@ -5416,7 +5552,7 @@ function App() {
 
           if (!regionOutlineGroupRef.current) {
             regionOutlineGroupRef.current = new THREE.Group();
-            sceneRef.current.add(regionOutlineGroupRef.current);
+            scene.add(regionOutlineGroupRef.current);
           }
 
           systemsInRegion.forEach(system => {
@@ -5440,10 +5576,45 @@ function App() {
       return;
     }
 
-    // Remove highlight
+    // Atlas mode (Region Highlighter active with no system selected)
+    if (isRegionHighlighterActive && !highlightedSystem) {
+      // Skip RegionHighlighter cleanup so atlas mode can apply palette colors.
+      // We still clear any outline sprites or selection halos below.
+      // Remove any region outline sprites
+      try {
+        if (regionOutlineGroupRef.current && scene) {
+          scene.remove(regionOutlineGroupRef.current);
+          regionOutlineGroupRef.current.children.forEach(child => {
+            if (child instanceof THREE.Sprite) {
+              child.geometry.dispose();
+              (child.material as THREE.Material).dispose();
+            }
+          });
+          regionOutlineGroupRef.current = null;
+        }
+      } catch (e) {
+        // ignore
+      }
+
+      // Remove selected halo if present, but leave star colors for atlas coloring pipeline
+      try {
+        if (selectedStarHaloRef.current) {
+          scene.remove(selectedStarHaloRef.current);
+          selectedStarHaloRef.current.geometry.dispose();
+          (selectedStarHaloRef.current.material as THREE.Material).dispose();
+          selectedStarHaloRef.current = null;
+        }
+      } catch (e) {
+        // ignore
+      }
+
+      return;
+    }
+
+    // Remove highlight (toggle turned off)
     try {
       RegionHighlighterModule.cleanup(
-        starFieldRef.current!,
+        starField,
         stargateLinesRef.current,
         highlightedSystem,
         visibleSystemsRef.current,
@@ -5455,8 +5626,8 @@ function App() {
 
     // Remove any region outline sprites
     try {
-      if (regionOutlineGroupRef.current && sceneRef.current) {
-        sceneRef.current.remove(regionOutlineGroupRef.current);
+      if (regionOutlineGroupRef.current && scene) {
+        scene.remove(regionOutlineGroupRef.current);
         regionOutlineGroupRef.current.children.forEach(child => {
           if (child instanceof THREE.Sprite) {
             child.geometry.dispose();
@@ -5471,7 +5642,7 @@ function App() {
 
     // Reset star colors to base (planet count or default)
     try {
-      const starColorsAttribute = starFieldRef.current.geometry.attributes.color as THREE.BufferAttribute;
+      const starColorsAttribute = starField.geometry.attributes.color as THREE.BufferAttribute;
       const tempColors = new Float32Array(starColorsAttribute.array.length);
       const planetCounts = visibleSystemsRef.current.map(s => s.planets);
       const minPlanetsLocal = planetCounts.length > 0 ? Math.min(...planetCounts) : 0;
@@ -5506,8 +5677,8 @@ function App() {
 
     // Remove selected halo if present
     try {
-      if (selectedStarHaloRef.current && sceneRef.current) {
-        sceneRef.current.remove(selectedStarHaloRef.current);
+      if (selectedStarHaloRef.current) {
+        scene.remove(selectedStarHaloRef.current);
         selectedStarHaloRef.current.geometry.dispose();
         (selectedStarHaloRef.current.material as THREE.Material).dispose();
         selectedStarHaloRef.current = null;
@@ -6539,6 +6710,34 @@ function App() {
         />
       )}
   <DonateCryptoModal open={cryptoModalOpen} onClose={()=> setCryptoModalOpen(false)} address="0xC1204805b018ec2Ad06e6119965134AfFa212C10" ensName="lacal.eth" />
+      <PromptModal
+        open={showLayoutResetPrompt}
+        title="Reset layout?"
+        description="Panel positions, open drawers, accent color, and form inputs will revert to defaults."
+        tone="warning"
+        primaryAction={{
+          label: 'Reset layout',
+          onSelect: handleConfirmLayoutReset,
+          variant: 'danger'
+        }}
+        secondaryAction={{
+          label: 'Cancel',
+          onSelect: handleCancelLayoutReset,
+          autoFocus: true
+        }}
+        onDismiss={handleCancelLayoutReset}
+      />
+      <PromptModal
+        open={showSmartGateAccessPrompt}
+        title="Smart Gate access syncing"
+        description="We're still confirming your restricted Smart Gate access. Please try again shortly."
+        tone="warning"
+        primaryAction={{
+          label: 'Got it',
+          onSelect: handleDismissSmartGateAccessPrompt
+        }}
+        onDismiss={handleDismissSmartGateAccessPrompt}
+      />
   {/* Referral code copy state */}
   {/* ...existing code... */}
   <div className="ef-top-toolbar" style={hideUI?{display:'none'}:{}}>
@@ -6706,7 +6905,7 @@ function App() {
               alignItems:'center',
               boxShadow:'0 2px 6px rgba(0,0,0,0.45)'
             }}
-            onClick={()=>{
+            onClick={() => {
               // Soft reset: clear inputs & routes but KEEP panel positions
               softReset();
               setRouteResult(null);
@@ -6718,6 +6917,26 @@ function App() {
               setAvoidSystems([]);
               setWaypointOptimize(false);
               setResetToken(t=> t+1);
+              setHighlightedSystem(null);
+              setLastSelectedSystemId(null);
+              if(selectedLabelObj.current){
+                try {
+                  const parent = selectedLabelObj.current.parent as THREE.Object3D | null;
+                  if(parent){
+                    parent.remove(selectedLabelObj.current);
+                    sceneRef.current?.remove(parent);
+                  }
+                } catch {/* ignore cleanup errors */}
+                selectedLabelObj.current = null;
+              }
+              if(selectedStarHaloRef.current){
+                try {
+                  sceneRef.current?.remove(selectedStarHaloRef.current);
+                  selectedStarHaloRef.current.geometry.dispose();
+                  (selectedStarHaloRef.current.material as THREE.Material).dispose();
+                } catch {/* ignore halo cleanup errors */}
+                selectedStarHaloRef.current = null;
+              }
               updateManualStartSystem('');
             }}
             aria-label="Reset all inputs"

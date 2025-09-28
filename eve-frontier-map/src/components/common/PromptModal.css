@@ -1,0 +1,17 @@
+.prompt-modal-backdrop{position:fixed;inset:0;z-index:5200;background:rgba(7,9,14,0.68);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;padding:24px;font-family:var(--font-stack,'Inter','Segoe UI',system-ui,sans-serif);} 
+.prompt-modal{width:min(480px,94%);background:linear-gradient(145deg,rgba(18,18,24,0.98),rgba(10,12,18,0.96));border:1px solid rgba(255,255,255,0.16);border-radius:22px;box-shadow:0 26px 64px -26px rgba(0,0,0,0.86),0 0 0 1px rgba(255,255,255,0.05);padding:28px 30px;color:#f2f5fb;display:flex;flex-direction:column;gap:18px;position:relative;} 
+.prompt-modal h3{margin:0;font-size:20px;font-weight:600;letter-spacing:0.2px;} 
+.prompt-modal p{margin:0;font-size:14px;line-height:1.6;opacity:0.82;} 
+.prompt-modal .prompt-modal-body{font-size:14px;line-height:1.6;display:flex;flex-direction:column;gap:12px;} 
+.prompt-modal .prompt-modal-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:12px;margin-top:6px;} 
+.prompt-modal button{appearance:none;border:1px solid rgba(255,255,255,0.14);background:rgba(20,22,28,0.88);color:#f2f5fb;font-size:13px;font-weight:500;padding:9px 18px;border-radius:999px;cursor:pointer;transition:filter .18s ease,transform .18s ease;} 
+.prompt-modal button:hover{filter:brightness(1.08);transform:translateY(-1px);} 
+.prompt-modal button:disabled{opacity:0.55;cursor:default;transform:none;} 
+.prompt-modal button[data-variant="accent"]{background:var(--accent,#ff4c26);border-color:rgba(255,255,255,0.2);color:#fff;} 
+.prompt-modal button[data-variant="danger"]{background:#ff4c26;border-color:rgba(255,255,255,0.22);color:#fff;} 
+.prompt-modal button[data-variant="ghost"]{background:transparent;border-color:rgba(255,255,255,0.18);} 
+.prompt-modal[data-tone="warning"]{border-color:rgba(255,193,112,0.36);} 
+.prompt-modal[data-tone="warning"] h3{color:#ffd7a1;} 
+.prompt-modal[data-tone="warning"] p{opacity:0.9;color:#ffe5c5;} 
+.prompt-modal-backdrop:focus-visible{outline:none;} 
+@media (max-width:520px){.prompt-modal{padding:24px 22px;border-radius:18px;}}

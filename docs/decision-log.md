@@ -82,6 +82,22 @@ Older entries and legacy indexer details have been archived: [archive\decision-l
 - Goal: Update the Cloudflare Pages worker validation so `create-share` accepts any versioned payload (`r<num>|`), restoring short-link copies for Smart Gate routes.
 - Risk: low (server-side validation only)
 - Gates: test ✅ `pnpm test` | typecheck ✅ `pnpm typecheck` | build ✅ `pnpm build` | preview smoke ✅ `wrangler pages deploy dist --project-name ef-map --branch preview-share-r2-fix --commit-dirty=true…
+## 2025-09-28 – Atlas mode palette & reset cleanup
+- Goal: Color every region uniquely when Highlight Region is active with no selection, tint each stargate segment to the source system’s region color, and ensure both reset controls (Display Settings…
+- Risk: high (core render loop + reset flow)
+- Gates: typecheck ✅ (via `npm run build` + `npx tsc --noEmit`) | build ✅ `npm run build` | smoke ➖ (atlas toggle manual check pending)
+## 2025-09-28 – Atlas gates stay tinted after reset
+- Goal: Keep atlas palette colors applied to stargate segments when Highlight Region is enabled with no selection, even after clearing the active star via toolbar reset.
+- Risk: low (cleanup sequencing only)
+- Gates: typecheck ✅ `npx tsc --noEmit` | build ✅ `npm run build` | smoke ➖ (preview validation in progress)
+## 2025-09-28 – Atlas gate tint softness
+- Goal: Soften atlas-mode stargate colors by blending region hues toward the neutral map grey, keeping lines legible without overpowering the starfield.
+- Risk: low (palette blending only)
+- Gates: typecheck ✅ `npx tsc --noEmit` | build ✅ `npm run build` | smoke ➖ (preview validation in progress)
+## 2025-09-28 – Themed prompts for layout & Smart Gates
+- Goal: Replace native confirm/alert dialogs for layout reset and restricted Smart Gate authorization with a reusable themed modal component.
+- Risk: low (client UI polish only)
+- Gates: typecheck ✅ (via `npm run build`) | build ✅ `npm run build` | smoke ➖ (modal UX to be spot-checked in app)
 ## 2025-09-26 – Overlay repository bootstrap & guardrail sync
 - Goal: Create the dedicated `ef-map-overlay` repository for native helper + DX12 overlay work and mirror the shared guardrail docs between projects.
 - Risk: low (documentation updates).
