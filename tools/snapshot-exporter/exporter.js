@@ -60,6 +60,39 @@ function normalizeAddress(addr){
   return s.toLowerCase();
 }
 
+function normalizeTimestamp(value){
+  if(value === null || value === undefined) return undefined;
+  const tryNumber = (input) => {
+    if(typeof input === 'number' && Number.isFinite(input)) return input;
+    if(typeof input === 'bigint') {
+      const num = Number(input);
+      return Number.isFinite(num) ? num : NaN;
+    }
+    if(typeof input === 'string'){
+      const trimmed = input.trim();
+      if(trimmed){
+        if(/^-?\d+(\.\d+)?$/.test(trimmed)){
+          const num = Number(trimmed);
+          if(Number.isFinite(num)) return num;
+        }
+        const date = new Date(trimmed);
+        if(!Number.isNaN(date.getTime())) return date.getTime();
+      }
+    }
+    return NaN;
+  };
+
+  let numeric = tryNumber(value);
+  if(Number.isNaN(numeric)) return undefined;
+  // If value looks like seconds (10 digits) convert to milliseconds. Anything >=1e12 treat as already ms.
+  if(Math.abs(numeric) < 1e11){
+    numeric = numeric * 1000;
+  }
+  const date = new Date(numeric);
+  if(Number.isNaN(date.getTime())) return undefined;
+  return date.toISOString();
+}
+
 async function main(){
   const t0 = Date.now();
   const argv = new Set(process.argv.slice(2));
@@ -623,7 +656,9 @@ async function main(){
                   (!colSet.has('is_online') && !colSet.has('online') && colSet.has('is_linked')) ? 'CASE WHEN is_linked THEN 1 ELSE 0 END AS is_linked' : null,
                   colSet.has('anchored_at') ? 'anchored_at' : null,
                   colSet.has('last_change_at') ? 'last_change_at' : null,
-                  colSet.has('updated_at') ? 'updated_at' : null
+                  colSet.has('updated_at') ? 'updated_at' : null,
+                  colSet.has('updated_block_time') ? 'updated_block_time' : null,
+                  colSet.has('updated_block_number') ? 'updated_block_number' : null
                 ].filter(Boolean).join(', ');
                 const stQ = `SELECT ${sel} FROM ${ident}."evefrontier__deployable_state"`;
                 try {
@@ -632,17 +667,27 @@ async function main(){
                   for(const r2 of (st.rows||[])){
                     const gid = String(r2.gate_id||'');
                     if(!gid) continue;
-                    const isOnline = (r2.is_online===1) || (r2.online===1) || (r2.is_linked===1) || undefined;
-                    const currentState = r2.current_state || r2.state || undefined;
-                    const anchoredAt = r2.anchored_at ? new Date(r2.anchored_at).toISOString() : undefined;
-                    const updatedAt = r2.updated_at ? new Date(r2.updated_at).toISOString() : undefined;
-                    const lastChangeAt = r2.last_change_at ? new Date(r2.last_change_at).toISOString() : undefined;
+                    let isOnline;
+                    if (r2.is_online === 1 || r2.online === 1 || r2.is_linked === 1) {
+                      isOnline = true;
+                    } else if (r2.is_online === 0 || r2.online === 0 || r2.is_linked === 0) {
+                      isOnline = false;
+                    }
+                    const currentStateRaw = r2.current_state ?? r2.state;
+                    const currentState = (currentStateRaw !== undefined && currentStateRaw !== null) ? String(currentStateRaw) : undefined;
+                    const currentStateCode = currentState !== undefined ? Number(currentState) : undefined;
+                    const anchoredAt = normalizeTimestamp(r2.anchored_at);
+                    const updatedAt = normalizeTimestamp(r2.updated_at ?? r2.updated_block_time);
+                    const lastChangeAt = normalizeTimestamp(r2.last_change_at ?? r2.updated_block_time);
+                    const updatedBlockNumber = r2.updated_block_number ?? r2.__last_updated_block_number;
                     statusMap.set(gid, {
                       ...(typeof isOnline === 'boolean' ? { isOnline } : {}),
                       ...(currentState ? { currentState } : {}),
+                      ...(currentStateCode !== undefined && !Number.isNaN(currentStateCode) ? { currentStateCode } : {}),
                       ...(anchoredAt ? { anchoredAt } : {}),
                       ...(updatedAt ? { updatedAt } : {}),
-                      ...(lastChangeAt ? { lastChangeAt } : {})
+                      ...(lastChangeAt ? { lastChangeAt } : {}),
+                      ...(updatedBlockNumber !== undefined && updatedBlockNumber !== null ? { updatedBlockNumber: String(updatedBlockNumber) } : {})
                     });
                     applied++;
                   }
@@ -939,22 +984,43 @@ async function main(){
       }
     }
   } catch(e){ log('error','override_load_failed',{ message:String(e) }); }
-  const links = rows.map(r=>{
+  function deriveOnlineForGate(gid, rowOnline){
+    const status = statusMap.get(gid);
+    if(status){
+      if(typeof status.isOnline === 'boolean') return status.isOnline;
+      const code = status.currentStateCode ?? (status.currentState !== undefined ? Number(status.currentState) : undefined);
+      if(code !== undefined && !Number.isNaN(code)){
+        if(code === 3) return true;
+        // Treat non-online states as offline when explicitly known
+        if(code === 1 || code === 2 || code === 4 || code === 5) return false;
+      }
+    }
+    if(rowOnline !== undefined && rowOnline !== null){
+      if(typeof rowOnline === 'boolean') return rowOnline;
+      const num = Number(rowOnline);
+      if(!Number.isNaN(num)) return num > 0;
+    }
+    return !!rowOnline;
+  }
+
+  const derivedLinks = rows.map(r=>{
     const gid = String(r.gate_id);
     const tribes = deriveTribesForGate(gid);
     // Prefer a single tribeId field if one mapping; otherwise include tribes array for future use
     const tribeId = tribes.length === 1 ? tribes[0] : undefined;
+    const online = deriveOnlineForGate(gid, r.online);
     return {
       gateId: gid,
       origin: Number(r.origin),
       destination: Number(r.destination),
       linked: !!(r.linked*1),
-      online: !!(r.online*1),
+      online,
       cost: Number(r.cost||0),
       ...(tribeId ? { tribeId } : {}),
       ...(tribes.length > 1 ? { tribes } : {})
     };
   });
+  const links = onlyOnline ? derivedLinks.filter(l => l.online) : derivedLinks;
   // Build minimal ACL rules snapshot
   const ZERO = '0x0000000000000000000000000000000000000000';
   const rules = links.map(l => {

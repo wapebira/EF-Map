@@ -28,7 +28,7 @@ services:
       CF_API_TOKEN: ${CF_API_TOKEN}
       KV_NAMESPACE_ID: ${EF_SNAPSHOTS_NAMESPACE_ID}
       # Behavior
-      ONLY_ONLINE: "1"
+      ONLY_ONLINE: "0"
       DRY_RUN: ${SNAPSHOT_DRY_RUN:-0}
       LOG_JSON: "1"
       # Ensure remote writes (Cloudflare API) rather than local: set FORCE_REMOTE=1

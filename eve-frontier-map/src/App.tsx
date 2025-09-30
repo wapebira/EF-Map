@@ -968,6 +968,32 @@ function App() {
   const smartAssemblyAccentColor = useMemo(() => new THREE.Color(accentIsBlue ? 0x00aaff : 0xff4c26), [accentIsBlue]);
   const smartAssemblyOppositeColor = useMemo(() => new THREE.Color(accentIsBlue ? 0xff4c26 : 0x00aaff), [accentIsBlue]);
   const smartGateLinesRef = useRef<THREE.LineSegments | null>(null);
+  const smartGateOfflineLinesRef = useRef<THREE.LineSegments | null>(null);
+  const smartGateOfflineCountRef = useRef(0);
+
+  const disposeSmartGateLine = useCallback((ref: { current: THREE.LineSegments | null }) => {
+    const line = ref.current;
+    if (!line) return;
+    try {
+      sceneRef.current?.remove(line);
+      line.geometry.dispose();
+      const mats = Array.isArray(line.material) ? line.material : [line.material];
+      mats.forEach((mat) => (mat as THREE.Material).dispose?.());
+    } catch { /* ignore */ }
+    ref.current = null;
+  }, []);
+
+  type SmartGateLink = {
+    origin: number;
+    destination: number;
+    linked?: boolean;
+    online?: boolean;
+    cost?: number;
+    gateId?: number;
+    tribeId?: string;
+    tribes?: string[];
+  };
+
 
   const [showSmartGates, setShowSmartGates] = useState<boolean>(()=>{ try { return localStorage.getItem('efmap:smartgates:show') === '1'; } catch { return false; } });
   // Phase 0: UI state for Smart Gates – color mode and viewing mode
@@ -1329,6 +1355,177 @@ function App() {
     };
     return { legend, resolveColor, getBucketId, topIds: Array.from(topSet) };
   }, []);
+
+  const buildSmartGateGeometry = useCallback((linksSource: SmartGateLink[] | null | undefined) => {
+    const disposeAll = () => {
+      disposeSmartGateLine(smartGateLinesRef);
+      disposeSmartGateLine(smartGateOfflineLinesRef);
+      smartGateOfflineCountRef.current = 0;
+    };
+
+    if (!sceneRef.current) return false;
+    if (!showSmartGates || !mapData || !linksSource || linksSource.length === 0) {
+      disposeAll();
+      return false;
+    }
+
+    const linkedLinks = linksSource.filter((l) => l && l.linked !== false);
+    if (linkedLinks.length === 0) {
+      disposeAll();
+      return false;
+    }
+
+    let links = [...linkedLinks];
+    if (smartGateViewMode !== 'all') {
+      links = links.filter((l) => l.online !== false);
+    }
+    if (smartGateViewMode === 'authorized') {
+      if (traversableEdgeSet) {
+        links = links.filter((l) => traversableEdgeSet.has(`${l.origin}-${l.destination}`));
+      }
+    } else if (smartGateViewMode === 'public') {
+      links = links.filter((l) => publicEdgeSet.has(`${l.origin}-${l.destination}`));
+    }
+
+    let baseCol: THREE.Color | null = null;
+    let tribeColorResolver: ((tid?: string, tribes?: string[]) => number) | null = null;
+    if (smartGateColorMode === 'tribe') {
+      const { legend, resolveColor, getBucketId } = buildTribeColorMap(links as any);
+      setSmartGateTribeLegend(legend);
+      tribeColorResolver = resolveColor;
+      if (smartGateTribeFilters.length > 0) {
+        const validIds = new Set(legend.map((item) => item.tribeId));
+        let activeFilters = smartGateTribeFilters;
+        const filteredSelection = smartGateTribeFilters.filter((id) => validIds.has(id));
+        if (filteredSelection.length !== smartGateTribeFilters.length) {
+          setSmartGateTribeFilters(filteredSelection);
+          activeFilters = filteredSelection;
+        }
+        if (activeFilters.length > 0) {
+          const activeSet = new Set(activeFilters);
+          links = links.filter((l) => activeSet.has(getBucketId(l)));
+        }
+      }
+    } else {
+      const themeAccentHex = accentIsBlue ? 0x00aaff : 0xff4c26;
+      const oppositeAccentHex = accentIsBlue ? 0xff4c26 : 0x00aaff;
+      const baseHex = smartGateColorMode === 'opposite' ? oppositeAccentHex : themeAccentHex;
+      baseCol = new THREE.Color(baseHex);
+      setSmartGateTribeLegend([]);
+      setSmartGateTribeFilters((prev) => (prev.length ? [] : prev));
+    }
+
+    const offlineLinks = smartGateViewMode === 'all' ? links.filter((l) => l.online === false) : [];
+    const renderLinks = smartGateViewMode === 'all' ? links.filter((l) => l.online !== false) : links;
+
+    const positions: number[] = [];
+    const colors: number[] = [];
+    const mids: number[] = [];
+    const sel: number[] = [];
+  const offlinePositions: number[] = [];
+  const offlineColors: number[] = [];
+  const offlinePairs = new Set<string>();
+
+    const tx = (p: { x: number; y: number; z: number }) => ({ x: p.x, y: p.z, z: p.y * -1 });
+
+    const getColorForLink = (link: SmartGateLink) => {
+      if (tribeColorResolver) {
+        const hex = tribeColorResolver(link.tribeId, link.tribes);
+        return new THREE.Color(hex);
+      }
+      if (baseCol) {
+        return baseCol.clone();
+      }
+      return null;
+    };
+
+    for (const l of renderLinks) {
+      const a = (mapData.solar_systems as any)[String(l.origin)];
+      const b = (mapData.solar_systems as any)[String(l.destination)];
+      if (!a || !b || a.hidden || b.hidden) continue;
+      const p1 = tx(a.position);
+      const p2 = tx(b.position);
+      positions.push(p1.x, p1.y, p1.z, p2.x, p2.y, p2.z);
+      const midx = (p1.x + p2.x) / 2;
+      const midy = (p1.y + p2.y) / 2;
+      const midz = (p1.z + p2.z) / 2;
+      mids.push(midx, midy, midz, midx, midy, midz);
+      const col = getColorForLink(l);
+      if (col) {
+        colors.push(col.r, col.g, col.b, col.r, col.g, col.b);
+      }
+      sel.push(0, 0);
+    }
+
+    for (const l of offlineLinks) {
+      const a = (mapData.solar_systems as any)[String(l.origin)];
+      const b = (mapData.solar_systems as any)[String(l.destination)];
+      if (!a || !b || a.hidden || b.hidden) continue;
+      const pairKey = l.origin < l.destination ? `${l.origin}:${l.destination}` : `${l.destination}:${l.origin}`;
+      if (offlinePairs.has(pairKey)) {
+        continue;
+      }
+      offlinePairs.add(pairKey);
+      const p1 = tx(a.position);
+      const p2 = tx(b.position);
+      offlinePositions.push(p1.x, p1.y, p1.z, p2.x, p2.y, p2.z);
+      const col = getColorForLink(l);
+      if (col) {
+        offlineColors.push(col.r, col.g, col.b, col.r, col.g, col.b);
+      }
+    }
+
+    disposeAll();
+
+    if (positions.length === 0 && offlinePositions.length === 0) {
+      return false;
+    }
+
+    const baseRenderOrder = (stargateLinesRef.current?.renderOrder ?? 0) + 1;
+
+    if (positions.length > 0) {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+      if (colors.length > 0) {
+        geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+      }
+      geo.setAttribute('mid', new THREE.Float32BufferAttribute(mids, 3));
+      geo.setAttribute('sel', new THREE.Float32BufferAttribute(sel, 1));
+      const lines = new THREE.LineSegments(geo, smartGateMaterial);
+      lines.visible = !cinematicMode;
+      lines.renderOrder = baseRenderOrder;
+      sceneRef.current?.add(lines);
+      smartGateLinesRef.current = lines;
+    }
+
+  const offlineFallbackColor = baseCol ? baseCol.getHex() : accentIsBlue ? 0x00aaff : 0xff4c26;
+
+  if (offlinePositions.length > 0) {
+      const offlineGeo = new THREE.BufferGeometry();
+      offlineGeo.setAttribute('position', new THREE.Float32BufferAttribute(offlinePositions, 3));
+      if (offlineColors.length > 0) {
+        offlineGeo.setAttribute('color', new THREE.Float32BufferAttribute(offlineColors, 3));
+      }
+      const offlineMaterial = new THREE.LineDashedMaterial({
+        color: offlineFallbackColor,
+        dashSize: 2.5,
+        gapSize: 1.5,
+        linewidth: 1,
+        transparent: true,
+        opacity: 1,
+        vertexColors: offlineColors.length > 0,
+      });
+      const offlineLines = new THREE.LineSegments(offlineGeo, offlineMaterial);
+      offlineLines.computeLineDistances();
+      offlineLines.visible = !cinematicMode;
+      offlineLines.renderOrder = positions.length > 0 ? baseRenderOrder + 0.01 : baseRenderOrder;
+      sceneRef.current?.add(offlineLines);
+      smartGateOfflineLinesRef.current = offlineLines;
+    }
+
+    smartGateOfflineCountRef.current = offlineLinks.length;
+    return true;
+  }, [accentIsBlue, buildTribeColorMap, cinematicMode, disposeSmartGateLine, mapData, publicEdgeSet, sceneRef, setSmartGateTribeFilters, setSmartGateTribeLegend, showSmartGates, smartGateColorMode, smartGateMaterial, smartGateTribeFilters, smartGateViewMode, traversableEdgeSet]);
 
   const smartAssemblyFiltered = useMemo(() => {
     const perSystem = new Map<number, {
@@ -1854,271 +2051,61 @@ function App() {
   // No manual picker; we select automatically during connect by priority
 
   // Build/teardown Smart Gate lines in scene
-  useEffect(()=>{
-    // If scene not ready yet but data/toggles indicate we should render, schedule a short retry
-    if(!sceneRef.current){
-      if(showSmartGates && mapData && smartGateSnapshot?.links && smartGateBuildRetry < 5){
-        const t = setTimeout(()=> setSmartGateBuildRetry(v=> v+1), 80);
-        return ()=> clearTimeout(t);
+  useEffect(() => {
+    if (!sceneRef.current) {
+      if (showSmartGates && mapData && smartGateSnapshot?.links && smartGateBuildRetry < 5) {
+        const t = setTimeout(() => setSmartGateBuildRetry((v) => v + 1), 80);
+        return () => clearTimeout(t);
       }
       return;
     }
-    // Tear down if toggled off or no data
-    if(!showSmartGates || !mapData || !smartGateSnapshot || !smartGateSnapshot.links || smartGateSnapshot.links.length===0){
-      if(smartGateLinesRef.current){
-        try {
-          // Remove base lines and dispose geometry/material
-          sceneRef.current.remove(smartGateLinesRef.current);
-          smartGateLinesRef.current.geometry.dispose();
-          (smartGateLinesRef.current.material as THREE.Material).dispose?.();
-          // No secondary bloom duplicate
-        } catch {}
-        smartGateLinesRef.current = null;
-      }
-      // Reset retry counter on teardown to keep future attempts bounded
-      if(smartGateBuildRetry !== 0) setSmartGateBuildRetry(0);
-      return;
-    }
-    // Already present -> update colors if theme changed below (separate effect)
-    if(smartGateLinesRef.current) return;
-    try {
-      const allLinks = smartGateSnapshot.links.filter(l=> l && (l.online !== false) && (l.linked !== false));
-      // Determine filtering set based on Viewing mode
-      let links = allLinks;
-      if(smartGateViewMode === 'authorized'){
-        // Use per-user traversable set; if not ready yet, keep existing lines until it arrives
-        if(traversableEdgeSet){ links = allLinks.filter(l=> traversableEdgeSet.has(`${l.origin}-${l.destination}`)); }
-      } else if(smartGateViewMode === 'public'){
-        links = allLinks.filter(l=> publicEdgeSet.has(`${l.origin}-${l.destination}`));
-      }
-  const positions:number[]=[]; const colors:number[]=[]; const mids:number[]=[]; const sel:number[]=[];
-  // Determine base colour or tribe-mapped colours
-  let baseCol: THREE.Color | null = null;
-  let tribeColorResolver: ((tid?:string, tribes?:string[])=> number) | null = null;
-  if(smartGateColorMode === 'tribe'){
-  const { legend, resolveColor, getBucketId } = buildTribeColorMap(links);
-  setSmartGateTribeLegend(legend);
-    tribeColorResolver = resolveColor;
-    if(smartGateTribeFilters.length > 0){
-      const validIds = new Set(legend.map(item => item.tribeId));
-      let activeFilters = smartGateTribeFilters;
-      const filteredSelection = smartGateTribeFilters.filter(id => validIds.has(id));
-      if(filteredSelection.length !== smartGateTribeFilters.length){
-        setSmartGateTribeFilters(filteredSelection);
-        activeFilters = filteredSelection;
-      }
-      if(activeFilters.length > 0){
-        const activeSet = new Set(activeFilters);
-        links = links.filter(l => activeSet.has(getBucketId(l)));
-      }
-    }
-  } else {
-    const themeAccentHex = accentIsBlue ? 0x00aaff : 0xff4c26;
-    const oppositeAccentHex = accentIsBlue ? 0xff4c26 : 0x00aaff;
-    const baseHex = (smartGateColorMode === 'opposite') ? oppositeAccentHex : themeAccentHex;
-    baseCol = new THREE.Color(baseHex);
-    setSmartGateTribeLegend([]);
-    setSmartGateTribeFilters(prev => prev.length ? [] : prev);
-  }
-      const tx = (p:{x:number;y:number;z:number})=>({ x:p.x, y:p.z, z:p.y*-1 });
-      for(const l of links){
-        const a = (mapData.solar_systems as any)[String(l.origin)];
-        const b = (mapData.solar_systems as any)[String(l.destination)];
-        if(!a || !b || a.hidden || b.hidden) continue;
-        const p1 = tx(a.position); const p2 = tx(b.position);
-        positions.push(p1.x,p1.y,p1.z, p2.x,p2.y,p2.z);
-        const midx=(p1.x+p2.x)/2, midy=(p1.y+p2.y)/2, midz=(p1.z+p2.z)/2;
-        mids.push(midx,midy,midz, midx,midy,midz);
-  if(tribeColorResolver){
-    const hex = tribeColorResolver(l.tribeId, l.tribes);
-    const c = new THREE.Color(hex);
-    colors.push(c.r,c.g,c.b, c.r,c.g,c.b);
-  } else if(baseCol){
-    colors.push(baseCol.r,baseCol.g,baseCol.b, baseCol.r,baseCol.g,baseCol.b);
-  }
-        sel.push(0,0);
-      }
-      if(positions.length===0){
-        // No segments under current filter – keep ref null; reset retry counter
-        if(smartGateBuildRetry !== 0) setSmartGateBuildRetry(0);
-        return;
-      }
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute('position', new THREE.Float32BufferAttribute(positions,3));
-      geo.setAttribute('color', new THREE.Float32BufferAttribute(colors,3));
-      geo.setAttribute('mid', new THREE.Float32BufferAttribute(mids,3));
-      geo.setAttribute('sel', new THREE.Float32BufferAttribute(sel,1));
-      const lines = new THREE.LineSegments(geo, smartGateMaterial);
-      lines.visible = !cinematicMode; // honor cinematic
-      lines.renderOrder = (stargateLinesRef.current?.renderOrder ?? 0) + 1; // draw above base gates
-      sceneRef.current.add(lines);
-      smartGateLinesRef.current = lines;
-      if(smartGateBuildRetry !== 0) setSmartGateBuildRetry(0);
-      // No bloom duplicate created
-    } catch {/* ignore build errors */}
-  }, [showSmartGates, smartGateSnapshot, mapData, stargateMaterial, smartGateMaterial, accentIsBlue, cinematicMode, publicEdgeSet, smartGateBuildRetry, gateAccessSnapshot, smartGateViewMode, traversableEdgeSet, smartGateColorMode, smartGateTribeFilters]);
-
-  // (Removed) separate public-only geometry rebuild; covered by unified view mode changes
-
-  // Rebuild geometry when viewing mode or authorized policy changes
-  useEffect(()=>{
-    if(!smartGateLinesRef.current) return;
-  // If authorized view selected but policy not yet loaded, keep current until ready
-  if(smartGateViewMode==='authorized' && !traversableEdgeSet) return;
-    try {
-      sceneRef.current?.remove(smartGateLinesRef.current);
-      smartGateLinesRef.current.geometry.dispose();
-      (smartGateLinesRef.current.material as THREE.Material).dispose?.();
-    } catch { /* ignore */ }
-    smartGateLinesRef.current = null;
-    setSmartGateBuildRetry(v=> v+1);
-  }, [smartGateViewMode, traversableEdgeSet]);
-
-  // Recolor/Rebuild Smart Gate lines when theme accent, mode, or tribe filter changes
-  useEffect(()=>{
-    if(smartGateColorMode === 'tribe'){
-      if(!smartGateLinesRef.current) return;
-      try {
-        sceneRef.current?.remove(smartGateLinesRef.current);
-        smartGateLinesRef.current.geometry.dispose();
-        (smartGateLinesRef.current.material as THREE.Material).dispose?.();
-      } catch { /* ignore */ }
-      smartGateLinesRef.current = null;
-      setSmartGateBuildRetry(v=> v+1);
-      return;
-    }
-    if(!smartGateLinesRef.current) return;
-    try {
-      const attr = (smartGateLinesRef.current.geometry as THREE.BufferGeometry).getAttribute('color') as THREE.BufferAttribute;
-      if(!attr) return;
-      const themeAccentHex = accentIsBlue ? 0x00aaff : 0xff4c26;
-      const oppositeAccentHex = accentIsBlue ? 0xff4c26 : 0x00aaff;
-      const newHex = (smartGateColorMode === 'opposite') ? oppositeAccentHex : themeAccentHex;
-      const c = new THREE.Color(newHex);
-      for(let i=0;i<attr.count;i++){ attr.setXYZ(i, c.r, c.g, c.b); }
-      attr.needsUpdate = true;
-      setSmartGateTribeLegend([]);
-      setSmartGateTribeFilters(prev => prev.length ? [] : prev);
-    } catch {/* ignore */}
-  }, [accentIsBlue, smartGateColorMode, smartGateTribeFilters]);
+    buildSmartGateGeometry(smartGateSnapshot?.links ?? null);
+    if (smartGateBuildRetry !== 0) setSmartGateBuildRetry(0);
+  }, [buildSmartGateGeometry, mapData, sceneRef, showSmartGates, smartGateSnapshot, smartGateBuildRetry]);
 
   useEffect(() => {
     return () => {
+      disposeSmartGateLine(smartGateLinesRef);
+      disposeSmartGateLine(smartGateOfflineLinesRef);
       if (smartAssemblyAbortRef.current) {
         smartAssemblyAbortRef.current.abort();
       }
     };
-  }, []);
+  }, [disposeSmartGateLine]);
 
   // Manual refresh handler for Smart Gates snapshots (links + ACL)
-  const refreshSmartGates = useCallback(async (alsoAcl:boolean = true) => {
-    if(!showSmartGates || smartGateRefreshBusy) return;
+  const refreshSmartGates = useCallback(async (alsoAcl: boolean = true) => {
+    if (!showSmartGates || smartGateRefreshBusy) return;
     setSmartGateRefreshBusy(true);
     try {
       setSmartGateErr(null);
-      // Always bypass caches; server honors force=1 and ts to avoid ETag hits
-      const linksResp = await fetch(`/api/smart-gate-links?force=1&ts=${Date.now()}`, { cache:'no-store' });
-      if(!linksResp.ok){ throw new Error(`HTTP ${linksResp.status} on links`); }
+      const linksResp = await fetch(`/api/smart-gate-links?force=1&ts=${Date.now()}`, { cache: 'no-store' });
+      if (!linksResp.ok) {
+        throw new Error(`HTTP ${linksResp.status} on links`);
+      }
       const linksJson = await linksResp.json();
+      const newLinks = Array.isArray(linksJson?.links) ? linksJson.links : null;
       setSmartGateSnapshot(linksJson);
-      // ACL optional refresh
-      if(alsoAcl){
+
+      if (alsoAcl) {
         try {
-          const aclResp = await fetch(`/api/gate-access?force=1&ts=${Date.now()}`, { cache:'no-store' });
-          if(aclResp.ok){
+          const aclResp = await fetch(`/api/gate-access?force=1&ts=${Date.now()}`, { cache: 'no-store' });
+          if (aclResp.ok) {
             const aclJson = await aclResp.json();
             setGateAccessSnapshot(aclJson);
           }
-        } catch {/* ignore ACL refresh errors */}
+        } catch { /* ignore ACL refresh errors */ }
       }
-      // Rebuild and swap geometry atomically to avoid flicker
+
       try {
-        if(sceneRef.current && mapData && linksJson && Array.isArray(linksJson.links)){
-          const allLinks = linksJson.links.filter((l:any)=> l && (l.online !== false) && (l.linked !== false));
-          let links = allLinks as { origin:number; destination:number; linked?:boolean; online?:boolean }[];
-          if(smartGateViewMode === 'authorized'){
-            if(traversableEdgeSet){ links = allLinks.filter((l:{origin:number;destination:number})=> traversableEdgeSet.has(`${l.origin}-${l.destination}`)); }
-            // If not ready, keep existing lines (no swap)
-            else { /* skip rebuild until traversable ready */ }
-          } else if(smartGateViewMode === 'public'){
-            links = allLinks.filter((l:{origin:number;destination:number})=> publicEdgeSet.has(`${l.origin}-${l.destination}`));
-          }
-          if(links && links.length>0){
-            const positions:number[]=[]; const colors:number[]=[]; const mids:number[]=[]; const sel:number[]=[];
-            let baseCol: THREE.Color | null = null;
-            let tribeColorResolver: ((tid?:string, tribes?:string[])=> number) | null = null;
-            if(smartGateColorMode === 'tribe'){
-              const { legend, resolveColor, getBucketId } = buildTribeColorMap(links as any);
-              setSmartGateTribeLegend(legend);
-              tribeColorResolver = resolveColor;
-              if(smartGateTribeFilters.length > 0){
-                const validIds = new Set(legend.map(item => item.tribeId));
-                let activeFilters = smartGateTribeFilters;
-                const filteredSelection = smartGateTribeFilters.filter(id => validIds.has(id));
-                if(filteredSelection.length !== smartGateTribeFilters.length){
-                  setSmartGateTribeFilters(filteredSelection);
-                  activeFilters = filteredSelection;
-                }
-                if(activeFilters.length > 0){
-                  const activeSet = new Set(activeFilters);
-                  links = (links as any).filter((l:any) => activeSet.has(getBucketId(l)));
-                }
-              }
-            } else {
-              const themeAccentHex = accentIsBlue ? 0x00aaff : 0xff4c26;
-              const oppositeAccentHex = accentIsBlue ? 0xff4c26 : 0x00aaff;
-              const baseHex = (smartGateColorMode === 'opposite') ? oppositeAccentHex : themeAccentHex;
-              baseCol = new THREE.Color(baseHex);
-              setSmartGateTribeLegend([]);
-              setSmartGateTribeFilters(prev => prev.length ? [] : prev);
-            }
-            const tx = (p:{x:number;y:number;z:number})=>({ x:p.x, y:p.z, z:p.y*-1 });
-            for(const l of links){
-              const a = (mapData.solar_systems as any)[String(l.origin)];
-              const b = (mapData.solar_systems as any)[String(l.destination)];
-              if(!a || !b || a.hidden || b.hidden) continue;
-              const p1 = tx(a.position); const p2 = tx(b.position);
-              positions.push(p1.x,p1.y,p1.z, p2.x,p2.y,p2.z);
-              const midx=(p1.x+p2.x)/2, midy=(p1.y+p2.y)/2, midz=(p1.z+p2.z)/2;
-              mids.push(midx,midy,midz, midx,midy,midz);
-              if(tribeColorResolver){
-                const hex = tribeColorResolver((l as any).tribeId, (l as any).tribes);
-                const c = new THREE.Color(hex);
-                colors.push(c.r,c.g,c.b, c.r,c.g,c.b);
-              } else if(baseCol){
-                colors.push(baseCol.r,baseCol.g,baseCol.b, baseCol.r,baseCol.g,baseCol.b);
-              }
-              sel.push(0,0);
-            }
-            if(positions.length>0){
-              const geo = new THREE.BufferGeometry();
-              geo.setAttribute('position', new THREE.Float32BufferAttribute(positions,3));
-              geo.setAttribute('color', new THREE.Float32BufferAttribute(colors,3));
-              geo.setAttribute('mid', new THREE.Float32BufferAttribute(mids,3));
-              geo.setAttribute('sel', new THREE.Float32BufferAttribute(sel,1));
-              const lines = new THREE.LineSegments(geo, smartGateMaterial);
-              lines.visible = !cinematicMode;
-              lines.renderOrder = (stargateLinesRef.current?.renderOrder ?? 0) + 1;
-              // Swap
-              if(sceneRef.current){ sceneRef.current.add(lines); }
-              if(smartGateLinesRef.current && sceneRef.current){
-                sceneRef.current.remove(smartGateLinesRef.current);
-                try { smartGateLinesRef.current.geometry.dispose(); (smartGateLinesRef.current.material as THREE.Material).dispose?.(); } catch {}
-              }
-              smartGateLinesRef.current = lines;
-            }
-          }
-        } else {
-          // Fallback: trigger rebuild effect
-          setSmartGateBuildRetry(v=> v+1);
-        }
-      } catch {/* ignore rebuild errors */}
-    } catch(e:any){
-      setSmartGateErr(String(e?.message||e||'Refresh failed'));
+        buildSmartGateGeometry(newLinks);
+      } catch { /* ignore scene rebuild errors */ }
+    } catch (err: any) {
+      setSmartGateErr(String(err?.message || err || 'Failed to refresh smart gates'));
     } finally {
       setSmartGateRefreshBusy(false);
     }
-  }, [showSmartGates, smartGateRefreshBusy]);
+  }, [buildSmartGateGeometry, showSmartGates, smartGateRefreshBusy]);
 
   // Listen for display settings updates (accent span etc.)
   useEffect(() => {
@@ -6161,7 +6148,7 @@ function App() {
     currentRenderer.domElement.addEventListener('pointerdown', onPointerDown);
   currentRenderer.domElement.addEventListener('pointerup', onPointerUp);
   currentRenderer.domElement.addEventListener('pointerleave', onPointerLeave);
-    currentRenderer.domElement.addEventListener('wheel', onWheel);
+  currentRenderer.domElement.addEventListener('wheel', onWheel, { passive: true });
     // Right-click context menu for setting destination
   const onContextMenu = (event: MouseEvent) => {
       if(!hoveredSystem) return; // only active when a star is hovered
@@ -7254,22 +7241,30 @@ function App() {
                     Visible: {
                       (()=>{
                         // Apply base filters (online/linked), then view filter, then optional tribe filter (tribe mode)
-                        const all = smartGateSnapshot.links.filter(l=> l && (l.online !== false) && (l.linked !== false));
-                        let total = Math.round(all.length/2);
-                        let set = all;
-                        if(smartGateViewMode==='authorized' && traversableEdgeSet){
-                          set = all.filter(l=> traversableEdgeSet.has(`${l.origin}-${l.destination}`));
-                        } else if(smartGateViewMode==='public'){
-                          set = all.filter(l=> publicEdgeSet.has(`${l.origin}-${l.destination}`));
+                        const linked = smartGateSnapshot.links.filter(l=> l && l.linked !== false);
+                        let viewLinks = linked;
+                        if(smartGateViewMode !== 'all'){
+                          viewLinks = viewLinks.filter(l => l.online !== false);
                         }
+                        if(smartGateViewMode==='authorized' && traversableEdgeSet){
+                          viewLinks = viewLinks.filter(l=> traversableEdgeSet.has(`${l.origin}-${l.destination}`));
+                        } else if(smartGateViewMode==='public'){
+                          viewLinks = viewLinks.filter(l=> publicEdgeSet.has(`${l.origin}-${l.destination}`));
+                        }
+                        let filtered = viewLinks;
                         if(smartGateColorMode==='tribe' && smartGateTribeFilters.length>0){
                           const pickTid = (l:any)=> (String(l.tribeId||'').trim() || (Array.isArray(l.tribes)? String(l.tribes[0]||'').trim():'')) || 'other';
                           const selectionSet = new Set(smartGateTribeFilters);
-                          set = set.filter(l=> selectionSet.has(pickTid(l)));
-                          total = Math.round(set.length/2);
-                          return `${total}`;
+                          filtered = viewLinks.filter(l=> selectionSet.has(pickTid(l)));
                         }
-                        return `${Math.round(set.length/2)}/${Math.round(all.length/2)}`;
+                        const segmentCount = (list:any[]) => Math.round(list.length/2);
+                        if(smartGateViewMode === 'all'){
+                          const onlineSegments = segmentCount(filtered.filter(l=> l.online !== false));
+                          const offlineSegments = segmentCount(filtered.filter(l=> l.online === false));
+                          const totalSegments = onlineSegments + offlineSegments;
+                          return offlineSegments > 0 ? `${onlineSegments} online + ${offlineSegments} offline (${totalSegments})` : `${onlineSegments} online`;
+                        }
+                        return `${segmentCount(filtered)}/${segmentCount(viewLinks)}`;
                       })()
                     }
                   </div>

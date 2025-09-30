@@ -1,8 +1,8 @@
-<!-- Curated on 2025-09-28. This log keeps entries relevant to: Primordium indexer (World API via Docker), Postgres, Grafana, Docker, and the Cloudflare-hosted website (KV stats/snapshots/overlays). Older/legacy D1 indexer & cron/decoder content moved to archive. -->
+<!-- Curated on 2025-09-30. This log keeps entries relevant to: Primordium indexer (World API via Docker), Postgres, Grafana, Docker, and the Cloudflare-hosted website (KV stats/snapshots/overlays). Older/legacy D1 indexer & cron/decoder content moved to archive. -->
 
-Older entries and legacy indexer details have been archived: [archive\decision-log\decision-log-legacy-2025-09-27.md](./archive/decision-log/decision-log-legacy-2025-09-27.md)
+Older entries and legacy indexer details have been archived: [archive\decision-log\decision-log-legacy-2025-09-28.md](./archive/decision-log/decision-log-legacy-2025-09-28.md)
 
-## Current Environment Quick Reference (as of 2025-09-28)
+## Current Environment Quick Reference (as of 2025-09-30)
 - Hosting/runtime
   - Cloudflare Pages + Worker (Pages serves assets; `_worker.js` handles `/api/*`). Netlify code removed post-cutover.
   - Preview detection: hosts ending with `.pages.dev`; admin endpoints allow preview bypass with `?openPreview=1` when token is absent/mismatched.
