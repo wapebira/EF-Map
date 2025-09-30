@@ -33,6 +33,8 @@ If stuck: ask for "safer alternative" or "explain tradeoffs". Avoid giving line-
 - Cinematic mode: toggled global via `window.__efSetCinematic(bool)` (set inside `App.tsx`), tracked for enter/session/time metrics.
 
 Reference index: see `docs/README.md` for links to broader specs (`PROJECT_REQUIREMENTS.md`, cinematic spec, operational playbooks).
+- **LLM Troubleshooting Guide**: `docs/LLM_TROUBLESHOOTING_GUIDE.md` provides comprehensive orientation (architecture, components, data flows, diagnostic paths) - read this first when starting troubleshooting.
+- **Local Environment**: `docs/LOCAL_ENVIRONMENT.md` (gitignored) contains Postgres/Grafana credentials for local dev.
 - Overlay initiative roadmap is mirrored in `docs/initiatives/GAME_OVERLAY_PLAN.md` (and in the overlay repo under the same path). Update both copies when the plan changes.
 
 Cloud Platform: Cloudflare (Pages + Worker + KV) is authoritative. Netlify is deprecated and retained only as historical reference in the repo until final purge. Do not add new Netlify code; any persistence change must target the existing Cloudflare Worker & KV abstraction. See `docs/archive/migration/MIGRATION_PLAN.md` for archival context only.

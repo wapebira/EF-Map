@@ -16,12 +16,14 @@ Purpose: Provide persistent, high-signal context and guardrails for agent mode i
 - Tooling: Chrome DevTools MCP server (`chrome-devtools`) is pre-installed for VS Code Copilot. It launches an isolated Chrome profile for traces/screenshots/automation—keep it clear of secrets and close sessions once finished.
 
 Useful entry points:
+- **LLM Troubleshooting Guide**: `docs/LLM_TROUBLESHOOTING_GUIDE.md` (comprehensive orientation: architecture, components, data flows, credentials reference, common diagnostic paths)
+- **Local environment**: `docs/LOCAL_ENVIRONMENT.md` (gitignored - Postgres/Grafana credentials for local dev)
 - High-level rules and patterns: `.github/copilot-instructions.md`
 - Operational decisions (newest first): `docs/decision-log.md`
 - Cloudflare migration status & plan: `docs/archive/migration/MIGRATION_PLAN.md`, `docs/archive/migration/migration_status.json`
 - Frontend root: `eve-frontier-map/` (see `src/App.tsx`, `src/utils/usage.ts`)
 - Cloudflare Worker (API, KV, routing): `_worker.js` (+ any sibling worker files)
- - Data Exposure Plan (current initiative): `docs/initiatives/DATA_EXPOSURE_PLAN.md`
+- Data Exposure Plan (current initiative): `docs/initiatives/DATA_EXPOSURE_PLAN.md`
 - Overlay helper partnership: see sibling repo **ef-map-overlay** for `AGENTS.md` and `.github/copilot-instructions.md` (native helper + DX12 overlay live there; keep shared docs in sync).
 
 ## Agent operating rules (must follow)
@@ -41,10 +43,22 @@ Useful entry points:
 - Before updating shared docs (guardrails, roadmap) make sure the overlay copy stays aligned or include an explicit note about divergence.
 
 ## Fast context to load on start
+- **First**: Read `docs/LLM_TROUBLESHOOTING_GUIDE.md` (full system overview, reduces orientation time by 50%+)
 - Read `.github/copilot-instructions.md` (source of truth for patterns & guardrails)
 - Skim last ~40 lines of `docs/decision-log.md` for current initiatives and recent incidents
+- If working with local services: Check `docs/LOCAL_ENVIRONMENT.md` for Postgres/Grafana credentials
 - If touching metrics: also read Worker endpoint mappings where EVENT_MAP lives
 - If touching routing: read `src/utils/routing_worker.ts` and related workers under `eve-frontier-map/`
+
+## VS Code Extensions (use proactively)
+The following extensions are installed and should be your **first choice** for inspection tasks:
+- **PostgreSQL** (ckolkman.vscode-postgres): Browse Postgres schemas, run queries interactively. Connect to localhost:5432 (credentials in `LOCAL_ENVIRONMENT.md`)
+- **Docker** (ms-azuretools.vscode-docker): Inspect containers, view logs, attach shells. Prefer over `docker` CLI for one-off checks.
+- **SQLite** (alexcvzz.vscode-sqlite): Open `eve-frontier-map/public/map_data_v2.db` for schema inspection
+- **REST Client** (humao.rest-client): Test API endpoints via `.http` files
+- **Chrome DevTools MCP** (chrome-devtools): Capture traces/screenshots via MCP (use isolated profile, close when done)
+
+**Default to extension UI for inspection; use CLI only when scripting or automation is required.**
 
 ## Common tasks & success criteria
 - Stop legacy jobs (Windows): Use `tools/win/pause_world_api.ps1`; verify no scheduled tasks remain; log in decision log

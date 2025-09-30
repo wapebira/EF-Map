@@ -64,3 +64,6 @@ eve-frontier-map/public/data/index-latest/*.json
 
 # Cloudflare exporter local env (contains secrets; do not commit)
 tools/worldapi-cron/.env*
+
+# Local environment credentials (safe for local dev, but keep out of git for security hygiene)
+docs/LOCAL_ENVIRONMENT.md
