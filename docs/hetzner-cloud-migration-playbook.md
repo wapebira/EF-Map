@@ -135,6 +135,15 @@ _Optional Terraform module (`infra/hetzner/main.tf`) can describe the same resou
 | Emergency rollback | VPS | Restore latest Hetzner volume snapshot or `pg_restore` from nightly dump; keep local stack ready as fallback reference. |
 | Agent-led debugging | Local preferred, VPS when needed | Run troubleshooting playbooks locally whenever possible; when remote access is required, have the agent execute scripted tunnel + SSH commands to keep actions reproducible. |
 
+### 6.8 Cost & Billing Considerations
+- **Baseline instance**: CX32 (4 vCPU / 8 GB RAM / 80 GB NVMe) suits the 8 GB requirement at €0.0113 /hr, capped at €6.80 /mo, and includes a primary IPv4 plus 20 TB outbound traffic in EU regions. Choosing the IPv6-only variant trims €0.50 /mo but removes IPv4 connectivity.
+- **Traffic overages**: Exceeding the 20 TB pool triggers €1.00 per extra TB (EU/US). Keep an eye on future API exposure; Cloudflare KV writes are tiny but bulk data exports could spike egress.
+- **Block storage volumes**: Hetzner charges €0.044 / GB / mo. An 80 GB Postgres volume adds ~€3.52 per month and bills hourly while attached—even if the server stops.
+- **Snapshots**: Manual snapshots cost €0.011 / GB / mo. One 80 GB snapshot is ~€0.88 per month; costs scale with the number of snapshots retained.
+- **Automated backups**: Enabling the managed backup feature adds 20 % of the instance price each month (~€1.36 for CX32). Disable it if we rely solely on scripted pg_dumps and off-site copies.
+- **Load balancers & extras**: Only pay for optional components (e.g., LB11 at €5.39 /mo capped with 20 TB traffic). Floating IPs, networks, and firewalls are free; dedicated vCPU (CCX) plans significantly increase the base rate if we outgrow shared compute.
+- **Budgeting tip**: Document snapshot/backup retention and monitor traffic usage so hourly billing for orphaned storage or unexpected egress doesn’t linger after maintenance or restores.
+
 ## 7. Risks & Mitigations
 | Risk | Impact | Mitigation |
 | --- | --- | --- |
