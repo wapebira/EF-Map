@@ -1,0 +1,2 @@
+# Normalize decision log to LF to avoid CRLF churn on Windows
+/docs/decision-log.md text eol=lf
