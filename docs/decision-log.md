@@ -70,135 +70,34 @@ Older entries and legacy indexer details have been archived: [archive\decision-l
 - Preview URLs
   - Pattern: `https://<branch-or-alias>.ef-map.pages.dev` (project `ef-map`).
 
-## 2025-10-01 – Agent documentation alignment
-- Goal: Mark completed backlog suggestions, clarify local stack container naming/startup scripts, and reinforce legacy/CLI guardrails in the troubleshooting guide.
-- Risk: low (documentation updates)
-- Gates: typecheck n/a | build n/a | smoke n/a
-## 2025-09-28 – Chrome DevTools MCP server registration
-- Goal: Register Google's Chrome DevTools MCP server with VS Code Copilot so agents can grab traces, screenshots, console logs, or scripted smoke runs without leaving the editor.
-- Risk: low (tool registration + docs update).
-- Gates: typecheck n/a | build n/a | smoke ✅ (`code --% --add-mcp "{\"name\":\"chrome-devtools\",\"command\":\"npx\",\"args\":[\"chrome-devtools-mcp@latest\"]}"` added the server; `node -v` → v22.19.…
-## 2025-09-28 – Share schema r2 smart gate metadata
-- Goal: Preserve Smart Gate hops and mode selection in shared routes by bumping the client share schema to `r2` and restoring metadata during playback.
-- Risk: medium (share links + routing UI state)
-- Gates: typecheck ✅ `pnpm typecheck` | build ✅ `pnpm build` | test ✅ `pnpm test`
-## 2025-09-28 – Share worker accepts r2 payloads
-- Goal: Update the Cloudflare Pages worker validation so `create-share` accepts any versioned payload (`r<num>|`), restoring short-link copies for Smart Gate routes.
-- Risk: low (server-side validation only)
-- Gates: test ✅ `pnpm test` | typecheck ✅ `pnpm typecheck` | build ✅ `pnpm build` | preview smoke ✅ `wrangler pages deploy dist --project-name ef-map --branch preview-share-r2-fix --commit-dirty=true…
-## 2025-09-28 – Atlas mode palette & reset cleanup
-- Goal: Color every region uniquely when Highlight Region is active with no selection, tint each stargate segment to the source system’s region color, and ensure both reset controls (Display Settings…
-- Risk: high (core render loop + reset flow)
-- Gates: typecheck ✅ (via `npm run build` + `npx tsc --noEmit`) | build ✅ `npm run build` | smoke ➖ (atlas toggle manual check pending)
-## 2025-09-28 – Atlas gates stay tinted after reset
-- Goal: Keep atlas palette colors applied to stargate segments when Highlight Region is enabled with no selection, even after clearing the active star via toolbar reset.
-- Risk: low (cleanup sequencing only)
-- Gates: typecheck ✅ `npx tsc --noEmit` | build ✅ `npm run build` | smoke ➖ (preview validation in progress)
-## 2025-09-28 – Atlas gate tint softness
-- Goal: Soften atlas-mode stargate colors by blending region hues toward the neutral map grey, keeping lines legible without overpowering the starfield.
-- Risk: low (palette blending only)
-- Gates: typecheck ✅ `npx tsc --noEmit` | build ✅ `npm run build` | smoke ➖ (preview validation in progress)
-## 2025-09-28 – Themed prompts for layout & Smart Gates
-- Goal: Replace native confirm/alert dialogs for layout reset and restricted Smart Gate authorization with a reusable themed modal component.
-- Risk: low (client UI polish only)
-- Gates: typecheck ✅ (via `npm run build`) | build ✅ `npm run build` | smoke ➖ (modal UX to be spot-checked in app)
-## 2025-09-26 – Overlay repository bootstrap & guardrail sync
-- Goal: Create the dedicated `ef-map-overlay` repository for native helper + DX12 overlay work and mirror the shared guardrail docs between projects.
-- Risk: low (documentation updates).
-- Gates: typecheck n/a | build n/a (docs only) | smoke n/a.
-## 2025-09-27 – Embed palette polish & production deploy
-- Goal: Finalize cinematic embed polish (palette-aware labels, smaller CTA, orbit cancel on wheel, aurora scaling) and push the feature live.
-- Risk: medium (embed UX + cinematic rendering).
-- Gates: typecheck ✅ (via build) | build ✅ `npm run build` | smoke ✅ (embed preview/manual).
-## 2025-09-27 – Scout optimizer session persistence
-- Goal: Preserve key Scout Optimizer form inputs within the session (radius/region toggle, gate filter, planet filter, optimizer timers, worker count, ship/gate trade settings, hide inputs) so switch…
-- Risk: low (client-side state persistence only).
-- Gates: typecheck ✅ (via build) | build ✅ `npm run build` | smoke ➖ (pending manual panel retest).
-## 2025-09-26 – Search result favicon alignment
-- Goal: Align public favicons, touch icons, and structured data with the EF-Map logo so Google Search shows the branded round icon instead of the blank placeholder, and expose manifest/browserconfig …
-- Risk: low (static assets + head metadata only).
-- Gates: typecheck ✅ (n/a) | build ✅ (`npm run build`)
-## 2025-09-26 – Cinematic orbit query fixes
-- Goal: Ensure `orbit=1` deep links immediately enter cinematic mode, keep custom zoom distances, and re-seed cinematic bloom/palette visuals once the starfield rebuilds.
-- Risk: medium (camera animation + cinematic initialization)
-- Gates: typecheck ✅ | build ✅ (`npm run build`)
-## 2025-09-26 – Cinematic haze regression fix
-- Goal: Restore default cinematic visuals after orbit auto-init by reapplying shader slider uniforms whenever the scene rebuilds (previous run left radial glow at default, causing a bright white wash…
-- Risk: low (dependency array tweaks only)
-- Gates: typecheck ✅ | build ✅ (`npm run build`)
-## 2025-09-26 – Embed zoom minimum parity
-- Goal: Let deep links and embeds zoom as tightly as manual controls by lowering the clamp to the OrbitControls minimum distance.
-- Risk: low (constant + docs)
-- Gates: typecheck ✅ | build ✅ (`npm run build`)
-## 2025-09-26 – Gates badge polling cadence
-- Goal: Reduce `/api/debug-snapshots` polling frequency for the Gates status pill to align with snapshot cadence while keeping freshness checks.
-- Risk: low (interval constant only)
-- Gates: typecheck ✅ | build ✅ (`npm run build`)
-## 2025-09-26 – Cinematic orbit embed flag
-- Goal: Add an `orbit=1` query flag that auto-enables cinematic mode, keeps labels visible, and orbits the camera around the selected system until the viewer interacts.
-- Risk: medium (render loop adjustments + query parsing)
-- Gates: typecheck ✅ | build ✅ (`npm run build`)
-## 2025-09-26 – Embed zoom parameter + label persistence
-- Goal: Restore automatic labels for deep-linked selections, add a sanitized `zoom` query for camera distance, and trim embed chrome to the essentials.
-- Risk: medium (App initialization + embed wiring)
-- Gates: typecheck ✅ | build ✅ (`npm run build`)
-## 2025-09-26 – System deep links & embed preset
-- Goal: Support direct system selection via numeric queries/paths and introduce an embed-focused UI preset for iframe integrations, including an in-frame "Open on EF Map" escape hatch.
-- Risk: high (core App initialization & selection flows).
-- Gates: `npm run build` ✅
-## 2025-09-25 – Telemetry dedup for P2P route + transmission replay
-- Goal: Remove duplicate client-side emits for `p2p_route` (meta helper) and `transmission_replay` (Incoming Transmission replay handler) to keep usage stats accurate while preserving existing batchi…
-- Risk: low (client-only telemetry tightening; no API/KV schema impact). Rollback: revert App + usage helper edits.
-- Gates: `npm run build` ✅ | Preview deploy (`wrangler pages deploy dist --project-name ef-map --branch feature-telemetry-dedup`) ✅ | Smoke: pages.dev preview `/api/stats?history=2` returns JSON; rep…
-## 2025-09-25 – Reachability telemetry guardrails
-- Goal: Ensure reachability toggle analytics (`reachability_enable`/`reachability_disable`) reflect deliberate user actions and suppress default slider bucket noise.
-- Risk: low (client-side telemetry only; no server/KV interaction)
-- Gates: typecheck ✅ | build ✅ (`npm run build`)
-## 2025-09-24 – Smart Assemblies colour parity
-- Goal: Align Smart Assemblies overlay colour modes with Smart Gates (theme accent, opposite accent, tribe legend/filter) and push tribe filtering through halo rendering plus panel metrics.
-- Risk: medium (core scene update loop + overlay UI wiring).
-- Gates: `npm run build` ✅ (vite + worker copy).
-## 2025-09-24 – Tribe filter multi-select parity
-- Goal: Let Smart Assemblies and Smart Gates support ctrl/meta multi-select tribe filtering with clear legend hints, consistent counts, and visibility metrics.
-- Risk: medium (shared state, overlay rendering, and legend UX touched).
-- Gates: `npm run build` ✅ (tsc + vite + worker copy).
-## 2025-09-24 – Smart Assemblies Halo Preview Deploy
-- Goal: Publish the Smart Assemblies overlay (halo renderer + panel wiring) to a Cloudflare Pages preview for review (`feature-structure-overlays.ef-map.pages.dev`).
-- Risk: low (preview environment only, no production impact).
-- Gates: typecheck ✅ | build ✅ (`npm run build`) | smoke ✅ (`/api/structure-snapshot` → 200 `application/json` on preview).
-## 2025-09-24 – Pages worker structure snapshot parity
-- Goal: Ensure the Cloudflare Pages worker serves `/api/structure-snapshot` with KV-backed data, matching root worker behavior.
-- Risk: low (read-only KV fetch + JSON response).
-- Gates: typecheck ❌ (npm run build blocked by existing App.tsx Smart Assemblies errors), build ❌ (same), smoke ⏳ (pending post-fix verification).
-## 2025-09-24 – Smart Assemblies overlay panel
-- Goal: Add Smart Assemblies snapshot controls (status/type filters, color modes, overlay toggle) with persisted preferences and map tinting.
-- Risk: medium (core App wiring + render overlay integration).
-- Gates: `npm run build` ✅ (Vite + worker copy); manual smoke ⏳ (preview panel interaction + overlay colors).
-## 2025-09-24 – User Overlay Modal & Agent Workflow Docs
-- Goal: Replace browser prompt flows for overlay folder creation with an in-app modal, and align contributor guidance with enforced GPT-5 Codex workflow + Cloudflare CLI execution mandate.
-- Risk: Medium (new UI surface + instructions baseline). Modal tested in preview; documentation affects contributor behavior only.
-- Gates: npm run build ✅ | Preview deploy (`wrangler pages deploy dist --project-name ef-map --branch feature-systemselection`) ✅ | Manual smoke: create folder in overlay (modal validation + focus), …
-## 2025-09-24 – Structure snapshot cron wiring
-- Goal: Package the structure snapshot exporter in the Docker image and schedule it via supercronic (15 min cadence) alongside the existing smart gate snapshot job.
-- Risk: low (container packaging + cron schedule only; exporter logic unchanged).
-- Gates: `node tools/snapshot-exporter/structure_snapshot_exporter.js --dry-run --out tmp_structure_snapshot.json` ✅ (verifies snapshot build post-packaging; file removed after check).
-## 2025-09-24 – Structure snapshot API endpoint
-- Goal: Serve `structure_snapshot_v1` via `/api/structure-snapshot` with KV fallback, system/meta filters, and cache-friendly headers.
-- Risk: low (read-only KV fetch + documentation tweak).
-- Gates: `npm run build` ✅ (Vite + worker copy) | `/api/structure-snapshot?meta=1` preview fetch ⏳ (pending after deployment).
-## 2025-09-24 – Structure snapshot exporter groundwork
-- Goal: Add a Node-based exporter that aggregates smart assembly counts by system/type/status/tribe and writes `structure_snapshot_v1` to EF_SNAPSHOTS (currently dry-run only).
-- Risk: medium (touches exporter pipeline + KV tooling; no production write yet).
-- Gates: `DRY_RUN=1 node tools/snapshot-exporter/structure_snapshot_exporter.js --dry-run --out tmp_structure_snapshot.json` ✅ (Postgres join + snapshot build).
-## 2025-09-24 – SEO Static Pages & Sitemap
-- Goal: Add crawlable static marketing/content pages (FAQ, Features, About) + sitemap.xml and robots.txt pointing to sitemap to improve indexation for queries like "EVE Frontier map" & "Smart Gate ro…
-- Risk: low (static assets only; no runtime logic, KV, or worker changes). Rollback: delete added files; remove sitemap reference in robots.txt if needed.
-- Gates: typecheck ✅ (unchanged TS) | build ✅ (vite) | smoke ✅ (files present in `dist/` after build; HTML contains correct canonical + meta; FAQ JSON-LD valid structure).
-## 2025-09-24 – Canonical Domain Switch (pages.dev → ef-map.com)
-- Goal: Normalize all public-facing canonical, Open Graph, Twitter, JSON-LD SearchAction, sitemap, and robots.txt references from the Cloudflare Pages default subdomain (`ef-map.pages.dev`) to the cu…
-- Risk: low (static text replacements; no runtime code or worker logic changed). Rollback: revert commit to restore previous host references.
-- Gates: typecheck ✅ (no TS changes) | build ✅ (vite build after edits) | smoke ⏳ (post-deploy fetch of https://ef-map.com/sitemap.xml + page heads pending deploy).
-## 2025-09-24 – Overlay folder-based map filtering + inline tribe note edit
+## 2025-10-01
+## 2025-09-28
+## 2025-09-27
+## 2025-09-26
+## 2025-09-25
+## 2025-09-24
+## 2025-09-23 – (no major changes recorded)
+## 2025-09-22
+## 2025-09-21
+## 2025-09-20
+## 2025-09-19
+## 2025-09-18
+## 2025-09-17
+## 2025-09-16
+## 2025-09-15
+## 2025-09-14
+## 2025-09-13
+## 2025-09-12
+## 2025-09-11
+## 2025-09-09
+## 2025-09-08
+## 2025-09-07
+## 2025-09-06
+## 2025-09-05
+## 2025-09-04
+## 2025-09-03
+## 2025-09-02
+## 2025-09-01
 ## 2025-09-24 – Production deploy: overlay hover parity + help panel updates
 - Goal: Promote overlay folder infrastructure (filtered feed + folder-scoped map halo rendering), tribe hover highlight parity, and expanded Help Panel documentation (tribe shared folder semantics, d…
 - Risk: low (UI event handlers + documentation text). Worker bundle already validated in preview; no persistence format changes.
