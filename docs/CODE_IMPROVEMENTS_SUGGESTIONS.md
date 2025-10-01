@@ -6,6 +6,14 @@ Purpose: Identify areas for improvement that aid LLM comprehension, reduce redun
 
 ---
 
+## Recently Completed (as of 2025-10-01)
+
+- **#1 – Postgres connection details**: `docs/LOCAL_ENVIRONMENT.md` now exists, is referenced from `AGENTS.md`, and is excluded via `.gitignore`.
+- **#3 – VS Code extension guidance**: Extension usage guidance has been added to `AGENTS.md` and mirrored in the troubleshooting guide.
+- **#4 – Deprecated code boundaries**: Legacy assets live under `legacy/` with guardrails updated accordingly.
+
+---
+
 ## Critical Improvements (High Priority)
 
 ### 1. Postgres Connection Details Scattered Across Multiple Files
@@ -36,6 +44,8 @@ Purpose: Identify areas for improvement that aid LLM comprehension, reduce redun
 
 Add `.gitignore` entry for `docs/LOCAL_ENVIRONMENT.md` and reference it from `AGENTS.md` as the first file to read.
 
+**Status**: ✅ Completed — already implemented; keep the document in sync if credentials change.
+
 ---
 
 ### 2. Docker Compose Files Have Conflicting Service Names
@@ -51,6 +61,8 @@ Add `.gitignore` entry for `docs/LOCAL_ENVIRONMENT.md` and reference it from `AG
 - Prefix all service names with their subsystem: `worldapi_`, `pgadapter_`, `primordium_`
 - Document the canonical container name pattern in the orientation guide
 - Update any scripts that reference container names by exact match
+
+**Implementation notes**: A rename will break existing helper scripts (`tools/win/start_pg_indexer_stack.ps1`, exporter launchers, diagnostics). Audit and update every consumer—or consider introducing Docker label conventions / documentation before changing service names.
 
 ---
 
@@ -75,6 +87,8 @@ These are installed but not mentioned in agent guardrails.
 - Chrome DevTools MCP: Registered for trace/screenshot capture (use isolated profile)
 
 Default to extension UI for inspection tasks; use CLI only when scripting or automation is required.
+
+**Status**: ✅ Completed — `AGENTS.md` and `docs/LLM_TROUBLESHOOTING_GUIDE.md` now carry this guidance.
 ```
 
 ---
@@ -100,6 +114,8 @@ Agents scanning the workspace may not immediately recognize these as legacy.
 - Update `.github/copilot-instructions.md` to explicitly exclude `legacy/` from active change scope
 - Update `file_search` and `semantic_search` mental model to skip `legacy/**` unless explicitly investigating history
 
+**Status**: ✅ Completed — deprecated assets live under `legacy/` and guardrails direct agents to treat the folder as read-only history.
+
 ---
 
 ### 5. Worker.js EVENT_MAP Lacks Type Safety
@@ -120,6 +136,8 @@ Agents scanning the workspace may not immediately recognize these as legacy.
   ```
 - Update `usage.ts` to import and use: `track(evt: {type: UsageEventType, ...})`
 - Run as precommit hook or build step to keep in sync
+
+**Implementation notes**: The worker bundle is plain JavaScript deployed via Cloudflare Pages. Introducing generated types requires a supporting script (Node ≥18) that writes to `eve-frontier-map/src/types/` and a lightweight sanity check to ensure the worker (JS) and client (TS) stay synchronized without breaking the non-bundled build.
 
 ---
 
@@ -144,6 +162,8 @@ Agents scanning the workspace may not immediately recognize these as legacy.
   ```
 - Import in worker.js and docker-compose via environment variable or build-time substitution
 - Single source of truth for network parameters
+
+**Implementation notes**: The Cloudflare worker currently runs unbundled ES modules. If you centralize URLs in JSON, expose them via a small JS config module or environment variables; avoid `import`ing JSON directly unless you add a bundler step.
 
 ---
 
@@ -266,20 +286,20 @@ Agents scanning the workspace may not immediately recognize these as legacy.
 
 ## Summary Table
 
-| # | Issue | Risk | Effort | Priority |
-|---|-------|------|--------|----------|
-| 1 | Postgres creds scattered | High | 15m | Critical |
-| 2 | Docker service naming conflicts | Medium | 30m | Critical |
-| 3 | Missing VS Code extension guidance | Med | 10m | Critical |
-| 4 | Deprecated code boundaries unclear | Medium | 2h | Critical |
-| 5 | EVENT_MAP lacks type safety | Med | 1h | Critical |
-| 6 | Hardcoded URLs | Low | 30m | Critical |
-| 7 | Inconsistent error handling | Low | 1h | Medium |
-| 8 | No snapshot schema versioning | Medium | 45m | Medium |
-| 9 | Missing health endpoints | Medium | 1h | Medium |
-| 10 | Grafana dashboard not versioned | Med | 20m | Medium |
-| 11 | Worker files lack docs | Low | 2h | Low |
-| 12 | No automated smoke tests | Low | 4h | Low |
+| # | Issue | Risk | Effort | Priority | Status |
+|---|-------|------|--------|----------|--------|
+| 1 | Postgres creds scattered | High | 15m | Critical | ✅ Completed |
+| 2 | Docker service naming conflicts | Medium | 30m | Critical | ⏳ Pending |
+| 3 | Missing VS Code extension guidance | Med | 10m | Critical | ✅ Completed |
+| 4 | Deprecated code boundaries unclear | Medium | 2h | Critical | ✅ Completed |
+| 5 | EVENT_MAP lacks type safety | Med | 1h | Critical | ⏳ Pending |
+| 6 | Hardcoded URLs | Low | 30m | Critical | ⏳ Pending |
+| 7 | Inconsistent error handling | Low | 1h | Medium | ⏳ Pending |
+| 8 | No snapshot schema versioning | Medium | 45m | Medium | ⏳ Pending |
+| 9 | Missing health endpoints | Medium | 1h | Medium | ⏳ Pending |
+| 10 | Grafana dashboard not versioned | Med | 20m | Medium | ⏳ Pending |
+| 11 | Worker files lack docs | Low | 2h | Low | ⏳ Pending |
+| 12 | No automated smoke tests | Low | 4h | Low | ⏳ Pending |
 
 **Total Critical Path Effort**: ~5 hours  
 **Total Medium Priority**: ~3.5 hours  

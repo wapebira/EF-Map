@@ -13,18 +13,35 @@ Guiding principles
 - Keep endpoints read-only and cacheable (ETag + Cache-Control). Add small KV shards for personalized overlays.
 - Prefer simple, observable pipelines with clear SLAs and fallbacks.
 
+## Status snapshot (2025-10-03)
+
+| Phase | State | Notes |
+|-------|-------|-------|
+| Phase 1 – Snapshots | ✅ Production | `smart_gate_links_v1`, `gate_access_snapshot_v1`, and `structure_snapshot_v1` published by `tools/snapshot-exporter/`. Served via `/api/smart-gate-links`, `/api/gate-access`, `/api/structure-snapshot`.
+| Phase 2 – Auth-gated overlays | 🟡 Rolling | Smart Gates SIWE + authorized edges live; generalized `/api/my/overlays` remains TODO.
+| Phase 3 – Prequeries | ⏳ Not started | Needs dataset shortlist + asset pipeline.
+| Phase 4 – Dynamic | ⏳ Not started | Pending decision on hosted Postgres mirror / Hyperdrive.
+
+Key breadcrumbs:
+- Exporters: `tools/snapshot-exporter/exporter.js`, `tools/snapshot-exporter/structure_snapshot_exporter.js`
+- Worker routes: `_worker.js` (`/api/smart-gate-links`, `/api/gate-access`, `/api/structure-snapshot`, `/api/authorized-gates`)
+- UI consumers: Smart Gates panel & Structures overlay (production)
+
 Phases (incremental)
 1) Snapshots (Now)
    - Export compact JSON from local Postgres on a short cadence.
-   - Initial artifacts:
-     - smart_gate_links_v1.json
-       { edges: [{ aSystemId, bSystemId, srcGateId, dstGateId, srcState, dstState, lastBlock, generatedAt }] }
-     - system_overlays_v1.json
-       { [systemId: string]: { tribeId?: string, dominantOwner?: string, structureFlags?: { hasRefinery?: boolean, hasGate?: boolean, hasMarket?: boolean }, updatedAt: string } }
-   - Storage: KV for small (links), R2 or Pages static asset for larger overlays.
-   - Worker endpoints:
-     - GET /api/smart-gate-links → KV read + 30–60s cache
-     - GET /api/system-overlays?v=tribe|owner|structures → serve filtered vector from R2/asset with 1–5 min cache
+    - Initial artifacts:
+       - `smart_gate_links_v1`
+          `{ links: [{ gateId, fromSystemId, toSystemId, linked, online, traversalCost, appliedSystemId, isPublic, tribeId? }], updatedAt }`
+       - `gate_access_snapshot_v1`
+          `{ updatedAt, rules:[{ gate_id, fromSystemId, toSystemId, appliedSystemId, isPublic, tribeId? }] }`
+       - `structure_snapshot_v1`
+          `{ meta:{ generatedAt, lastBlock, totals… }, systems:{ [systemId]: { counts, tribes } } }`
+    - Storage: Cloudflare KV (`EF_SNAPSHOTS` namespace) for all three keys; files mirrored to preview-specific namespaces during branch deploys.
+    - Worker endpoints:
+       - GET `/api/smart-gate-links` → KV read + 60s cache
+       - GET `/api/gate-access` → KV read + 60s cache (diagnostic headers attached)
+       - GET `/api/structure-snapshot` → KV read + 60s cache
 
 2) Auth-gated personal overlays (Soon)
    - Sign-in with MetaMask or EVE Vault: nonce → signature → verify → JWT (15–60 min).

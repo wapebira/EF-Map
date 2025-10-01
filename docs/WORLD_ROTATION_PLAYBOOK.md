@@ -1,13 +1,15 @@
 # World Rotation Playbook (Pyrope / EF Index)
 
-Purpose: Safely rotate indexing to a new WORLD_ADDRESS (same chain) while preserving the previous world’s data in separate D1 databases. No code changes required—only bindings and variables.
+> **Status: Archived.** This workflow described the legacy Cloudflare D1 indexer rotation. The production stack now relies on the Primordium Postgres indexer + KV snapshots, so rotating worlds means reseeding the exporter pipeline instead of touching D1 bindings. Keep this file only for historical context; see `docs/primordium-indexer.md` and the recent entries in `docs/decision-log.md` for the active procedure.
 
-## Naming and scope
+Purpose *(legacy)*: Safely rotate indexing to a new WORLD_ADDRESS (same chain) while preserving the previous world’s data in separate D1 databases. No code changes required—only bindings and variables.
+
+## Naming and scope *(legacy D1 approach)*
 - New index DB: ef_index_<epoch>
 - New archives: ef_index_archive_1_<epoch> (+ optional ef_index_archive_2_<epoch>)
 - Epoch: short label like 2025Q4 or 2025-10.
 
-## Minimal procedure
+## Minimal procedure *(superseded)*
 1) Provision D1s
    - Create: ef_index_<epoch>, ef_index_archive_1_<epoch> (and _archive_2_ if desired)
    - Capture database_id values.

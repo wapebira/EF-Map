@@ -2,6 +2,13 @@
 
 # EF-Map Game Overlay Initiative
 
+## Sync Checklist (when updating this plan)
+1. Apply the change to this file (`EF-Map-main/docs/initiatives/GAME_OVERLAY_PLAN.md`).
+2. Mirror the identical change in `ef-map-overlay/docs/initiatives/GAME_OVERLAY_PLAN.md` within the same session.
+3. Record a brief entry in both decision logs if the update reflects roadmap movement (reference the same ISO date/title in each).
+4. Call out any cross-repo code impact in your status summary so the operator can trace dependencies quickly.
+
+
 ## 1. Purpose
 - Provide an in-game overlay for EVE Frontier that surfaces a focused subset of EF Map data (initially routing information).
 - Preserve the existing web app while enabling players to summon an overlay on demand without restarting the game client.
@@ -36,10 +43,11 @@
 - **Custom protocol** `ef-overlay://attach?session=<token>` for explicit actions from the browser.
 - **Local HTTP API** `http://127.0.0.1:<port>/status`, `/attach`, `/dismiss` for health checks and richer commands.
 
-## 6. Progress Summary (2025-09-27)
+## 6. Progress Summary (2025-10-03)
 - ✅ **Helper + injector MVP** – C++ helper boots, exposes HTTP API, launches overlay smoke script, injects DX12 module with hotkey toggle.
 - ✅ **DX12 overlay hook** – Swap-chain hook renders ImGui window, handles input capture (F8 toggle, drag/move, edge resize) without impacting gameplay.
 - ✅ **Automation** – PowerShell smoke script coordinates helper launch, payload post, and DLL injection for quick manual validation.
+- 🟡 **Overlay state v2 schema draft** – Shared header sketched (`overlay_state_v2.hpp` proto) with camera pose + highlight fields; awaiting validation with EF-Map payload generator.
 - ▢ **Installer & signing** – Deferred until we stabilize feature set; helper currently launched manually.
 - ▢ **Browser CTA** – Web → helper bridge still manual; custom protocol & detection flow to be designed.
 

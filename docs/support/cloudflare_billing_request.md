@@ -1,5 +1,7 @@
 # Cloudflare Billing Support Request – Unexpected D1/KV Usage (Hobby Project EF‑Map)
 
+> **Context (2025-09 D1 spike):** This template documents a one-off billing request after an experimental D1 ingestion job unexpectedly generated large reads/writes. If you reuse it, update the timeline and root-cause sections to match the new incident—or replace the intro entirely if the issue is unrelated to D1. The Workers KV references remain accurate, but current production workloads primarily rely on KV-backed snapshots instead of D1.
+
 Hello Cloudflare Billing Team,
 
 I’m requesting help with an unexpected spike in usage-derived charges on my Cloudflare account. I’m an individual hobbyist building a non-commercial map project and, while iterating with an LLM assistant (“vibe coding”), I unintentionally triggered a large volume of D1 and KV reads/writes. As soon as I realized, I immediately paused all activity. I’m concerned I won’t be able to afford the upcoming invoice and would appreciate your help.

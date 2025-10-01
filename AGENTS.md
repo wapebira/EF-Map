@@ -67,6 +67,13 @@ The following extensions are installed and should be your **first choice** for i
 - Routing tweak: maintain identical path outputs unless explicitly requested; keep performance neutral or better
 - Build frontend locally: run the VS Code task **“shell: Build frontend”** (installs deps on first run) to ensure Vite build + Worker bundling succeed.
 
+## High-risk surfaces (coordinate before changing)
+- **Core render loop & global state** – `eve-frontier-map/src/App.tsx`, `src/scene/*`, and shared stores. Impacts cinematic mode, panel wiring, and selection handling.
+- **Cloudflare Worker entrypoints** – `worker.js`, `_worker.js`, and any new bindings. Affects persistence, auth, and API invariants; requires preview deploy + decision log entry.
+- **Snapshot/export pipelines** – `tools/snapshot-exporter/*`, Docker cron configs, and KV write scripts. Changes can corrupt production data; run with `DRY_RUN=1` first and capture logs.
+- **Usage telemetry helpers** – `src/utils/usage.ts` and EVENT_MAP definitions in the Worker. Guard against double counting and keep payload schemas backward compatible.
+- **Shared schema / data files** – `public/map_data_v2.db`, Smart Gate snapshot contracts, or anything feeding the overlay repo. Coordinate with `ef-map-overlay` maintainers before altering formats.
+
 ## Safety & boundaries
 - Never commit secrets; use env vars or `.env.example` for placeholders
 - Avoid large diffs (>150 LoC) or dependency adds without explicit approval

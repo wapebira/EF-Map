@@ -1,6 +1,6 @@
 # Smart Assembly Snapshot Plan
 
-Status: in progress (branch `feature/structure-overlays`) – exporter + `/api/structure-snapshot` worker endpoint live; frontend overlay pending.
+Status: **shipped** (exporter + `/api/structure-snapshot` worker endpoint + `StructureOverlayPanel` UI live on production, 2025-10). This note now serves as the canonical reference for maintaining the snapshot pipeline.
 
 This note captures the data model, current metrics, and proposed snapshot format for visualizing smart assemblies (network nodes, manufacturers, hangars, smart gates, turrets, SSUs) on the EF map.
 
@@ -23,9 +23,9 @@ Assumptions confirmed by operators:
 - We retain unanchored rows for completeness but default UI filter will show online only. Rows with `solar_system_id = 0` are excluded from the snapshot.
 - Tribe membership is stable enough to treat the latest `characters` row as authoritative.
 
-## Current metrics (2025-09-24)
+## Current metrics (sample window: 2025-09-24)
 
-Queries executed via `docker exec pg-indexer-reader-postgres-1 psql ...` with `SET search_path`.
+Queries executed via `docker exec pg-indexer-reader-postgres-1 psql ...` with `SET search_path`. For up-to-date production counts, consult the Grafana dashboard **Structures Snapshot / Overview** (wired to the KV totals published by the exporter).
 
 ### Assemblies by type
 
@@ -80,9 +80,9 @@ Total tracked assemblies: **146,603**.
 
 Additional observations: 2,097 solar systems currently contain at least one assembly with a valid location (non-zero `solar_system_id`).
 
-## Proposed snapshot schema
+## Snapshot schema (v1, production)
 
-Snapshot key (KV): `structure_snapshot_v1` (subject to refinement). Stored as JSON with the following shape:
+Snapshot key (KV): `structure_snapshot_v1` within the `EF_STATS` namespace. Stored as JSON with the following shape:
 
 ```jsonc
 {
@@ -135,23 +135,21 @@ To guard against drift, schedule a weekly full rebuild (same script with `--full
 
 ## Storage & cadence
 
-- Estimated size: `systems` map has ≈2,100 entries. With counts only, JSON should stay under 5 MB (KV single-key limit is 25 MB). If growth pushes us near 10 MB, plan B is to shard by constellation (one KV key per constellation ID) and stream them in the client.
-- Refresh cadence: **every 15 minutes** via snapshot exporter cron job (reuse the existing `tools/snapshot-exporter` framework). A weekly full rebuild ensures no drift from incremental logic.
-- Worker endpoint: `/api/structure-snapshot` now serves the KV snapshot with `ETag` and public cache headers (`max-age=60`, `s-maxage=120`, `stale-while-revalidate=300`).
+- Estimated size: `systems` map has ≈2,100 entries. With counts only, JSON stays under 5 MB (KV single-key limit is 25 MB). If growth pushes us near 10 MB, plan B is to shard by constellation (one KV key per constellation ID) and stream them in the client.
+- Refresh cadence: **every 15 minutes** via the `tools/snapshot-exporter` cron (Wrangler scheduled job). A weekly full rebuild ensures no drift from incremental logic.
+- Worker endpoint: `/api/structure-snapshot` serves the KV snapshot with `ETag` and cache headers (`max-age=60`, `s-maxage=120`, `stale-while-revalidate=300`). Preview deploys reuse the same exporter with branch-specific KV when needed.
 
 ## UI + UX notes
 
-- Default filter: status = online (3). Additional toggles for anchored (2), unanchored (1), destroyed (4).
-- Multi-select chips for structure type and tribe. Consider a search box for tribes when list grows.
-- Visualization options to prototype:
-  1. **Density bar** above each star (height scaled by `log(count+1)`, color keyed by type).
-  2. **Numeric badge** with the total count, using colored ring to indicate dominant type.
-- Include a mini legend showing totals per selected filter and the snapshot timestamp.
+- Default filter: status = online (3). Additional toggles for anchored (2), unanchored (1), destroyed (4) ship with badges showing counts.
+- Multi-select chips for structure type and tribe (ships today with tribe search-as-you-type once list exceeds 25 entries).
+- Visualization: current production release uses the **numeric badge** variant with colored rings to reflect the dominant structure type; density bar prototype remains an optional enhancement.
+- Legend and snapshot timestamp render in the overlay footer; timestamp is pulled from `meta.generatedAt`.
 
-## Next steps
+## Rollout timeline & follow-ups
 
-1. ✅ Implement Node script under `tools/snapshot-exporter/` to materialize `structure_snapshot_v1` (supports `--dry-run`, `--full`, `--since-block` flags).
-2. ✅ Extend Cloudflare worker `_worker.js` to serve the snapshot via `/api/structure-snapshot`.
-3. Build `StructureOverlayPanel` in the frontend to load the snapshot, apply filters, and update the map layer.
-4. Add instrumentation events (`structures_overlay_open`, `structures_filter_apply`, etc.) in `src/utils/usage.ts` once UI is in place.
-5. After feature ships, update `docs/decision-log.md` with the rollout summary.
+- ✅ Implement Node script under `tools/snapshot-exporter/` to materialize `structure_snapshot_v1` (supports `--dry-run`, `--full`, `--since-block` flags).
+- ✅ Extend Cloudflare worker `_worker.js` to serve the snapshot via `/api/structure-snapshot`.
+- ✅ Ship `StructureOverlayPanel` in the frontend to load the snapshot, apply filters, and update the map layer.
+- 🔄 Instrumentation events (`structures_overlay_open`, `structures_filter_apply`, etc.) land in `src/utils/usage.ts`; verify coverage stays aligned with UI tweaks.
+- 🔄 Keep `docs/decision-log.md` updated with notable exporter or schema changes.

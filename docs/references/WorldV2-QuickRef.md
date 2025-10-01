@@ -7,10 +7,10 @@ Sources
 - World Contracts Recipe Book: https://metalyth.org/posts/World-Contracts-Recipe-Book
 - Terminology: https://metalyth.org/posts/Terminology
 
-EF-Map context (as of 2025-09-20)
+EF-Map context (as of 2025-10-03)
 - Hosting/runtime: Cloudflare Pages + Worker; KV for shares/stats/snapshots.
 - Chain: Pyrope. World address and deploy block recorded in decision log (see “Current Environment Quick Reference”).
-- Ingestion: Primordium pg-indexer → Postgres (local) → snapshots to KV for site overlays; Grafana is the canonical dashboard.
+- Ingestion: Primordium pg-indexer → Postgres (local) → snapshots to KV for site overlays; Grafana is the canonical dashboard. Legacy D1 ingestion is fully retired in favor of this snapshot-first pipeline.
 
 Key terms (very short)
 - EVM: Deterministic execution of Solidity bytecode; gas metering.
@@ -21,21 +21,16 @@ Key terms (very short)
 - Identities: account (EOA) and smartObjectId (on‑chain ID for assemblies/characters/items).
 
 Practical lookups (read-only)
-Characters
-- Address → characterId: table `evefrontier__CharactersByAcc` (indexer/explorer)
-- characterId → name/metadata: table `evefrontier__EntityRecordMeta`
-- characterId → tribeId: table `evefrontier__Characters`
 
-Ownership
-- smartObjectId → owner account: table `evefrontier__OwnershipByObjec`
-
-Metadata
-- smartObjectId → assemblyType: table `evefrontier__SmartAssembly` (types include NWN, manufacturing, smart_hangar, SSU, …)
-- smartObjectId → 3D location: table `evefrontier__Location` (solarSystemId, x, y, z)
-
-Items
-- typeId → item smartObjectId: ObjectIdLib.calculateObjectId(tenantId, typeId)
-  - Tenant ID constant example (bytes32): `0xaef2…1fee5` (see Recipe Book). Validate against current chain.
+| Scenario | Source table / utility | Where to apply this knowledge |
+| --- | --- | --- |
+| Character address → `characterId` | `evefrontier__CharactersByAcc` | Resolve wallet logins and overlay presence checks inside `worker.js` auth handlers and `/api/player-profile`. |
+| `characterId` → name / portrait metadata | `evefrontier__EntityRecordMeta` | Populate identity badges in `eve-frontier-map/src/components/PlayerIdentityBadge.tsx` and enrich overlay payloads before sharing. |
+| `characterId` → `tribeId` | `evefrontier__Characters` | Maintain authorized Smart Gate ACLs and tribe filters in snapshot exporter + Pages Worker (`authorized-gates`, tribe overlays). |
+| `smartObjectId` → owner account | `evefrontier__OwnershipByObjec` | Attach owning corp/player to Smart Gate and structure snapshots (`tools/snapshot-exporter/*`). |
+| `smartObjectId` → assembly type | `evefrontier__SmartAssembly` | Categorize structures when building overlays and Stats breakdowns; ties into `StructureSnapshot` panels. |
+| `smartObjectId` → solar system + XYZ | `evefrontier__Location` | Translate assemblies to map coordinates when generating route overlays or visualizing halo positions. |
+| `typeId` → deterministic `smartObjectId` | `ObjectIdLib.calculateObjectId(tenantId, typeId)` | Cross-check exporter outputs when reconstructing Smart Gate IDs or verifying share links; reusable in maintenance scripts under `tools/`. |
 
 TableId utilities (when you need to derive or verify table IDs)
 - Solidity: ResourceIdLib.encode({ typeId: RESOURCE_TABLE | RESOURCE_OFFCHAIN_TABLE, name })

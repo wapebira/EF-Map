@@ -2,6 +2,24 @@
 
 Purpose: Turn Smart Gates into a fully integrated feature across UI, routing, and metrics, with safe, privacy-preserving gating and preview-first deployments.
 
+## Status snapshot (2025-10-03)
+
+| Phase | State | Notes |
+|-------|-------|-------|
+| Phase 0 – Baseline polish | ✅ Production (2025-09-27) | Overlay toggles + color fixes landed in `eve-frontier-map` main.
+| Phase 1 – Snapshot schema | ✅ Production (2025-09-29) | `tools/snapshot-exporter/exporter.js` publishes `smart_gate_links_v1` + `gate_access_snapshot_v1` to KV.
+| Phase 2 – SIWE auth | ✅ Preview + Production (2025-09-30) | `/api/auth/*` endpoints in `_worker.js`; MetaMask connect staged behind opt-in UI.
+| Phase 3 – Authorized overlay | ✅ Production (2025-10-01) | `/api/authorized-gates` served from KV+session; Smart Gates panel exposes “Traversable only”.
+| Phase 4 – Routing integration | ✅ Production (2025-10-03) | Routing toggle “Use Smart Gates” wired to `routing_worker.ts` gated edges.
+| Phase 5 – Visual integration | ⏹️ Not required | Existing route styling sufficient; no additional work scheduled.
+| Phase 6 – Automation & ops | ✅ Production cron | Snapshot exporter cron + `/api/gate-access` diagnostics in place.
+
+Key assets:
+- Cloudflare Worker: `_worker.js` (auth + gates endpoints)
+- UI: `eve-frontier-map/src/components/*SmartGate*` (panel, overlay wiring)
+- Exporter: `tools/snapshot-exporter/exporter.js` (writes `smart_gate_links_v1`, `gate_access_snapshot_v1`)
+- Metrics: `eve-frontier-map/src/utils/usage.ts` (`smart_gates_*` events) & Worker EVENT_MAP
+
 ## Summary
 - End goal: Everyone can view ALL Smart Gates (intelligence view). Signed-in users (SIWE) can optionally filter to ONLY gates they can traverse. Routing can optionally use those gates. Visuals remain clear across themes; metrics captured later.
 - Change agreed: Do authentication first, then routing. We will land Sign-In with Ethereum (MetaMask/EVE Vault) and an authorized-gates endpoint on a Pages preview before any routing integration.
@@ -23,12 +41,14 @@ Out-of-scope (phase-1):
 ## Phases (auth-first)
 
 ### Phase 0 – Baseline polish (UI only)
+**Status:** ✅ Production (2025-09-27)
 - Overlay panel: add toggles for Show/Hide and Color mode (by owner/tribe/static). No user controls for opacity or thickness. No direction arrows in UI.
 - Viewing modes: add selector – "All gates" (default, available to everyone) and "Traversable only" (requires auth; disabled until Phase 3). The UI text explains the difference.
 - Fix current color issues and theme consistency (dark/orange). Ensure route line legibility when drawn over Smart Gate lines (z-order/blending). Acceptance: visually correct in both themes; no z-fighting or aliasing artifacts; route lines appear unchanged.
 - Metrics: deferred; keep existing generic panel open metrics only (no new event types in this phase).
 
 ### Phase 1 – Snapshot schema and delivery
+**Status:** ✅ Production (2025-09-29)
 - Ensure smart_gate_links_v2 contains directed edges + flags and applied system:
   - { gate_id, fromSystemId, toSystemId, linked:boolean, online:boolean, traversalCost:number, appliedSystemId:string, isPublic:boolean, owner?:string, tribeId?:string }
   - isPublic is derived as appliedSystemId == 0x0000000000000000000000000000000000000000 (zero address implies unrestricted access)
@@ -40,6 +60,7 @@ Out-of-scope (phase-1):
 - Acceptance: endpoints 200 with caching headers; payload sizes reasonable; UI can load both.
 
 ### Phase 2 – SIWE Auth (server + client) – BEFORE routing
+**Status:** ✅ Production (2025-09-30)
 - Protocol: Sign-In with Ethereum (SIWE). User connects a wallet (MetaMask primary; EVE Vault as optional) and signs a message. Server verifies and issues an HttpOnly session cookie.
 - Server endpoints (Pages Worker):
   - GET `/api/auth/nonce` → { nonce, issuedAt, expiresInSec, sig } where `sig = HMAC(nonce|issuedAt|expiry)` using AUTH_HMAC_SECRET (stateless replay guard).
@@ -55,6 +76,7 @@ Out-of-scope (phase-1):
 - Acceptance (preview): Endpoints work; session persists; UI shows “Signed in as 0x…”. No console errors.
 
 ### Phase 3 – Authorized gates API + overlay filtering
+**Status:** ✅ Production (2025-10-01)
 - Server: GET `/api/authorized-gates` (requires `ef_ses`) returns { updatedAt, snapshotEtag, edges:[{ from, to, gateId }] }.
   - Implementation v1: public-only fallback (uses `isPublic`); v2: per-user derivation via RPC against chain (PYROPE_RPC), optionally cached in KV under `auth_edges_v1/{address}/{snapshotEtag}`.
   - Caching: ETag combining {address, snapshotEtag}; Cache-Control short TTL; headers `X-Auth-Addr`, `X-Auth-Edges` for diagnostics.
@@ -68,6 +90,7 @@ Out-of-scope (phase-1):
 - Acceptance: Gate counts change as expected when switching modes; no console errors; perf remains smooth.
 
 ### Phase 4 – Routing integration (after auth)
+**Status:** ✅ Production (2025-10-03)
 - Add “Use Smart Gates” option in Routing panel (checkbox + tooltip). Default off.
 - Modify `routing_worker.ts` to include directed smart-gate edges when enabled; respect auth-filtered edges.
 - Cost model: allow traversalCost (0 for free); no additional cooldown/cost semantics. Ensure caches invalidate when gate toggle changes. Directionality is enforced strictly in neighbor generation.
@@ -77,14 +100,14 @@ Out-of-scope (phase-1):
 - Acceptance: Same paths when off; valid paths with gates when on; time to first route unchanged within +/- 10% on medium routes.
 
 ### Phase 5 – Visual integration for routes
-- Keep existing route styling unchanged. Ensure route lines render identically whether over stargate (light gray) or smart gate (colored) lines by adjusting z-order/blending if needed.
-- Acceptance: Route visuals match current appearance in both themes (baseline screenshots). No special segment styling for smart gates in this phase.
+**Status:** ⏹️ Not required
+- Baseline release already met acceptance; no additional styling work scheduled beyond standard regression checks.
 
 ### Phase 6 – Automation & ops
-- Exporter cron (local or CI) to publish snapshots to EF_SNAPSHOTS.
-- Pages Worker endpoint `/api/gate-access` added with ETag + caching.
-- Preview-only deploys to validate payload & UI before production.
-- Acceptance: Manual “seed & verify” checklist passes; Pages endpoints show correct diagnostic headers.
+**Status:** ✅ Production cron (2025-10-02)
+- Exporter cron (local or CI) publishes snapshots to EF_SNAPSHOTS.
+- Pages Worker endpoint `/api/gate-access` exposes diagnostics; `/api/smart-gate-links` upgraded with caching headers.
+- Preview deploys validated payload + UI before promotion; production deployment recorded in decision log 2025-10-02.
 
 ## Data contracts (draft)
 - smart_gate_links_v2.json

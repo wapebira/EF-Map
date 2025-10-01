@@ -37,6 +37,16 @@ Reference index: see `docs/README.md` for links to broader specs (`PROJECT_REQUI
 - **Local Environment**: `docs/LOCAL_ENVIRONMENT.md` (gitignored) contains Postgres/Grafana credentials for local dev.
 - Overlay initiative roadmap is mirrored in `docs/initiatives/GAME_OVERLAY_PLAN.md` (and in the overlay repo under the same path). Update both copies when the plan changes.
 
+### Agent Runbook Index
+| Need | Start here | Notes |
+| --- | --- | --- |
+| Daily workflow refresher | `AGENTS.md` → “Workflow primer” | Combined contract alongside this file for expectations and guardrails. |
+| Build & quality gates | `docs/LLM_TROUBLESHOOTING_GUIDE.md` → “Verification Matrix” | Matrix outlines which commands to run per change type (UI, worker, exporter, docs). |
+| Cloudflare CLI ops | `docs/CLI_WORKFLOWS.md` → “Wrangler sandbox” | Copy-pastable sequences for listing deployments, inspecting KV, and issuing preview deploys from PowerShell. |
+| Data pipeline orientation | `docs/LLM_TROUBLESHOOTING_GUIDE.md` → “Snapshot lifecycle timeline” | Visualized Primordium → Postgres → exporter → KV → Worker flow with cache touchpoints. |
+| Cross-repo coordination | `docs/initiatives/GAME_OVERLAY_PLAN.md` → “Sync checklist” | Step-by-step list to update both repos and decision logs when roadmap changes. |
+| Decision logging | This file → “Decision Log Template” & `docs/decision-log.md` | Template + latest entries; mirror significant cross-repo entries. |
+
 Cloud Platform: Cloudflare (Pages + Worker + KV) is authoritative. Netlify is deprecated and retained only as historical reference in the repo until final purge. Do not add new Netlify code; any persistence change must target the existing Cloudflare Worker & KV abstraction. See `docs/archive/migration/MIGRATION_PLAN.md` for archival context only.
 
 ## Key Folders / Files

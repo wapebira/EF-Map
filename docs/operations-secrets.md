@@ -1,12 +1,12 @@
 # Secrets Operations Runbook
 
 Status: Active (Cloudflare Pages + Worker primary)
-Scope: Procedures for adding, rotating, verifying, and troubleshooting secrets used by the EF Map Cloudflare Worker (including D1 indexer admin token).
+Scope: Procedures for adding, rotating, verifying, and troubleshooting secrets used by the EF Map Cloudflare Worker. Today the only secret is the legacy D1 indexer admin token; newer Worker features use KV bindings and do not require additional secrets.
 
 ## 1. Secrets We Currently Use
 | Name | Purpose | Scope | Notes |
 |------|---------|-------|-------|
-| INDEXER_ADMIN_TOKEN | Auth header `X-Indexer-Admin` for protected indexer endpoints (`/api/indexer-migrate`, `/api/indexer-bootstrap`, future admin ops) | Pages Worker (preview & production) | Must be present before running migrations/bootstrap. |
+| INDEXER_ADMIN_TOKEN | Auth header `X-Indexer-Admin` for legacy D1 indexer endpoints (`/api/indexer-migrate`, `/api/indexer-bootstrap`, other `/api/indexer-*`) | Pages Worker (preview & production) | Required only when invoking the deprecated D1 admin routes. New Cloudflare Worker features rely on KV + Pages bindings instead of this token. |
 
 (If more secrets are added later, extend this table; keep one-line purposes.)
 

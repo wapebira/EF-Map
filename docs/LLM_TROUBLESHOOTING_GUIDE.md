@@ -12,16 +12,18 @@
 
 ## Table of Contents
 1. [Quick Start Checklist](#quick-start-checklist)
-2. [System Architecture Overview](#system-architecture-overview)
-3. [Component Inventory](#component-inventory)
-4. [Data Flow Diagrams](#data-flow-diagrams)
-5. [Local Development Environment](#local-development-environment)
-6. [VS Code Extensions (Use Proactively)](#vs-code-extensions-use-proactively)
-7. [Common Troubleshooting Paths](#common-troubleshooting-paths)
-8. [Key File Locations](#key-file-locations)
-9. [Postgres Database Reference](#postgres-database-reference)
-10. [Cloudflare Platform Details](#cloudflare-platform-details)
-11. [Glossary](#glossary)
+2. [Verification Matrix](#verification-matrix)
+3. [Snapshot Lifecycle Timeline](#snapshot-lifecycle-timeline)
+4. [System Architecture Overview](#system-architecture-overview)
+5. [Component Inventory](#component-inventory)
+6. [Data Flow Diagrams](#data-flow-diagrams)
+7. [Local Development Environment](#local-development-environment)
+8. [VS Code Extensions (Use Proactively)](#vs-code-extensions-use-proactively)
+9. [Common Troubleshooting Paths](#common-troubleshooting-paths)
+10. [Key File Locations](#key-file-locations)
+11. [Postgres Database Reference](#postgres-database-reference)
+12. [Cloudflare Platform Details](#cloudflare-platform-details)
+13. [Glossary](#glossary)
 
 ---
 
@@ -47,8 +49,53 @@ When you begin a troubleshooting or development session, complete these steps **
    - API/sharing → `worker.js` (Cloudflare Worker)
    - Indexer/chain data → Docker containers + Postgres
    - Metrics/observability → Grafana dashboards
+   - Historical or deprecated code lives under `legacy/` — treat it as read-only reference unless explicitly researching history.
 
 5. **Use semantic_search** if you need to locate code related to a feature (e.g., "Smart Gate routing mode selection")
+
+---
+
+## Verification Matrix
+
+| Change type | Minimal gates | Commands (PowerShell shell) | Notes |
+| --- | --- | --- | --- |
+| **Docs / markdown only** | Review formatting | *(none)* | Still run spell/grammar check manually if copy-heavy. |
+| **Frontend UI / TypeScript** | `npm run build` (includes typecheck) | `cd eve-frontier-map; npm run build` | Build step runs `tsc` and Vite bundle; smoke in preview if behavior changes. |
+| **Cloudflare Worker logic** | `npm run build` + targeted API smoke | `cd eve-frontier-map; npm run build` | After build, deploy preview via [`wrangler` workflows](./CLI_WORKFLOWS.md) and hit affected `/api/*` endpoints. |
+| **Worker + Frontend combined** | `npm run build`; preview deploy; browser smoke | `cd eve-frontier-map; npm run build` then follow Pages preview flow | Confirm no console errors, key UI interaction works. |
+| **Node exporters / cron scripts** | Targeted script run (with `DRY_RUN=1` when offered) | Example: `DRY_RUN=1 node tools/snapshot-exporter/structure_snapshot_exporter.js --dry-run --out tmp.json` | Remove temp outputs after validation; document impact in decision log. |
+| **Python data pipeline** | Script execution + DB sanity check | `python create_map_data.py` (etc.) | Rebuild dependent assets and note new filenames if schema bumps. |
+| **Docs + gating guidance updates** | Lint not required, but cross-link | *(none)* | Ensure new sections are mirrored in overlay repo when applicable. |
+
+> Use this matrix as the default expectation; escalate to more exhaustive testing if touching high-risk surfaces (see `AGENTS.md`).
+
+---
+
+## Snapshot Lifecycle Timeline
+
+```
+Primordium pg-indexer (Docker)          ──┐  MUD events decoded into Postgres tables
+                │
+World API Cron (DLT)                     ─┼─► Supplements off-chain data (killmails, tribes)
+                │
+Postgres (schema: world contract, DLT)   ─┘  Single source for exporter reads
+   │
+   ▼  (poll interval ~5–10 min)
+Snapshot Exporter (Node, Docker)         ──► Generates smart_gate_links_v1, structure_snapshot_v1
+   │                                     (supports DRY_RUN and remote publish)
+   ▼
+Cloudflare KV (EF_SNAPSHOTS namespace)   ──► Stores keyed JSON blobs with `updatedAt`
+   │
+   ▼  (edge cache ~60s, bypass via `?force=1`)
+Cloudflare Worker (`/api/smart-gate-links`, `/api/structure-snapshot`, etc.)
+   │
+   ▼
+EF-Map Frontend (React)                  ──► Fetches snapshots on load; caches in memory for panels/overlays
+```
+
+- **Cache touchpoints**: Snapshot exporter publishes to KV → Worker serves with `Cache-Control: public, max-age=60, s-maxage=120`. Use `?force=1` to bypass during investigations.
+- **Freshness monitoring**: `wrangler kv key get` (see [`CLI_WORKFLOWS.md`](./CLI_WORKFLOWS.md)) or `/api/debug-snapshots` preview endpoint for human-readable timestamps.
+- **Troubleshooting flow**: If UI shows stale data, confirm exporter logs, KV timestamp, and Worker response in that order.
 
 ---
 
@@ -303,6 +350,8 @@ docker logs snapshot-exporter-1 --tail 50
 
 **Provisioning**: `tools/grafana/provisioning/`
 
+> Note: The top-level `grafana/` directory tracks exported dashboards; `tools/grafana/` contains provisioning files and helper scripts. Update both when dashboards change.
+
 **Start** (if not auto-started):
 ```powershell
 # (Currently no start script; Grafana typically runs as Docker service or desktop app)
@@ -446,7 +495,7 @@ Routes include SG hops (rendered with chevrons)
 **⚠️ SECURITY NOTE**: Connection credentials are stored in `docs/LOCAL_ENVIRONMENT.md` (gitignored). This file contains only safe-to-commit reference information.
 
 **Quick Reference** (see `docs/LOCAL_ENVIRONMENT.md` for full details):
-- **Host**: `localhost` (from host) or `postgres` (from Docker network)
+- **Host**: `localhost` (from host) or the Compose-assigned service name (for example `pg-indexer-reader_postgres-1` from within the Docker network)
 - **Port**: `5432`
 - **Database**: `postgres`
 - **User**: See LOCAL_ENVIRONMENT.md
@@ -474,32 +523,34 @@ SELECT * FROM world_api_dlt.get_v_2_tribes LIMIT 10;
 
 ### Docker Containers Expected
 
-When fully operational, you should see:
+When fully operational, you should see container names following the `<project>_<service>_1` Compose pattern, for example:
 
 ```
 CONTAINER ID   IMAGE                        STATUS    PORTS                    NAMES
-<id>           postgres:16-alpine           Up        0.0.0.0:5432->5432/tcp   postgres
-<id>           store-indexer:latest         Up                                  postgres-index-write
-<id>           store-query:latest           Up        3001/tcp                 postgres-query-read
-<id>           ef-worldapi-cron:local       Up                                  worldapi-cron-killmails
-<id>           ef-worldapi-cron:local       Up                                  worldapi-cron-smartcharacters
-<id>           ef-worldapi-cron:local       Up                                  worldapi-cron-tribes
-<id>           ef-snapshot-exporter:local   Up                                  snapshot-exporter
+<id>           postgres:16-alpine           Up        0.0.0.0:5432->5432/tcp   pg-indexer-reader_postgres-1
+<id>           store-indexer:latest         Up                                  pg-indexer-reader_postgres-index-write-1
+<id>           store-query:latest           Up        3001/tcp                 pg-indexer-reader_postgres-query-read-1
+<id>           ef-worldapi-cron:local       Up                                  worldapi-cron_worldapi-cron-killmails-1
+<id>           ef-worldapi-cron:local       Up                                  worldapi-cron_worldapi-cron-smartcharacters-1
+<id>           ef-worldapi-cron:local       Up                                  worldapi-cron_worldapi-cron-tribes-1
+<id>           ef-snapshot-exporter:local   Up                                  worldapi-cron_snapshot-exporter-1
 ...
 ```
 
 **Start All**:
 ```powershell
-tools/win/start_docker_desktop.ps1
-tools/win/wait_for_docker_ready.ps1
-tools/win/start_pg_indexer_stack.ps1
-cd tools/worldapi-cron; docker compose up -d
+tools/win/start_local_stack.ps1  # boots Docker Desktop, Primordium stack, cron/exporters
+# or invoke granular scripts:
+# tools/win/start_docker_desktop.ps1
+# tools/win/wait_for_docker_ready.ps1
+# tools/win/start_pg_indexer_stack.ps1
+# cd tools/worldapi-cron; docker compose up -d
 ```
 
 **Stop All**:
 ```powershell
 cd tools/worldapi-cron; docker compose down
-# (Primordium stack stop command TBD - typically docker compose down in its directory)
+# Stop Primordium stack via Docker Desktop UI or docker compose down in its project directory
 ```
 
 ---
@@ -671,7 +722,7 @@ performance.getEntriesByType('resource').filter(r => r.name.includes('map_data')
 **Checklist**:
 1. Docker containers running:
    ```powershell
-   docker ps | grep postgres
+   docker ps | Select-String pg-indexer-reader_postgres
    ```
 2. Port 5432 open:
    ```powershell
@@ -680,16 +731,16 @@ performance.getEntriesByType('resource').filter(r => r.name.includes('map_data')
 3. Credentials correct (see [Postgres Reference](#postgres-database-reference))
 
 **Diagnostic**:
-- Docker logs:
+- Docker logs (replace container name if different):
   ```powershell
-  docker logs postgres --tail 50
+   docker logs pg-indexer-reader_postgres-1 --tail 50
   ```
 - VS Code PostgreSQL extension: Try to connect (will show error message)
 
 **Fix**:
-- Restart Postgres container:
+- Restart Postgres container (update name as needed):
   ```powershell
-  docker restart postgres
+   docker restart pg-indexer-reader_postgres-1
   ```
 - Check Docker network:
   ```powershell
@@ -801,6 +852,7 @@ performance.getEntriesByType('resource').filter(r => r.name.includes('map_data')
 - `docs/DEPRECATIONS.md` - Deprecated subsystems
 - `docs/primodium-indexer.md` - Primordium setup guide
 - `docs/operations-secrets.md` - Secrets management runbook
+- `legacy/` - Archived/deprecated code; treat as read-only historical reference
 
 ### Worker Files
 - `worker.js` - Primary Cloudflare Worker implementation
@@ -896,6 +948,8 @@ ORDER BY member_count DESC;
 
 ## Cloudflare Platform Details
 
+> ⚠️ **CLI mandate**: Agents must execute Wrangler (and other CLI) commands themselves. Launch the command, let it prompt the operator for secret input if needed, and never delegate runnable commands back to the human operator.
+
 ### Pages Project
 - **Name**: `ef-map`
 - **Production Domain**: `https://ef-map.pages.dev` (or custom domain if configured)
@@ -948,6 +1002,8 @@ wrangler pages deploy dist --project-name ef-map --branch feature-xyz
 # 4. Merge to main after approval (triggers production deploy if CI configured)
 ```
 
+> ✅ Always verify changes in a Pages preview before touching production (main). Production deploys require explicit operator approval.
+
 ---
 
 ## Glossary
@@ -984,7 +1040,7 @@ Build:       npm run build  (or VS Code task "Build frontend")
 Deploy:      wrangler pages deploy dist --project-name ef-map --branch <name>
 
 Docker Check:
-  docker ps | grep postgres  (expect 3+ containers)
+   docker ps | Select-String pg-indexer-reader_postgres  (expect Primordium + cron containers)
 
 Worker Endpoints:
   /api/stats?history=7

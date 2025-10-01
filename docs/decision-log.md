@@ -1,8 +1,8 @@
-<!-- Curated on 2025-09-30. This log keeps entries relevant to: Primordium indexer (World API via Docker), Postgres, Grafana, Docker, and the Cloudflare-hosted website (KV stats/snapshots/overlays). Older/legacy D1 indexer & cron/decoder content moved to archive. -->
+<!-- Curated on 2025-10-01. This log keeps entries relevant to: Primordium indexer (World API via Docker), Postgres, Grafana, Docker, and the Cloudflare-hosted website (KV stats/snapshots/overlays). Older/legacy D1 indexer & cron/decoder content moved to archive. -->
 
 Older entries and legacy indexer details have been archived: [archive\decision-log\decision-log-legacy-2025-09-28.md](./archive/decision-log/decision-log-legacy-2025-09-28.md)
 
-## Current Environment Quick Reference (as of 2025-09-30)
+## Current Environment Quick Reference (as of 2025-10-01)
 - Hosting/runtime
   - Cloudflare Pages + Worker (Pages serves assets; `_worker.js` handles `/api/*`). Netlify code removed post-cutover.
   - Preview detection: hosts ending with `.pages.dev`; admin endpoints allow preview bypass with `?openPreview=1` when token is absent/mismatched.
@@ -70,6 +70,10 @@ Older entries and legacy indexer details have been archived: [archive\decision-l
 - Preview URLs
   - Pattern: `https://<branch-or-alias>.ef-map.pages.dev` (project `ef-map`).
 
+## 2025-10-01 – Agent documentation alignment
+- Goal: Mark completed backlog suggestions, clarify local stack container naming/startup scripts, and reinforce legacy/CLI guardrails in the troubleshooting guide.
+- Risk: low (documentation updates)
+- Gates: typecheck n/a | build n/a | smoke n/a
 ## 2025-09-28 – Chrome DevTools MCP server registration
 - Goal: Register Google's Chrome DevTools MCP server with VS Code Copilot so agents can grab traces, screenshots, console logs, or scripted smoke runs without leaving the editor.
 - Risk: low (tool registration + docs update).
