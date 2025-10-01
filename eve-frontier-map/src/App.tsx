@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react';
+import type { MouseEvent as ReactMouseEvent } from 'react';
 import { createRouteRibbon } from './modules/RouteRibbon';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
@@ -35,6 +36,7 @@ import './components/layout/panelLayout.css';
 // Bring neutral input/select styles used by Routing to Smart Gates panel
 import './components/P2PRouting/P2PRouting.css';
 import AutoCompleteInput from './components/AutoCompleteInput/AutoCompleteInput';
+import { createHelperBridge, type HelperBridgeState } from './utils/helperBridge';
 import HelpPanel from './components/HelpPanel/HelpPanel';
 import { loadPrefs, setAccent, setOpenPanels as persistOpenPanels, setRoutingPrefs, fullReset, getPrefs, softReset, setUiScale as persistUiScale, setShowStations as persistShowStations } from './utils/prefs';
 import { track } from './utils/usage';
@@ -83,6 +85,89 @@ const ReferralBadge: React.FC = () => {
       <button className={`ef-referral-copy-btn ${copied ? 'copied' : ''}`} onClick={handleCopy} aria-label="Copy referral code">
         {copied ? 'Copied' : 'Copy'}
       </button>
+    </div>
+  );
+};
+
+interface HelperStatusBadgeProps {
+  state: HelperBridgeState | null;
+  onRetry?: () => void;
+  placement?: 'cluster' | 'floating';
+}
+
+const HelperStatusBadge = ({ state, onRetry, placement = 'cluster' }: HelperStatusBadgeProps) => {
+  const phase = state?.phase ?? 'idle';
+
+  let statusLabel = 'Not detected';
+  let color = '#e74c3c';
+  let detail: string | undefined;
+
+  const markerName = state?.latestOverlayState?.player_marker?.display_name || state?.latestOverlayState?.route?.[0]?.display_name || '';
+
+  switch (phase) {
+    case 'connected':
+      statusLabel = 'Connected';
+      color = '#27c93f';
+      detail = markerName ? `Location: ${markerName}` : undefined;
+      break;
+    case 'connecting':
+      statusLabel = 'Connecting';
+      color = '#f1c40f';
+      detail = `Waiting on ${state?.host ?? 'helper'}:${state?.wsPort ?? ''}`;
+      break;
+    case 'error':
+      statusLabel = 'Issue';
+      color = '#e74c3c';
+      detail = state?.lastError;
+      break;
+    case 'closed':
+      statusLabel = 'Offline';
+      color = '#5c5c5c';
+      detail = undefined;
+      break;
+    case 'idle':
+    case 'not_found':
+    default:
+      statusLabel = 'Not detected';
+      color = '#e74c3c';
+      detail = state?.lastError && state.lastError !== 'Helper not detected' ? state.lastError : undefined;
+      break;
+  }
+
+  const ariaLabel = detail ? `Helper ${statusLabel}. ${detail}` : `Helper ${statusLabel}.`;
+  const title = detail ?? `Helper ${statusLabel}`;
+  const canRetry = Boolean(onRetry) && (phase === 'not_found' || phase === 'idle' || phase === 'closed');
+  const rootClass = placement === 'floating' ? 'ef-helper-badge ef-helper-badge--floating' : 'ef-helper-badge';
+  const rootStyle = placement === 'floating' ? ({ position:'fixed', bottom:12, right:12, zIndex:3400, fontFamily:'system-ui, sans-serif', fontSize:12 } as const) : ({ fontFamily:'system-ui, sans-serif', fontSize:12 } as const);
+
+  const handleRetry = (evt: ReactMouseEvent<HTMLButtonElement>) => {
+    evt.preventDefault();
+    evt.stopPropagation();
+    onRetry?.();
+  };
+
+  return (
+    <div className={rootClass} style={rootStyle}>
+      <div
+        aria-label={ariaLabel}
+        title={title}
+        style={{ display:'flex', alignItems:'center', gap:8, background:'rgba(0,0,0,0.55)', color:'#fff', border:'1px solid rgba(255,255,255,0.14)', padding:'6px 10px', borderRadius:18, cursor:'default', backdropFilter:'blur(6px) saturate(150%)', boxShadow:'0 2px 6px rgba(0,0,0,0.45)' }}
+      >
+        <span style={{ width:10, height:10, borderRadius:10, background:color, boxShadow:`0 0 4px ${color}` }} aria-hidden="true" />
+        <span style={{ fontWeight:600 }}>Helper</span>
+        <span style={{ opacity:0.75 }}>{statusLabel}</span>
+        {markerName && phase === 'connected' && <span style={{ opacity:0.65 }}>{markerName}</span>}
+        {canRetry && (
+          <button
+            type="button"
+            onClick={handleRetry}
+            className="ef-helper-badge__retry"
+            style={{ marginLeft:4, padding:'2px 8px', fontSize:11, lineHeight:1.1, borderRadius:12, border:'1px solid rgba(255,255,255,0.18)', background:'rgba(255,255,255,0.12)', color:'#fff', cursor:'pointer' }}
+          >
+            Retry
+          </button>
+        )}
+      </div>
     </div>
   );
 };
@@ -284,6 +369,35 @@ function App() {
   const [layoutResetToken, setLayoutResetToken] = useState(0); // layout-only reset for panel positions
   const [showLayoutResetPrompt, setShowLayoutResetPrompt] = useState(false);
   const [showSmartGateAccessPrompt, setShowSmartGateAccessPrompt] = useState(false);
+  const helperBridgeRef = useRef<ReturnType<typeof createHelperBridge> | null>(null);
+  const [helperBridgeState, setHelperBridgeState] = useState<HelperBridgeState | null>(null);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const bridge = createHelperBridge({ autoStart: true });
+    helperBridgeRef.current = bridge;
+    const unsubscribe = bridge.subscribe((nextState) => {
+      setHelperBridgeState(nextState);
+      if (typeof window !== 'undefined') {
+        try { (window as any).__efHelperLatest = nextState; } catch { /* ignore */ }
+      }
+    });
+    return () => {
+      unsubscribe();
+      bridge.disconnect();
+      helperBridgeRef.current = null;
+    };
+  }, []);
+  const handleHelperRetry = useCallback(() => {
+    const bridge = helperBridgeRef.current;
+    if (!bridge) {
+      return;
+    }
+    const phase = bridge.state.phase;
+    if (phase === 'connecting' || phase === 'connected') {
+      return;
+    }
+    bridge.connect();
+  }, []);
   // UI visibility + scaling
   const [hideUI, setHideUI] = useState(false);
   const ZOOM_MIN_DISTANCE = 10;
@@ -7355,9 +7469,14 @@ function App() {
   {/* Small persistent logo and indexer status */}
   {/* Persistent logo and status badge suppressed in embed mode */}
   {!embedMode && (
-    <img src={logo} alt="EF Map" className="ef-small-logo" />
+    <div className="ef-status-cluster">
+      <div className="ef-status-pills">
+        <HelperStatusBadge state={helperBridgeState} onRetry={handleHelperRetry} />
+        <IndexerStatusBadge placement="cluster" />
+      </div>
+      <img src={logo} alt="EF Map" className="ef-small-logo" />
+    </div>
   )}
-  {!embedMode && <IndexerStatusBadge />}
     </>
   );
 }

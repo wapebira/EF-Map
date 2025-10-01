@@ -2,8 +2,13 @@ import React, { useEffect, useRef, useState } from 'react';
 
 type BadgeState = 'loading' | 'ok' | 'stalled' | 'error' | 'idle';
 
-interface IndexerStatusBadgeProps { inline?: boolean }
-export const IndexerStatusBadge: React.FC<IndexerStatusBadgeProps> = ({ inline }) => {
+interface IndexerStatusBadgeProps {
+  placement?: 'floating' | 'inline' | 'cluster';
+  inline?: boolean; // legacy prop retained for backwards compatibility
+}
+
+export const IndexerStatusBadge: React.FC<IndexerStatusBadgeProps> = ({ placement, inline }) => {
+  const resolvedPlacement: 'floating' | 'inline' | 'cluster' = inline ? 'inline' : placement ?? 'floating';
   const [snapshots, setSnapshots] = useState<{ links?: { updatedAt?: string|null; count?: number|null }|null, acl?: { updatedAt?: string|null; count?: number|null }|null } | null>(null);
   const timerRef = useRef<any>(null);
   const fetchSnapshots = async () => {
@@ -41,9 +46,17 @@ export const IndexerStatusBadge: React.FC<IndexerStatusBadgeProps> = ({ inline }
   const gatesTitle = gatesState==='ok'? 'Gates fresh (≤10m)' : gatesState==='idle'? 'Gates a bit old (≤25m)' : gatesState==='stalled'? 'Gates stale (>25m)' : 'Gates: loading';
   // (Popover removed) — no per-field details needed here.
   // Read-only: no trigger action exposed here
-  const wrapperStyle: React.CSSProperties = inline ? ({ position:'relative', marginTop:40, fontFamily:'system-ui, sans-serif', fontSize:12 }) : ({ position:'fixed', bottom:12, right:122, zIndex:3400, fontFamily:'system-ui, sans-serif', fontSize:12 });
+  let wrapperStyle: React.CSSProperties;
+  if (resolvedPlacement === 'inline') {
+    wrapperStyle = { position:'relative', marginTop:40, fontFamily:'system-ui, sans-serif', fontSize:12 };
+  } else if (resolvedPlacement === 'cluster') {
+    wrapperStyle = { position:'relative', fontFamily:'system-ui, sans-serif', fontSize:12 };
+  } else {
+    wrapperStyle = { position:'fixed', bottom:12, right:122, zIndex:3400, fontFamily:'system-ui, sans-serif', fontSize:12 };
+  }
+  const className = resolvedPlacement === 'floating' ? 'ef-indexer-badge ef-indexer-badge--floating' : 'ef-indexer-badge';
   return (
-    <div style={wrapperStyle} className="ef-indexer-badge">
+    <div style={wrapperStyle} className={className}>
       <div aria-label={gatesTitle} style={{ display:'flex', alignItems:'center', gap:10, background:'rgba(0,0,0,0.55)', color:'#fff', border:'1px solid rgba(255,255,255,0.14)', padding:'6px 10px', borderRadius:18, cursor:'default', backdropFilter:'blur(6px) saturate(150%)', boxShadow:'0 2px 6px rgba(0,0,0,0.45)' }}>
         <span style={{ display:'inline-flex', alignItems:'center', gap:6 }} title={gatesTitle}>
           <span style={{ width:10, height:10, borderRadius:10, background:gatesColor, boxShadow:`0 0 4px ${gatesColor}` }} />

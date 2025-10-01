@@ -70,6 +70,18 @@ Older entries and legacy indexer details have been archived: [archive\decision-l
 - Preview URLs
   - Pattern: `https://<branch-or-alias>.ef-map.pages.dev` (project `ef-map`).
 
+## 2025-10-01 – Roadmap refresh: log telemetry focus & HTML embed stance
+- Goal: Mirror the overlay initiative roadmap updates by prioritizing the helper log watcher, introducing a combat telemetry milestone, and documenting a cautious stance on HTML embedding inside the …
+- Risk: low (documentation only).
+- Gates: build n/a | tests n/a | smoke n/a.
+## 2025-10-01 – Overlay schema v2 + event queue infrastructure
+- Goal: Finalize the shared overlay state v2 contract and introduce the helper ↔ overlay event queue backing forthcoming EF-Map browser integrations.
+- Risk: low (documentation alignment only in this repo).
+- Gates: build n/a | tests n/a | smoke n/a.
+## 2025-10-01 – Roadmap reprioritization: helper tray shell MVP
+- Goal: Reorder the overlay initiative roadmap to deliver a helper tray shell before log watcher and browser bridge work, giving operators a tangible control surface.
+- Risk: low (documentation only).
+- Gates: build n/a | tests n/a | smoke n/a.
 ## 2025-09-24 – Production deploy: overlay hover parity + help panel updates
 - Goal: Promote overlay folder infrastructure (filtered feed + folder-scoped map halo rendering), tribe hover highlight parity, and expanded Help Panel documentation (tribe shared folder semantics, d…
 - Risk: low (UI event handlers + documentation text). Worker bundle already validated in preview; no persistence format changes.

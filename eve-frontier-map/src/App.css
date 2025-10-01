@@ -120,9 +120,7 @@ button:focus-visible,
 
 /* Small persistent EF Map logo bottom-right */
 .ef-small-logo {
-  position: fixed;
-  right: 12px;
-  bottom: 12px;
+  display: block;
   width: 96px; /* doubled */
   height: 96px; /* doubled */
   opacity: 0.9;
@@ -138,6 +136,47 @@ button:focus-visible,
     0 0 10px rgba(255,255,255,0.08); /* faint ambient glow so edge isn't lost */
   cursor: default;
   transition: box-shadow .35s ease, border-color .35s ease, background .35s ease;
+  flex-shrink: 0;
+}
+
+.ef-status-cluster {
+  position: fixed;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  z-index: 3400;
+}
+
+.ef-status-pills {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  transform: scale(var(--ui-scale));
+  transform-origin: bottom right;
+}
+
+.ef-helper-badge {
+  display: flex;
+  align-items: stretch;
+}
+
+.ef-helper-badge--floating {
+  transform: scale(var(--ui-scale));
+  transform-origin: bottom right;
+}
+
+.ef-helper-badge__retry {
+  transition: background .2s ease, border-color .2s ease, transform .15s ease;
+}
+
+.ef-helper-badge__retry:hover {
+  background: rgba(255,255,255,0.18) !important;
+}
+
+.ef-helper-badge__retry:active {
+  transform: translateY(1px);
 }
 
 /* Slightly amplify accent + glow in cinematic mode */
@@ -172,7 +211,15 @@ button:focus-visible,
 }
 
 /* Indexer badge sits to the LEFT of the persistent logo with small gap; scale with UI */
-.ef-indexer-badge { transform: scale(var(--ui-scale)); transform-origin: bottom right; }
+.ef-indexer-badge {
+  display: flex;
+  align-items: stretch;
+}
+
+.ef-indexer-badge--floating {
+  transform: scale(var(--ui-scale));
+  transform-origin: bottom right;
+}
 .ef-indexer-badge button { border-color: rgba(255,255,255,0.14) !important; }
 
 /* Support button wrapper sits to the LEFT of the persistent logo (logo: 96px wide + 20px gap) */
