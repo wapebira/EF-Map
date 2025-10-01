@@ -1,7 +1,7 @@
 <div align="center">
     <h1>EVE Frontier Interactive Map</h1>
     <p><strong>Client‑side 3D starmap, routing & optimization tools, reachability analysis and usage stats for EVE Frontier.</strong></p>
-    <sub>React + TypeScript + Vite • Three.js custom shaders • Web Workers • Cloudflare Pages + Worker (KV + optional D1) • Zero PII instrumentation</sub>
+    <sub>React + TypeScript + Vite • Three.js custom shaders • Web Workers • Cloudflare Pages + Worker (KV) • Primordium pg-indexer (optional, local) • Zero PII instrumentation</sub>
 </div>
 
 ---
@@ -31,7 +31,7 @@ This repository contains two loosely coupled parts:
 
 Optional subsystem:
 
-* **Indexer (D1‑backed, optional)** – A lightweight ingestion + archival pipeline used for longitudinal usage snapshots and diagnostics. It keeps the primary D1 small via automated archival rollover and is surfaced in a small dashboard inside the app. If you don’t need it, you can ignore this entirely – the map works fully client‑side.
+* **Primordium Indexer (optional, local)** – Containerized Primordium pg-indexer → Postgres pipeline for longitudinal diagnostics, snapshot generation, and Grafana dashboards. See `docs/primordium-indexer.md`. Cloudflare D1 indexers are archived; the app runs fully client-side even without this pipeline.
 
 Raw extraction of game files is performed by a separate toolkit:  
 ➡ https://github.com/VULTUR-EveFrontier/eve-frontier-tools  
@@ -58,32 +58,35 @@ This repo focuses on *transforming* + *serving* that data and implementing inter
 | Workers | Heavy algorithms off main thread | Web Workers (`routing_worker.ts`, `scout_optimizer_worker.ts`, others) |
 | Data Access | Lazy open + query prebuilt SQLite in-browser | `sql.js` (WASM) wrapped by `lib/sql.ts` |
 | Serverless | Shares & usage metrics APIs | Cloudflare Pages Worker (`/api/*`) using KV (EF_SHARES / EF_STATS) |
-| Indexer (optional) | Longitudinal ingest + cleanup | Cloudflare D1 (primary + archival rollover) + scheduled Workers |
+| Indexer (optional) | Longitudinal ingest + diagnostics | Primordium pg-indexer → Postgres (local) • Grafana dashboards |
 | Instrumentation | Anonymous event batching | `src/utils/usage.ts` batching + server whitelist in `usage-event.js` |
 
-Persistence: All share + usage data lives in Cloudflare KV namespaces (EF_SHARES, EF_STATS). An optional Indexer uses Cloudflare D1 (primary + archival rollover). Schema draft is under `migrations/`.
+Persistence: All share + usage data lives in Cloudflare KV namespaces (EF_SHARES, EF_STATS). Optional longitudinal diagnostics rely on the Primordium pg-indexer feeding Postgres; Cloudflare D1 schemas remain only as historical drafts under `eve-frontier-map/migrations/`.
 
 ## 4. Directory Map
 ```
 root/
-    create_map_data.py        # Consolidate & transform raw exports -> SQLite/JSON inputs
-    filter_map_data.py        # Post-process filters (hiding regions, etc.)
-    verify_db.py              # Sanity checks for generated DB
-    docs/decision-log.md      # Running architectural / feature decisions
-    wrangler.jsonc            # Cloudflare Pages/Worker config (root)
-    archiver_worker.js        # (optional) scheduled archival worker
-    cron_worker.js            # (optional) scheduled maintenance worker
-    wrangler.*.jsonc          # (optional) worker configs (indexer/archiver)
-    eve-frontier-map/         # Frontend app (see below)
-        src/
-            App.tsx               # Core scene + global state + instrumentation bridges
-            components/           # Panels & UI modules (Routing, Scout, Reachability, Stats, etc.)
-            modules/RouteRibbon.ts# Custom ribbon geometry + shaders
-            utils/usage.ts        # Client event batching (sole origin of usage events)
-            workers/              # Optimization / routing workers
-        _worker.js             # Pages Worker for `/api/*` (KV + optional D1/indexer endpoints)
-        migrations/             # D1 schema drafts (future analytical/indexer work)
-        public/map_data.db      # Generated SQLite universe data (do not edit manually)
+    README.md
+    create_map_data.py        # Rebuild consolidated SQLite + JSON assets
+    filter_map_data.py        # Optional pruning / visibility filters
+    verify_db.py              # Optional validation pass for generated SQLite
+    docs/
+        decision-log.md       # Running architectural / feature decisions
+        CLI_WORKFLOWS.md      # Canonical Wrangler + PowerShell command recipes
+        LLM_TROUBLESHOOTING_GUIDE.md # End-to-end architecture & verification matrix
+        DEPRECATIONS.md       # Archived systems / guardrails
+        initiatives/          # Living roadmaps (Smart Gates, Overlay, Data Exposure, ...)
+    eve-frontier-map/
+        src/App.tsx           # Core scene + global state + instrumentation bridges
+        src/components/       # Panels & UI modules (Routing, Scout, Reachability, Stats, ...)
+        src/utils/usage.ts    # Client event batching (sole origin of usage events)
+        workers/              # Routing / optimization workers
+        public/map_data_v2.db # Generated SQLite universe data (current; older builds may reference map_data.db)
+        _worker.js            # Cloudflare Pages Worker for `/api/*`
+    tools/
+        snapshot-exporter/    # Smart Gate & structure snapshot publishing scripts
+        local-indexer/        # Legacy helpers (reference only)
+    migrations/               # Experimental schema drafts (historical D1 + future storage)
 ```
 
 ## 5. Quick Start (Frontend)
@@ -119,6 +122,7 @@ Station data: When `map_data_v2.db` contains `stations` table `{ system_id TEXT 
 * Large ship jumps are rendered as smoothly sampled quadratic curves (adaptive sampling) with dashed ship-only core.
 * Caches: Spatial grids & neighbor cache cleared when jump distance cell size changes (see `routing_worker.ts`).
 * Reachability Modes: unreachable dimming, in-range accenting, animated bubble. Precedence order ensures region highlighting & planet count modes supersede selection gradient & in-range coloring safely.
+* Smart Gates: directional public set, authorized-mode traversal, legend filtering, and live snapshot freshness surfaced in the status badge.
 
 ## 8. Usage Metrics & Privacy
 * All events emitted only via `usage.ts` (no ad-hoc tracking elsewhere) → prevents double counting.
@@ -128,11 +132,12 @@ Station data: When `map_data_v2.db` contains `stations` table `{ system_id TEXT 
 * Aggregates served via `stats` function; UI (`StatsPage.tsx`) renders charts + derived rates.
 
 ## 9. Development Workflow
-1. Implement feature in isolated module (shader / worker / panel).  
-2. Add instrumentation only if a new behavior needs measurement – extend `EVENT_MAP` accordingly.  
-3. Run `npm run build` before committing to catch type or bundling issues.  
-4. Update `docs/decision-log.md` for non-trivial architectural or UX decisions.  
-5. Keep public APIs (helpers, global setters like `__efSetCinematic`) stable unless log documents change & consumers updated.
+1. Skim `docs/LLM_TROUBLESHOOTING_GUIDE.md` for context (architecture, verification matrix) before major changes.  
+2. Implement feature in isolated module (shader / worker / panel).  
+3. Add instrumentation only if a new behavior needs measurement – extend `EVENT_MAP` accordingly.  
+4. Run `npm run build` before committing to catch type or bundling issues.  
+5. Append notable decisions to `docs/decision-log.md` and mirror cross-repo guardrails when necessary.  
+6. Keep public APIs (helpers, global setters like `__efSetCinematic`) stable unless the change is documented and consumers updated.
 
 ### Common Scripts
 | Command | Description |
@@ -141,21 +146,24 @@ Station data: When `map_data_v2.db` contains `stations` table `{ system_id TEXT 
 | `npm run build` | Type check + production build. |
 | `npm run preview` | (If added) Preview dist output locally. |
 
-## 10. Indexer (Primordium – canonical)
-The map works fully client‑side. For chain indexing we now standardize on the Primordium pg-indexer (chain → Postgres) surfaced in Grafana. Previous local/Cloudflare D1 indexer efforts are deprecated; see `docs/DEPRECATIONS.md`.
+## 10. Indexer (Primordium – optional)
+The map runs fully client-side. Teams that need longitudinal diagnostics can run the Primordium pg-indexer → Postgres pipeline locally (containerized) and surface results in Grafana.
+
+Key references:
+- `docs/primordium-indexer.md` – setup, container orchestration, environment expectations.
+- `docs/CLI_WORKFLOWS.md` – repeatable commands for exporter backfills, KV verification, and Grafana checks.
+- `docs/DEPRECATIONS.md` – Cloudflare D1 + legacy local indexers are archived; avoid reviving them.
 
 Notes:
-- Grafana is the canonical dashboard for chain status (head, lag, decoded tables, per-table counts).
-- Cloudflare Pages Worker remains primary for `/api/*` (shares + usage stats in KV). Any D1 indexer files in this repo are historical only.
-- Legacy local indexer scripts (under `tools/local-indexer/`) should not be used; they’re retained temporarily for reference.
-
-Operator docs: See `docs/decision-log.md` entries around 2025‑09‑14 and 2025‑09‑18 for the transition, plus `docs/DEPRECATIONS.md` for boundaries.
+- Grafana (http://localhost:3000) remains the canonical dashboard for chain status (head, lag, per-table counts).
+- Snapshot exporters under `tools/snapshot-exporter/` publish Smart Gate and structure data to Cloudflare KV; they expect Primordium tables.
+- Legacy helpers under `tools/local-indexer/` are kept only for reference and should not be executed.
 
 ## 11. Deployment Notes
 Cloud platform: Cloudflare Pages + Worker (primary). `/api/*` is served by the Pages Worker, backed by KV (shares, usage stats).  
-Legacy Netlify logic is no longer invoked; remaining files are historical only and have been moved to `legacy/netlify/` pending final deletion.
+Legacy Netlify logic is no longer invoked; remaining files are historical only.
 
-Preview & production deploys typically use Wrangler. Example (project already configured):
+Preview & production deploys rely on Wrangler (see `docs/CLI_WORKFLOWS.md` for full recipes). Example:
 
 ```bash
 # from eve-frontier-map/
@@ -166,7 +174,7 @@ wrangler pages deploy dist --branch <your-branch>
 
 Rollback Strategy: Revert recent Worker commits & redeploy (no Netlify fallback paths exist in client).  
 Encoding Hardening: Worker defensively strips a UTF‑8 BOM before JSON parsing of daily stats snapshots (prevents history gaps if manual KV writes introduce BOM).  
-Future: Optional Cloudflare D1 usage for richer longitudinal analytics / indexing (schema draft in `migrations/001_init.sql`).
+Future: Explore richer analytics via Primordium snapshots (Grafana dashboards) rather than Cloudflare D1; schema drafts for experimental storage live in `eve-frontier-map/migrations/`.
 
 Cache Busting: When DB schema changes, increment filename (e.g., `map_data_v2.db`) and document in decision log. Frontend lazily loads whichever name it expects; avoid breaking existing deployed bundles.
 
