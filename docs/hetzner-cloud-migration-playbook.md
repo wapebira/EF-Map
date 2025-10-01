@@ -114,6 +114,27 @@ _Optional Terraform module (`infra/hetzner/main.tf`) can describe the same resou
 3. Inform stakeholders; update documentation referencing new host.
 4. Monitor for 24h; confirm ingest lag in Grafana remains stable.
 
+### 6.6 Post-Migration Developer Workflow (Hybrid Model)
+- **Inner loop stays local**: Keep the existing Docker stack on Windows (or WSL) for feature development, schema experiments, and agent-assisted debugging. This preserves instant feedback and leverages VS Code extensions without additional networking hurdles.
+- **Remote VPS as staging authority**: Treat the Hetzner host as the long-running ingestion + analytics environment. Only promote changes that already passed locally by re-running the same automation scripts against the VPS.
+- **Access pattern**: Use scripted SSH tunnels so tooling can still connect to Postgres/Grafana securely. Example (`tools/vps/open-tunnel.ps1` placeholder):
+   ```powershell
+   $env:VPS_IP = '<recorded ip>'
+   ssh -N -L 5433:127.0.0.1:5432 -L 9300:127.0.0.1:3000 -L 9733:127.0.0.1:8733 ubuntu@$env:VPS_IP
+   ```
+   Point the VS Code Postgres extension at `localhost:5433`; Grafana is reachable at `http://localhost:9300` over the tunnel.
+- **Data synchronization**: Pull sanitized dumps from the VPS when you need fresh data locally (`pg_dump --schema-only` or filtered dumps). Avoid pushing local experiments back upstream unless they are part of an approved migration.
+- **Operational guardrails**: Document tunnel scripts, remote compose commands, and environment variables in `docs/ops/vps-access.md`. Add lightweight monitoring (Grafana alerts, health checks) so regressions on the VPS are noticed quickly.
+
+### 6.7 Troubleshooting & Feature Delivery Flow
+| Activity | Recommended location | Steps |
+| --- | --- | --- |
+| Schema exploration, quick queries | Local workstation | Use VS Code Postgres extension against local containers; refresh data with `pg_dump` pulled from VPS when needed. |
+| Exporter / diagnostic script changes | Develop locally → deploy to VPS | Edit & test locally, commit to repo, then run scripted deploy (`ssh ubuntu@<ip> "cd /srv/ef-map/repo && git pull && docker compose ..."`). |
+| Ingest or Grafana issues in production/staging | VPS (read-only first) | Establish tunnel, inspect logs via `docker compose logs`, check Grafana panels; capture findings in decision log. |
+| Emergency rollback | VPS | Restore latest Hetzner volume snapshot or `pg_restore` from nightly dump; keep local stack ready as fallback reference. |
+| Agent-led debugging | Local preferred, VPS when needed | Run troubleshooting playbooks locally whenever possible; when remote access is required, have the agent execute scripted tunnel + SSH commands to keep actions reproducible. |
+
 ## 7. Risks & Mitigations
 | Risk | Impact | Mitigation |
 | --- | --- | --- |
@@ -123,6 +144,7 @@ _Optional Terraform module (`infra/hetzner/main.tf`) can describe the same resou
 | Secret leakage | Compromised env | Store tokens in secret manager; never commit secrets; use `.env.example` |
 | Agent CLI errors | Incomplete automation | Implement Terraform plan/apply with `-auto-approve`; capture logs |
 | Region outage | Downtime | Snapshot volumes; document failover plan to secondary region |
+| Remote-only debugging friction | Slower feature turnaround | Maintain local dev stack for fast loops; provide documented SSH tunnels and scripted helper commands so agents/operators can reach VPS services quickly. |
 
 ## 8. Future Enhancements
 - **Automated Backups**: Schedule `hcloud volume snapshot create --server ef-map-vps` daily; sync to object storage.
