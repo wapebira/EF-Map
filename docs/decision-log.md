@@ -1,8 +1,8 @@
-<!-- Curated on 2025-10-01. This log keeps entries relevant to: Primordium indexer (World API via Docker), Postgres, Grafana, Docker, and the Cloudflare-hosted website (KV stats/snapshots/overlays). Older/legacy D1 indexer & cron/decoder content moved to archive. -->
+<!-- Curated on 2025-10-12. This log keeps entries relevant to: Primordium indexer (World API via Docker), Postgres, Grafana, Docker, and the Cloudflare-hosted website (KV stats/snapshots/overlays). Older/legacy D1 indexer & cron/decoder content moved to archive. -->
 
 Older entries and legacy indexer details have been archived: [archive\decision-log\decision-log-legacy-2025-10-01.md](./archive/decision-log/decision-log-legacy-2025-10-01.md)
 
-## Current Environment Quick Reference (as of 2025-10-01)
+## Current Environment Quick Reference (as of 2025-10-12)
 - Hosting/runtime
   - Cloudflare Pages + Worker (Pages serves assets; `_worker.js` handles `/api/*`). Netlify code removed post-cutover.
   - Preview detection: hosts ending with `.pages.dev`; admin endpoints allow preview bypass with `?openPreview=1` when token is absent/mismatched.
@@ -73,6 +73,18 @@ Older entries and legacy indexer details have been archived: [archive\decision-l
 ## 2025-10-01 – Roadmap refresh: log telemetry focus & HTML embed stance
 - Goal: Mirror the overlay initiative roadmap updates by prioritizing the helper log watcher, introducing a combat telemetry milestone, and documenting a cautious stance on HTML embedding inside the …
 - Risk: low (documentation only).
+- Gates: build n/a | tests n/a | smoke n/a.
+## 2025-10-12 – Overlay camera-aligned renderer sync
+- Goal: Record the overlay milestone where the DX12 starfield now consumes helper camera pose data and renders live route polylines, keeping EF-Map documentation in lockstep with the native overlay d…
+- Risk: low (documentation alignment only).
+- Gates: build n/a | tests n/a | smoke n/a.
+## 2025-10-02 – Star catalog exporter + overlay asset staging
+- Goal: Generate a compact EFSTARS1 star catalog from `map_data_v2.db` for the overlay, capture metadata alongside the binary, and copy the asset into the overlay repo so the native helper can load i…
+- Risk: low (tooling + data export only; no runtime code paths in this repo).
+- Gates: export ✅ (`python tools/export_star_catalog.py`), manual verification ✅ (manifest reports 24 018 systems, bbox matches query stats).
+## 2025-10-02 – Native starfield renderer spike (overlay status)
+- Goal: Track overlay repo progress where the DX12 module now renders the star catalog as a point cloud, ensuring roadmap alignment here.
+- Risk: low (documentation alignment only).
 - Gates: build n/a | tests n/a | smoke n/a.
 ## 2025-10-01 – Overlay schema v2 + event queue infrastructure
 - Goal: Finalize the shared overlay state v2 contract and introduce the helper ↔ overlay event queue backing forthcoming EF-Map browser integrations.
