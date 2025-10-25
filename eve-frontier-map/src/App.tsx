@@ -25,6 +25,7 @@ import { openDbFromArrayBuffer } from "./lib/sql";
 import type { SystemRow, StargateRow, RegionRow, ConstellationRow } from "./types/db";
 import { createJumpRangeBubble } from './modules/JumpRangeBubble';
 import LoadingScreen from './components/LoadingScreen';
+import { RegionMap2D, type ViewMode } from './modules/RegionMap2D';
 // Legacy panel components kept for reference removed in favor of unified RoutingPanel
 import PanelRail from './components/layout/PanelRail';
 import PanelDrawer, { type PanelDrawerHandle } from './components/layout/PanelDrawer';
@@ -403,6 +404,17 @@ function App() {
   const ZOOM_MIN_DISTANCE = 10;
   const ZOOM_MAX_DISTANCE = 50000;
   const ZOOM_DEFAULT_DISTANCE = 5000;
+  
+  // 2D Region View Mode
+  const [viewMode, setViewMode] = useState<ViewMode>('3D');
+  const [selectedRegionFor2D, setSelectedRegionFor2D] = useState<number | null>(null);
+  const viewModeRef = useRef<ViewMode>('3D');
+  
+  // Update viewModeRef when viewMode changes
+  useEffect(() => {
+    viewModeRef.current = viewMode;
+  }, [viewMode]);
+  
   const embedMode = useMemo(() => {
     if (typeof window === 'undefined') return false;
     if (window.location.pathname === '/embed') return true;
@@ -504,6 +516,11 @@ function App() {
   const [isPlanetCountActive, setIsPlanetCountActive] = useState(false);
   // Five legend bins (dynamic ranges) active flags; default all true when DPC enabled
   const [planetBinsActive, setPlanetBinsActive] = useState<boolean[]>([true, true, true, true, true]);
+  
+  // Gate Count filter state (individual numbers, not bins)
+  const [isGateCountActive, setIsGateCountActive] = useState(false);
+  // Track which specific gate counts are active (0, 1, 2, 3, 4) - default all unchecked
+  const [gateNumbersActive, setGateNumbersActive] = useState<{ [key: number]: boolean }>({ 0: false, 1: false, 2: false, 3: false, 4: false });
   // Stations visibility (persisted preference)
   const [showStations, setShowStations] = useState<boolean>(()=>{ try { return !!(getPrefs() as any).showStations; } catch { return false; } });
   const [stationsRetryToken, setStationsRetryToken] = useState(0); // forces re-run until station global available
@@ -952,6 +969,7 @@ function App() {
   const starFieldRef = useRef<THREE.Points | null>(null);
   const overlayRingsRef = useRef<UserOverlayRings | null>(null); // persistent user overlay halos
   const smartAssemblyHalosRef = useRef<SmartAssemblyHalos | null>(null);
+  const regionMap2DRef = useRef<RegionMap2D | null>(null);
   const smartAssemblyPendingDataRef = useRef<{ entries: SmartAssemblyHaloDatum[]; maxTotal: number } | null>(null);
   const [sceneReadyToken, setSceneReadyToken] = useState(0);
   const mapDataRef = useRef<MapData | null>(null);
@@ -4100,6 +4118,14 @@ function App() {
     return new THREE.Color().setHSL(normalized * 0.33, 1.0, 0.5); // Red to Green
   }, []);
 
+  const getGateCountColor = useCallback((gates: number, minGates: number, maxGates: number): THREE.Color => {
+    if (maxGates === minGates) {
+      return DEFAULT_STAR_COLOR;
+    }
+    const normalized = (gates - minGates) / (maxGates - minGates);
+    return new THREE.Color().setHSL(0.55 + normalized * 0.1, 1.0, 0.5); // Blue to Cyan
+  }, []);
+
   const generatePlanetCountLegend = useCallback(() => {
     if (!isPlanetCountActive || maxPlanets === 0) return null; // Don't show if DPC is off or no planets
 
@@ -4138,10 +4164,80 @@ function App() {
       <div style={{ marginTop: '10px', padding: '10px', border: '1px solid #ccc', borderRadius: '5px', background: 'rgba(0,0,0,0.35)' }}>
         <strong style={{ display: 'block', marginBottom: '6px', fontSize: '13px' }}>Planet Count Legend:</strong>
         {legendItems}
-        <div style={{ fontSize: '11px', opacity: 0.75, marginTop: '4px' }}>Uncheck ranges to de-emphasize them (stars revert to white).</div>
+        <div style={{ fontSize: '11px', opacity: 0.75, marginTop: '4px' }}>Uncheck ranges to hide them completely (systems and their gates are filtered out).</div>
       </div>
     );
   }, [isPlanetCountActive, minPlanets, maxPlanets, getPlanetCountColor, planetBinsActive]);
+
+  // Gate Count Legend Generator (individual numbers)
+  const generateGateCountLegend = useCallback(() => {
+    if (!isGateCountActive || !mapData) return null;
+
+    // Calculate gate counts for all systems (with fix for double counting)
+    const gateCountMapRaw = new Map<number, number>();
+    if (mapData.stargates) {
+      for (const gKey in mapData.stargates) {
+        const g = (mapData.stargates as any)[gKey];
+        const a = g.source_system_id;
+        const b = g.destination_system_id;
+        if (a == null || b == null) continue;
+        gateCountMapRaw.set(a, (gateCountMapRaw.get(a) || 0) + 1);
+        gateCountMapRaw.set(b, (gateCountMapRaw.get(b) || 0) + 1);
+      }
+    }
+    
+    // Fix double-counting
+    const gateCountMap = new Map<number, number>();
+    for (const [systemId, count] of gateCountMapRaw.entries()) {
+      gateCountMap.set(systemId, Math.round(count / 2));
+    }
+
+    const allSystems = Object.values(mapData.solar_systems).filter(s => s && s.position && !s.hidden);
+    const gateCounts = allSystems.map(s => gateCountMap.get(s.id) || 0);
+    const maxGates = gateCounts.length > 0 ? Math.max(...gateCounts) : 0;
+
+    if (maxGates === 0) return null; // No gates
+
+    const legendItems = [];
+    
+    // Count how many systems have each gate count
+    const countDistribution: { [key: number]: number } = {};
+    for (let i = 0; i <= maxGates; i++) {
+      countDistribution[i] = gateCounts.filter(c => c === i).length;
+    }
+
+    // Create checkbox for each gate count value
+    for (let gateNum = 0; gateNum <= maxGates; gateNum++) {
+      const systemCount = countDistribution[gateNum];
+      if (systemCount === 0) continue; // Skip if no systems have this count
+      
+      const color = getGateCountColor(gateNum, 0, maxGates);
+      const checked = gateNumbersActive[gateNum] !== false;
+
+      legendItems.push(
+        <label key={gateNum} style={{ display: 'flex', alignItems: 'center', marginBottom: '6px', cursor: 'pointer', gap: '8px' }}>
+          <input
+            type="checkbox"
+            checked={checked}
+            onChange={(e) => {
+              setGateNumbersActive(prev => ({ ...prev, [gateNum]: e.target.checked }));
+            }}
+            style={{ margin: 0 }}
+          />
+          <div style={{ width: '18px', height: '18px', backgroundColor: `#${color.getHexString()}`, borderRadius: '3px', border: checked ? 'none' : '1px solid #777', opacity: checked ? 1 : 0.25 }} />
+          <span style={{ fontSize: '12px' }}>{gateNum === 1 ? `${gateNum} gate` : `${gateNum} gates`} <span style={{ opacity: 0.6 }}>({systemCount} systems)</span></span>
+        </label>
+      );
+    }
+    
+    return (
+      <div style={{ marginTop: '10px', padding: '10px', border: '1px solid #ccc', borderRadius: '5px', background: 'rgba(0,0,0,0.35)' }}>
+        <strong style={{ display: 'block', marginBottom: '6px', fontSize: '13px' }}>Gate Count Legend:</strong>
+        {legendItems}
+        <div style={{ fontSize: '11px', opacity: 0.75, marginTop: '4px' }}>Shows systems with selected gate counts + their connected neighbors.</div>
+      </div>
+    );
+  }, [isGateCountActive, mapData, getGateCountColor, gateNumbersActive]);
 
   // Reset bins to all active when enabling Display Planet Counts
   useEffect(() => {
@@ -4149,6 +4245,14 @@ function App() {
       setPlanetBinsActive([true, true, true, true, true]);
     }
   }, [isPlanetCountActive]);
+
+  // Reset gate numbers to NONE active when enabling Display Gate Counts
+  // (so user can select which they want to see)
+  useEffect(() => {
+    if (isGateCountActive) {
+      setGateNumbersActive({ 0: false, 1: false, 2: false, 3: false, 4: false });
+    }
+  }, [isGateCountActive]);
 
   // Fetch and process data from SQLite
   useEffect(() => {
@@ -4811,6 +4915,200 @@ function App() {
   }, [isLoaded, ringTexture, cinematicMode, clampZoomDistance]);
   // FXAA pipeline removed
 
+  // Initialize RegionMap2D module
+  useEffect(() => {
+    if (!sceneRef.current || !mapData) return;
+    
+    if (!regionMap2DRef.current) {
+      regionMap2DRef.current = new RegionMap2D({
+        scene: sceneRef.current,
+        mapData: mapData,
+        onRegionClick: (regionId: number) => {
+          console.log('[RegionMap2D] Region clicked:', regionId);
+          setSelectedRegionFor2D(regionId);
+          setViewMode('2D_REGION_DETAIL');
+        },
+        onSystemClick: (systemId: number) => {
+          console.log('[RegionMap2D] System clicked:', systemId);
+          // Find and select the system
+          const sys = mapData.solar_systems?.[String(systemId)];
+          if (sys) {
+            selectSystem(sys);
+          }
+        }
+      });
+    }
+    
+    return () => {
+      regionMap2DRef.current?.dispose();
+      regionMap2DRef.current = null;
+    };
+  }, [sceneRef.current, mapData, selectSystem]);
+  
+  // Update RegionMap2D view mode
+  useEffect(() => {
+    if (!regionMap2DRef.current) return;
+    
+    regionMap2DRef.current.setViewMode(viewMode, selectedRegionFor2D || undefined);
+    
+    // Show/hide 3D elements based on view mode
+    if (starFieldRef.current) {
+      starFieldRef.current.visible = viewMode === '3D';
+    }
+    if (stargateLinesRef.current) {
+      stargateLinesRef.current.visible = viewMode === '3D';
+    }
+    if (smartGateLinesRef.current) {
+      smartGateLinesRef.current.visible = viewMode === '3D';
+    }
+    if (smartGateOfflineLinesRef.current) {
+      smartGateOfflineLinesRef.current.visible = viewMode === '3D';
+    }
+    if (routeLinesRef.current) {
+      routeLinesRef.current.visible = viewMode === '3D';
+    }
+    if (selectedStarHaloRef.current) {
+      selectedStarHaloRef.current.visible = viewMode === '3D';
+    }
+    if (regionOutlineGroupRef.current) {
+      regionOutlineGroupRef.current.visible = viewMode === '3D';
+    }
+    if (hoverPointRef.current) {
+      hoverPointRef.current.visible = viewMode === '3D';
+    }
+    if (dustPointsRef.current) {
+      dustPointsRef.current.visible = viewMode === '3D';
+    }
+    if (secondDustRef.current) {
+      secondDustRef.current.visible = viewMode === '3D';
+    }
+    if (parallaxStarsRef.current) {
+      parallaxStarsRef.current.visible = viewMode === '3D';
+    }
+    if (stationSpriteGroupRef.current) {
+      stationSpriteGroupRef.current.visible = viewMode === '3D';
+    }
+    if (supernovaGroupRef.current) {
+      supernovaGroupRef.current.visible = viewMode === '3D';
+    }
+    if (lensFlareGroupRef.current) {
+      lensFlareGroupRef.current.visible = viewMode === '3D';
+    }
+    if (rippleGroupRef.current) {
+      rippleGroupRef.current.visible = viewMode === '3D';
+    }
+    if (cometGroupRef.current) {
+      cometGroupRef.current.visible = viewMode === '3D';
+    }
+    if (meteorsGroupRef.current) {
+      meteorsGroupRef.current.visible = viewMode === '3D';
+    }
+  }, [viewMode, selectedRegionFor2D]);
+  
+  // Camera positioning for different view modes
+  useEffect(() => {
+    if (!cameraRef.current || !controlsRef.current) return;
+    
+    const camera = cameraRef.current;
+    const controls = controlsRef.current;
+    
+    if (viewMode === '2D_REGIONS') {
+      // Position camera for region overview - looking down at XY plane
+      const targetPos = new THREE.Vector3(0, 0, 0);
+      const cameraPos = new THREE.Vector3(0, 0, 30000); // Look down from above
+      
+      // Animate camera
+      const startPos = camera.position.clone();
+      const startTarget = controls.target.clone();
+      const duration = 800;
+      const startTime = Date.now();
+      
+      const animate = () => {
+        const elapsed = Date.now() - startTime;
+        const t = Math.min(elapsed / duration, 1);
+        const eased = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t; // ease in-out
+        
+        camera.position.lerpVectors(startPos, cameraPos, eased);
+        controls.target.lerpVectors(startTarget, targetPos, eased);
+        
+        if (t < 1) {
+          requestAnimationFrame(animate);
+        }
+      };
+      animate();
+      
+    } else if (viewMode === '2D_REGION_DETAIL') {
+      // Position camera to view the selected region's systems in 2D
+      const targetPos = new THREE.Vector3(0, 0, 0);
+      const cameraPos = new THREE.Vector3(0, 0, 15000); // Closer view for region detail
+      
+      const startPos = camera.position.clone();
+      const startTarget = controls.target.clone();
+      const duration = 600;
+      const startTime = Date.now();
+      
+      const animate = () => {
+        const elapsed = Date.now() - startTime;
+        const t = Math.min(elapsed / duration, 1);
+        const eased = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+        
+        camera.position.lerpVectors(startPos, cameraPos, eased);
+        controls.target.lerpVectors(startTarget, targetPos, eased);
+        
+        if (t < 1) {
+          requestAnimationFrame(animate);
+        }
+      };
+      animate();
+    }
+  }, [viewMode]);
+  
+  // Region click handler for 2D region view
+  useEffect(()=>{
+    if(!rendererRef.current || !cameraRef.current) return;
+    const dom = rendererRef.current.domElement;
+    const handleRegionClick = (e: MouseEvent) => {
+      if(viewMode !== '2D_REGIONS' || !regionMap2DRef.current || !cameraRef.current) return;
+      
+      const mouse = new THREE.Vector2();
+      const rect = dom.getBoundingClientRect();
+      mouse.x = ((e.clientX - rect.left)/rect.width)*2 - 1;
+      mouse.y = -((e.clientY - rect.top)/rect.height)*2 + 1;
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera(mouse, cameraRef.current as THREE.Camera);
+      
+      const regionId = regionMap2DRef.current.raycastRegions(raycaster);
+      if(regionId !== null){
+        console.log('[App] Region clicked:', regionId);
+        setSelectedRegionFor2D(regionId);
+        setViewMode('2D_REGION_DETAIL');
+        e.stopPropagation();
+      }
+    };
+    dom.addEventListener('click', handleRegionClick, true);
+    return ()=>{ dom.removeEventListener('click', handleRegionClick, true); };
+  }, [viewMode]);
+  
+  // Update text scaling for 2D regions
+  useEffect(() => {
+    if (!regionMap2DRef.current || !cameraRef.current) return;
+    
+    regionMap2DRef.current.setCamera(cameraRef.current);
+    
+    const updateScaling = () => {
+      if (regionMap2DRef.current && viewMode === '2D_REGIONS') {
+        regionMap2DRef.current.updateTextScaling();
+      }
+    };
+    
+    // Update scaling on camera movement
+    const controls = controlsRef.current;
+    if (controls) {
+      controls.addEventListener('change', updateScaling);
+      return () => controls.removeEventListener('change', updateScaling);
+    }
+  }, [viewMode, cameraRef.current]);
+
   // Create and update starfield and stargates
   useEffect(() => {
     if (!mapData || !sceneRef.current) return;
@@ -4820,11 +5118,129 @@ function App() {
       starFieldRef.current.geometry.dispose();
     }
 
-    visibleSystemsRef.current = Object.values(mapData.solar_systems).filter(s => s && s.position && !s.hidden);
+    // First filter: basic visibility (position, not hidden)
+    let allSystemsUnfiltered = Object.values(mapData.solar_systems).filter(s => s && s.position && !s.hidden);
+    let allSystems = [...allSystemsUnfiltered]; // Copy for filtering
+    
+    // Calculate gate counts for all systems (needed for filtering and coloring)
+    // Each stargate record represents ONE bidirectional connection
+    // We were double-counting before (once for source, once for dest), so divide by 2
+    const gateCountMapRaw = new Map<number, number>();
+    if (mapData.stargates) {
+      for (const gKey in mapData.stargates) {
+        const g = (mapData.stargates as any)[gKey];
+        const a = g.source_system_id;
+        const b = g.destination_system_id;
+        if (a == null || b == null) continue;
+        gateCountMapRaw.set(a, (gateCountMapRaw.get(a) || 0) + 1);
+        gateCountMapRaw.set(b, (gateCountMapRaw.get(b) || 0) + 1);
+      }
+    }
+    
+    // Fix the double-counting by dividing by 2
+    const gateCountMap = new Map<number, number>();
+    for (const [systemId, count] of gateCountMapRaw.entries()) {
+      gateCountMap.set(systemId, Math.round(count / 2));
+    }
+    
+    // Debug: Log sample gate counts
+    if (mapData.stargates) {
+      const sortedCounts = Array.from(gateCountMap.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 10);
+      console.log('[Gate Count Debug] Top 10 systems by gate count:', sortedCounts);
+      console.log('[Gate Count Debug] Total stargates:', Object.keys(mapData.stargates).length);
+    }
+    
+    // Calculate GLOBAL min/max values from ALL systems (before filtering)
+    // This ensures bins are consistent between legend and filtering
+    const allPlanetCounts = allSystemsUnfiltered.map(s => s.planets);
+    const globalMinPlanets = allPlanetCounts.length > 0 ? Math.min(...allPlanetCounts) : 0;
+    const globalMaxPlanets = allPlanetCounts.length > 0 ? Math.max(...allPlanetCounts) : 0;
+    
+    const allGateCounts = allSystemsUnfiltered.map(s => gateCountMap.get(s.id) || 0);
+    const globalMinGates = allGateCounts.length > 0 ? Math.min(...allGateCounts) : 0;
+    const globalMaxGates = allGateCounts.length > 0 ? Math.max(...allGateCounts) : 0;
+    
+    // Debug: Show gate count distribution
+    const gateDistribution: { [key: number]: number } = {};
+    allGateCounts.forEach(count => {
+      gateDistribution[count] = (gateDistribution[count] || 0) + 1;
+    });
+    console.log('[Gate Count Debug] Distribution:', gateDistribution);
+    console.log('[Gate Count Debug] Min/Max:', { min: globalMinGates, max: globalMaxGates });
+    
+    // Second filter: planet count bins (if active)
+    if (isPlanetCountActive) {
+      const hasUncheckedBins = planetBinsActive.some((active) => !active);
+      
+      if (hasUncheckedBins && globalMaxPlanets !== globalMinPlanets) {
+        const numSteps = 5;
+        allSystems = allSystems.filter(system => {
+          const ratio = (system.planets - globalMinPlanets) / (globalMaxPlanets - globalMinPlanets);
+          let bin = Math.floor(ratio * numSteps);
+          if (bin >= numSteps) bin = numSteps - 1;
+          return planetBinsActive[bin]; // Only include if bin is active
+        });
+        console.log(`[Planet Count Filter] Filtered to ${allSystems.length} systems (global range: ${globalMinPlanets}-${globalMaxPlanets})`);
+      }
+    }
+    
+    // Third filter: gate count (individual numbers, if active)
+    if (isGateCountActive) {
+      console.log('[Gate Filter Debug] Active numbers:', gateNumbersActive);
+      
+      // Check if any numbers are selected
+      const hasAnySelected = Object.values(gateNumbersActive).some(v => v === true);
+      
+      if (hasAnySelected) {
+        // Step 1: Find systems that match the selected gate counts
+        const primarySystems = new Set<number>();
+        allSystems.forEach(system => {
+          const gateCount = gateCountMap.get(system.id) || 0;
+          if (gateNumbersActive[gateCount] === true) {
+            primarySystems.add(system.id);
+          }
+        });
+        
+        // Step 2: Find systems connected to primary systems (neighbors)
+        const connectedSystems = new Set<number>(primarySystems);
+        if (mapData.stargates) {
+          for (const gKey in mapData.stargates) {
+            const g = (mapData.stargates as any)[gKey];
+            const a = g.source_system_id;
+            const b = g.destination_system_id;
+            if (a == null || b == null) continue;
+            
+            // If either endpoint is a primary system, include both endpoints
+            if (primarySystems.has(a)) connectedSystems.add(b);
+            if (primarySystems.has(b)) connectedSystems.add(a);
+          }
+        }
+        
+        // Step 3: Filter to show primary systems and their connected neighbors
+        allSystems = allSystems.filter(system => connectedSystems.has(system.id));
+        
+        console.log(`[Gate Count Filter] Primary systems: ${primarySystems.size}, Connected systems: ${connectedSystems.size}, Total visible: ${allSystems.length}`);
+      } else {
+        // No gate counts selected - show nothing
+        allSystems = [];
+        console.log('[Gate Count Filter] No gate counts selected - hiding all systems');
+      }
+    }
+    
+    visibleSystemsRef.current = allSystems;
 
     const vertices: number[] = [];
     const colors: number[] = [];
     const sizes: number[] = [];
+    
+    // Use the global min/max values for consistent coloring
+    const minPlanets = globalMinPlanets;
+    const maxPlanets = globalMaxPlanets;
+    const minGates = globalMinGates;
+    const maxGates = globalMaxGates;
+    
     for (const system of visibleSystemsRef.current) {
       const pos = getTransformedPosition(system.position);
       vertices.push(pos.x, pos.y, pos.z);
@@ -4834,16 +5250,32 @@ function App() {
   const norm = dist * 0.0000022; // smaller factor => farther stars dim sooner
   // Curve: near stars ~1.0, mid fade, far approach min
   const falloff = Math.max(0.38, 1.0 - Math.pow(norm, 1.12));
-      // Deterministic jitter for tiny temperature-like tint
-      const seed = (Math.sin(system.id * 12.9898) * 43758.5453);
-      const hSel = seed - Math.floor(seed);
+      
+      // Color: priority is gate count > planet count > default
       const tint = new THREE.Color();
-      if(hSel < 0.33) tint.setHSL(0.58, 0.08, 0.90); // cool
-      else if(hSel < 0.66) tint.setHSL(0.10, 0.08, 0.92); // warm
-      else tint.setHSL(0.0, 0.00, 0.92); // neutral
+      if (isGateCountActive && maxGates > minGates) {
+        // Gate count gradient color (blue to cyan)
+        const gateCount = gateCountMap.get(system.id) || 0;
+        const gateCountColor = getGateCountColor(gateCount, minGates, maxGates);
+        tint.copy(gateCountColor);
+      } else if (isPlanetCountActive && maxPlanets > minPlanets) {
+        // Planet count gradient color (red to green)
+        const planetCountColor = getPlanetCountColor(system.planets, minPlanets, maxPlanets);
+        tint.copy(planetCountColor);
+      } else {
+        // Default temperature-like tint
+        const seed = (Math.sin(system.id * 12.9898) * 43758.5453);
+        const hSel = seed - Math.floor(seed);
+        if(hSel < 0.33) tint.setHSL(0.58, 0.08, 0.90); // cool
+        else if(hSel < 0.66) tint.setHSL(0.10, 0.08, 0.92); // warm
+        else tint.setHSL(0.0, 0.00, 0.92); // neutral
+      }
+      
       tint.r *= falloff; tint.g *= falloff; tint.b *= falloff;
       colors.push(tint.r, tint.g, tint.b);
+      
       // Anchor star size variance (~3%)
+      const seed = (Math.sin(system.id * 12.9898) * 43758.5453);
       sizes.push((seed % 37) < 1 ? 1.6 : 1.0);
     }
 
@@ -4862,17 +5294,21 @@ function App() {
     }
   // Glow lines removal not needed (already removed)
 
+  // Create a Set of visible system IDs for fast lookup (O(1) instead of O(n))
+  const visibleSystemIds = new Set(visibleSystemsRef.current.map(s => s.id));
+
   const stargateVertices: number[] = [];
   const stargateMidpoints: number[] = [];
     const stargateColors: number[] = [];
-  const defaultStargateColor = new THREE.Color(0xffffff); // white base; shader controls brightness span
+  const defaultStargateColor = new THREE.Color(0x444444); // dark grey - matches base gate color
     const stargateData: { source_system_id: number, destination_system_id: number }[] = [];
 
     if (mapData.stargates) {
       Object.values(mapData.stargates).forEach((stargate) => {
         const sourceSystem = mapData.solar_systems[stargate.source_system_id];
         const destinationSystem = mapData.solar_systems[stargate.destination_system_id];
-        if (sourceSystem && destinationSystem && sourceSystem.position && destinationSystem.position && !sourceSystem.hidden && !destinationSystem.hidden) {
+        // Only render gate if both systems exist, have positions, are not hidden, AND are in the visible (filtered) list
+        if (sourceSystem && destinationSystem && sourceSystem.position && destinationSystem.position && !sourceSystem.hidden && !destinationSystem.hidden && visibleSystemIds.has(stargate.source_system_id) && visibleSystemIds.has(stargate.destination_system_id)) {
           const sourcePos = getTransformedPosition(sourceSystem.position);
           const destPos = getTransformedPosition(destinationSystem.position);
           stargateVertices.push(sourcePos.x, sourcePos.y, sourcePos.z);
@@ -4897,6 +5333,13 @@ function App() {
         stargateGeometry.setAttribute('mid', new THREE.Float32BufferAttribute(stargateMidpoints, 3));
       }
       stargateGeometry.userData = { stargateData };
+      
+      // Log gate filtering stats
+      const totalGates = Object.keys(mapData.stargates).length;
+      const visibleGates = stargateData.length;
+      if (visibleGates < totalGates) {
+        console.log(`[Gate Filter] Showing ${visibleGates} of ${totalGates} gates (${totalGates - visibleGates} filtered out)`);
+      }
 
   const stargateLines = new THREE.LineSegments(stargateGeometry, stargateMaterial);
   stargateLines.visible = !cinematicMode; // hide when cinematic
@@ -4905,7 +5348,7 @@ function App() {
   // Glow pass (same geometry, stronger near-only fade) layered above
   // Glow pass removed
     }
-  }, [mapData, getTransformedPosition, pointsMaterial, stargateMaterial, cinematicMode]);
+  }, [mapData, getTransformedPosition, pointsMaterial, stargateMaterial, cinematicMode, isPlanetCountActive, planetBinsActive, isGateCountActive, gateNumbersActive, getPlanetCountColor, getGateCountColor]);
 
   // Cinematic enable/disable lifecycle
   useEffect(()=>{
@@ -6047,6 +6490,19 @@ function App() {
         return;
       }
 
+      // Handle system hover in 2D region detail view (before 3D mode check)
+      if (viewModeRef.current === '2D_REGION_DETAIL' && regionMap2DRef.current) {
+        console.log('[App] Attempting system raycast in 2D_REGION_DETAIL mode');
+        const systemId = regionMap2DRef.current.raycastSystems(raycaster);
+        console.log('[App] Raycast result:', systemId);
+        regionMap2DRef.current.handleSystemHover(systemId);
+      }
+
+      // Only run 3D raycasting when in 3D mode
+      if (viewMode !== '3D') {
+        return;
+      }
+
       // Only perform expensive raycast when no buttons are pressed (pure hover)
       // Suppress all hover work during cinematic mode for immersion
   if(cinematicModeRef.current && !cinematicLabelsRef.current){
@@ -6203,6 +6659,7 @@ function App() {
           }
         }
       }
+      
       else if (isDraggingRef.current) {
         setHoveredSystem(null); // Clear hover when dragging
         if (hoverLabelObj.current) {
@@ -6266,6 +6723,11 @@ function App() {
     // Right-click context menu for setting destination
   const onContextMenu = (event: MouseEvent) => {
       if(!hoveredSystem) return; // only active when a star is hovered
+      
+      // Only show context menu in 3D mode
+      if (viewMode !== '3D') {
+        return;
+      }
       // If a menu for this same system already open, treat second right-click as close
       if(contextMenuObjRef.current && contextMenuSystemRef.current && contextMenuSystemRef.current.name === hoveredSystem.name){
         try {
@@ -7106,6 +7568,7 @@ function App() {
               { id:'cinematic', type:'panel', label:'Cinematic Mode', display:(<>Cinematic<br/>Mode</>), icon:null, active:openPanels.has('cinematic'), onSelect:()=> { if(openPanels.has('cinematic')) { setCinematicMode(false); } else { setCinematicMode(true); } togglePanel('cinematic'); } },
               { id:'region', type:'toggle', label:'Highlight Region', display:(<>Highlight<br/>Region</>), icon:null, active:isRegionHighlighterActive, onToggle:()=> setIsRegionHighlighterActive(v=> !v) },
               { id:'planets', type:'toggle', label:'Display Planet Counts', display:(<>Planet<br/>Counts</>), icon:null, active:isPlanetCountActive, onToggle:()=> setIsPlanetCountActive(v=> !v) },
+              { id:'gates', type:'toggle', label:'Display Gate Counts', display:(<>Gate<br/>Counts</>), icon:null, active:isGateCountActive, onToggle:()=> setIsGateCountActive(v=> !v) },
               { id:'smart-gates', type:'panel', label:'Smart Gates', display:(<>Smart<br/>Gates</>), icon:null, active:openPanels.has('smart-gates'), onSelect:()=> togglePanel('smart-gates') },
               { id:'smart-assemblies', type:'panel', label:'Smart Assemblies', display:(<>Smart<br/>Assemblies</>), icon:null, active:openPanels.has('smart-assemblies'), onSelect:()=> togglePanel('smart-assemblies') },
               { id:'stations', type:'toggle', label:'Show Stations', display:(<>Show<br/>Stations</>), icon:null, active:showStations, onToggle:()=> setShowStations(v=> { const next=!v; try { persistShowStations(next); } catch {}; try { if(next) track({ type:'show_stations' }); } catch {}; return next; }) },
@@ -7431,6 +7894,22 @@ function App() {
               {generatePlanetCountLegend()}
             </PlanetLegendPanel>
           )}
+          {/* Floating gate count legend (appears when gate coloring active). */}
+          {isGateCountActive && (
+            <PlanetLegendPanel
+              scale={uiScale}
+              anchoredBelowDrawer={openPanels.size>0 || isPlanetCountActive}
+              zIndex={panelZ['gateLegend']||1424}
+              basePos={alignedBase}
+              onActivate={()=> bringToFront('gateLegend')}
+              onClose={()=> setIsGateCountActive(false)}
+              resetToken={layoutResetToken}
+              isMinimized={minimizedPanels.has('gate-legend')}
+              onToggleMinimize={()=> toggleMinimize('gate-legend')}
+            >
+              {generateGateCountLegend()}
+            </PlanetLegendPanel>
+          )}
           {openPanels.has('display-settings') && (
             <PanelDrawer ref={displaySettingsDrawerRef} id="display-settings" title="Display Settings" defaultPos={alignedBase} scale={uiScale} zIndex={panelZ['display-settings']||1450} onActivate={bringToFront} onClose={(id)=> setOpenPanels(p=> { const n=new Set(p); n.delete(id); return n; })} isMinimized={minimizedPanels.has('display-settings')} onToggleMinimize={toggleMinimize}>
               <DisplaySettingsPanel onLayoutReset={()=> { setMinimizedPanels(new Set()); try { localStorage.removeItem('efmap:minPanels'); } catch {}; }} />
@@ -7443,6 +7922,62 @@ function App() {
       {!embedMode && (
       <div style={{ position: 'fixed', left: 10, bottom: 10, zIndex: 2000 }}>
         <div style={{ display:'flex', gap:'10px', alignItems:'center', flexWrap:'wrap' }}>
+          {/* View Mode Switcher */}
+          <div style={{ color:'white', backgroundColor:'rgba(0,0,0,0.65)', padding:'6px 10px', borderRadius:'8px', display:'flex', alignItems:'center', gap:'6px', border:'1px solid rgba(255,255,255,0.15)' }}>
+            <span style={{ fontSize:'12px', fontWeight:600, opacity:0.9 }}>View:</span>
+            <button
+              onClick={() => { setViewMode('3D'); setSelectedRegionFor2D(null); }}
+              style={{
+                padding:'4px 10px',
+                fontSize:'11px',
+                borderRadius:'4px',
+                border: viewMode === '3D' ? '1px solid rgba(255,255,255,0.4)' : '1px solid rgba(255,255,255,0.15)',
+                background: viewMode === '3D' ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.08)',
+                color: 'white',
+                cursor:'pointer',
+                fontWeight: viewMode === '3D' ? 600 : 400,
+                transition:'all 0.15s'
+              }}
+              title="3D star map view"
+            >
+              3D
+            </button>
+            <button
+              onClick={() => { setViewMode('2D_REGIONS'); setSelectedRegionFor2D(null); }}
+              style={{
+                padding:'4px 10px',
+                fontSize:'11px',
+                borderRadius:'4px',
+                border: viewMode === '2D_REGIONS' ? '1px solid rgba(255,255,255,0.4)' : '1px solid rgba(255,255,255,0.15)',
+                background: viewMode === '2D_REGIONS' ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.08)',
+                color: 'white',
+                cursor:'pointer',
+                fontWeight: viewMode === '2D_REGIONS' ? 600 : 400,
+                transition:'all 0.15s'
+              }}
+              title="2D region overview with spatial positioning"
+            >
+              Regions
+            </button>
+            {viewMode === '2D_REGION_DETAIL' && selectedRegionFor2D && (
+              <button
+                onClick={() => setViewMode('2D_REGIONS')}
+                style={{
+                  padding:'4px 10px',
+                  fontSize:'11px',
+                  borderRadius:'4px',
+                  border:'1px solid rgba(255,255,255,0.4)',
+                  background:'rgba(255,255,255,0.18)',
+                  color: 'white',
+                  cursor:'pointer',
+                  fontWeight:600
+                }}
+                title="Back to region overview"
+              >
+                ← Back
+              </button>
+            )}
+          </div>
           <label style={{ color: 'white', backgroundColor: 'rgba(0,0,0,0.5)', padding: '6px 8px', borderRadius: '6px', display: 'flex', alignItems: 'center', gap: '8px' }}>
             <input type="checkbox" checked={hideUI} onChange={(e)=> setHideUI(e.target.checked)} />
             <span style={{ fontSize: '12px' }}>Hide UI</span>

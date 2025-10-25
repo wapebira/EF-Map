@@ -193,15 +193,15 @@ const baseSections: SectionDef[] = [
         title: 'Legend Range Filters',
         content: (
           <div>
-            <p>The legend splits the current min→max planet counts among visible systems into five equally sized numeric ranges (rounded). All five are enabled by default. Unchecking a range causes systems whose planet counts fall inside that range to revert to the neutral white base color (they are de-emphasized, not hidden). This lets you, for example, isolate only the highest-density systems.</p>
-            <ul style={{ paddingLeft: '18px', margin: '6px 0' }}>
-              <li>All bins checked: full gradient across all systems (original behavior).</li>
-              <li>Some bins unchecked: only checked ranges retain their gradient color.</li>
-              <li>All bins unchecked: every star is white (legend still visible so you can re-enable bins quickly).</li>
-              <li>Toggling DPC off and back on resets all bins to checked.</li>
-      <li>Re-enabling a bin instantly restores its colors—no recalculation needed.</li>
-            </ul>
-            <p style={{ marginTop: '6px' }}><strong>Region Highlight synergy:</strong> When Highlight Region is also ON, the gradient (respecting the enabled bins) is applied only inside the highlighted region; systems outside the region remain white regardless of bin state. Disabled bins stay white everywhere.</p>
+       <p>The legend splits the current min→max planet counts among visible systems into five equally sized numeric ranges (rounded). All five are enabled by default. When you uncheck one or more ranges, systems in unchecked ranges are **completely hidden** from the map, making it easy to focus on specific planet densities.</p>
+       <ul style={{ paddingLeft: '18px', margin: '6px 0' }}>
+         <li>All bins checked: full gradient across all systems (normal behavior).</li>
+         <li>Some bins unchecked: only systems in checked ranges are shown with their gradient colors; unchecked ranges are hidden.</li>
+         <li>All bins unchecked: no stars are shown (legend remains visible so you can re-enable bins).</li>
+         <li>Toggling DPC off and back on resets all bins to checked.</li>
+         <li>Re-enabling a bin instantly shows those systems again with their gradient colors.</li>
+       </ul>
+       <p style={{ marginTop: '6px' }}><strong>Region Highlight synergy:</strong> When Highlight Region is also ON, the gradient (respecting the enabled bins) is applied only inside the highlighted region; systems outside the region remain white. The filter still hides unchecked bins everywhere.</p>
           </div>
         ),
       },
