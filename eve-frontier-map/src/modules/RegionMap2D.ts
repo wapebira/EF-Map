@@ -286,122 +286,106 @@ export class RegionMap2D {
     const regionArray = Array.from(this.regions.values());
     if (regionArray.length === 0) return;
     
-    // Calculate spatial bounds of all regions
-    let minX = Infinity, maxX = -Infinity;
-    let minZ = Infinity, maxZ = -Infinity;
+    console.log(`[RegionMap2D] Applying force-directed layout to ${regionArray.length} regions`);
+    console.log(`[RegionMap2D] LabelGroup children before build: ${this.labelGroup.children.length}`);
     
-    for (const region of regionArray) {
-      minX = Math.min(minX, region.bounds.minX);
-      maxX = Math.max(maxX, region.bounds.maxX);
-      minZ = Math.min(minZ, region.bounds.minZ);
-      maxZ = Math.max(maxZ, region.bounds.maxZ);
-    }
+    // Extract 3D coordinates of region centers for initial positioning
+    const coordinates3D = regionArray.map(region => [
+      region.center.x, 
+      region.center.y, 
+      region.center.z
+    ]);
     
-    // Calculate center of all regions
-    const centerX = (minX + maxX) / 2;
-    const centerZ = (minZ + maxZ) / 2;
+    // Apply PCA to get initial 2D projection
+    const coordinates2D = this.applyPCA(coordinates3D);
     
-    // Create exploded view: spread regions from center with consistent spacing
-    const baseSpacing = 3000; // Base distance between regions
-    const minSpacing = 2000; // Minimum spacing to prevent overlap
-    const maxSpacing = 5000; // Maximum spacing for very dense areas
+    // Apply force-directed layout with grid constraints
+    const finalPositions = this.applyForceDirectedLayout(regionArray, coordinates2D);
     
-    // Calculate relative positions and create exploded layout
-    const positions: { x: number; y: number; z: number; region: RegionData }[] = [];
+    // Create meshes with radius based on actual spatial extent of systems
+    const baseRadius = 10; // Minimum radius
+    const maxRadius = 1000; // Maximum radius
     
-    for (const region of regionArray) {
-      // Calculate relative position from center
-      const relX = region.center.x - centerX;
-      const relZ = region.center.z - centerZ;
-      const distance = Math.sqrt(relX * relX + relZ * relZ);
+    for (let i = 0; i < regionArray.length; i++) {
+      const region = regionArray[i];
+      const position = finalPositions[i];
       
-      // Normalize direction vector
-      const dirX = distance > 0 ? relX / distance : 0;
-      const dirZ = distance > 0 ? relZ / distance : 0;
+      // Calculate radius based on the spatial extent of systems within the region
+      let maxDistance = 0;
+      if (this.mapData?.solar_systems) {
+        for (const systemId of region.systemIds) {
+          const system = this.mapData.solar_systems[systemId];
+          if (system && system.position) {
+            const dx = system.position.x - region.center.x;
+            const dy = system.position.y - region.center.y;
+            const dz = system.position.z - region.center.z;
+            const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+            maxDistance = Math.max(maxDistance, distance);
+          }
+        }
+      }
       
-      // Calculate exploded position with consistent spacing
-      const spacing = Math.max(minSpacing, Math.min(maxSpacing, baseSpacing));
-      const explodedDistance = Math.max(1000, distance * 0.1 + spacing); // Scale down original distance but add spacing
+      // Apply logarithmic scaling to compress large values (better for wide range)
+      const scaleFactor = 0.02; // Base scaling factor
+      const linearRadius = maxDistance * scaleFactor;
       
-      const x = dirX * explodedDistance;
-      const y = 0; // All regions on the same plane
-      const z = dirZ * explodedDistance;
+      // Logarithmic: log(1 + x) to handle small values gracefully
+      const logRadius = Math.log(1 + linearRadius) * 8; // Multiply to adjust overall size
       
-      positions.push({ x, y, z, region });
-    }
-    
-    // Apply collision detection to prevent overlap
-    this.resolveOverlaps(positions, minSpacing);
-    
-    // Create meshes with smaller, consistent size
-    const baseRadius = 400; // Smaller base radius
-    const maxRadius = 600; // Maximum radius for very large regions
-    
-    positions.forEach(({ x, y, z, region }) => {
-      // Smaller, more consistent circle size
-      const radius = Math.min(maxRadius, baseRadius + (region.systemCount * 2));
-      const geometry = new THREE.CircleGeometry(radius, 32);
+      // Exponential: pow(x, exponent) for comparison
+      const exponent = 0.8;
+      const exponentialRadius = Math.pow(linearRadius, exponent) * 5
+      
+      // Choose which to use: logarithmic or exponential
+      const useLogarithmic = false; // Set to false to use exponential
+      const scaledRadius = useLogarithmic ? logRadius : exponentialRadius;
+      
+      const radius = Math.min(maxRadius, Math.max(baseRadius, scaledRadius));
+      console.log(`[RegionMap2D] Region ${region.name}: radius=${radius.toFixed(1)}, maxDist=${maxDistance.toFixed(0)}, linear=${linearRadius.toFixed(1)}, log=${logRadius.toFixed(1)}, expo=${exponentialRadius.toFixed(1)}`);
+      // Use a sphere geometry for better raycasting
+      const geometry = new THREE.SphereGeometry(radius, 16, 16);
       const material = new THREE.MeshBasicMaterial({
         color: region.color,
         transparent: true,
-        opacity: 0.7,
+        opacity: 0.8, // Slightly more opaque for better visibility
         side: THREE.DoubleSide
       });
       
       const mesh = new THREE.Mesh(geometry, material);
-      mesh.position.set(x, y, z);
+      mesh.position.set(position.x, position.y, 0); // Use 2D coordinates, Z=0 for 2D view
+      // Scale the mesh to be larger for better raycasting
+      mesh.scale.set(1, 1, 1);
       mesh.userData = { type: 'region', regionId: region.id };
       
       this.regionGroup.add(mesh);
       this.regionMeshes.set(region.id, mesh);
       
-      // Add scalable label
-      this.createScalableLabel(region.name, x, y + radius + 150, z, region.systemCount);
-    });
+      console.log(`[RegionMap2D] Created region mesh for ${region.name} (ID: ${region.id}) at position (${position.x}, ${position.y}, 0)`);
+      
+      // Add scalable label (hidden by default, shown on hover)
+      const label = this.createScalableLabel(region.name, position.x, position.y + radius + 20, region.systemCount, false);
+      // Set region ID for hover detection
+      if (label) {
+        label.userData.regionId = region.id;
+        if (label.userData.countLabel) {
+          label.userData.countLabel.userData.regionId = region.id;
+        }
+        console.log(`[RegionMap2D] Created label for region ${region.id} (${region.name})`);
+        console.log(`[RegionMap2D] Label regionId: ${label.userData.regionId}, Count label regionId: ${label.userData.countLabel?.userData.regionId}`);
+      }
+    }
     
-    console.log(`[RegionMap2D] Built exploded region view with ${regionArray.length} regions`);
+    // Add metro-style connections between regions
+    this.createMetroConnections(regionArray, finalPositions);
+    
+    console.log(`[RegionMap2D] LabelGroup children after build: ${this.labelGroup.children.length}`);
+    console.log(`[RegionMap2D] RegionMeshes count: ${this.regionMeshes.size}`);
+    console.log(`[RegionMap2D] Built region view with ${regionArray.length} regions`);
+    
+    
+    console.log(`[RegionMap2D] Built force-directed region view with ${regionArray.length} regions`);
   }
   
-  private resolveOverlaps(positions: { x: number; y: number; z: number; region: RegionData }[], minSpacing: number) {
-    const maxIterations = 10;
-    let iterations = 0;
-    
-    while (iterations < maxIterations) {
-      let hasOverlaps = false;
-      
-      for (let i = 0; i < positions.length; i++) {
-        for (let j = i + 1; j < positions.length; j++) {
-          const pos1 = positions[i];
-          const pos2 = positions[j];
-          
-          const dx = pos1.x - pos2.x;
-          const dz = pos1.z - pos2.z;
-          const distance = Math.sqrt(dx * dx + dz * dz);
-          
-          if (distance < minSpacing) {
-            hasOverlaps = true;
-            
-            // Calculate separation vector
-            const separation = minSpacing - distance;
-            const dirX = distance > 0 ? dx / distance : (Math.random() - 0.5);
-            const dirZ = distance > 0 ? dz / distance : (Math.random() - 0.5);
-            
-            // Move regions apart
-            const moveX = dirX * separation * 0.5;
-            const moveZ = dirZ * separation * 0.5;
-            
-            pos1.x += moveX;
-            pos1.z += moveZ;
-            pos2.x -= moveX;
-            pos2.z -= moveZ;
-          }
-        }
-      }
-      
-      if (!hasOverlaps) break;
-      iterations++;
-    }
-  }
   
   private createGateConnections(systems: SystemData[], systemPositions: Map<number, { x: number; y: number }>) {
     if (!this.mapData?.stargates) return;
@@ -543,94 +527,272 @@ export class RegionMap2D {
   
   private layoutSystemsMetro(systems: SystemData[]): Map<number, { x: number; y: number }> {
     const positions = new Map<number, { x: number; y: number }>();
-    const cellSize = 400;
     
-    // Build adjacency list for connected systems
-    const adjacencyList = new Map<number, number[]>();
-    for (const sys of systems) {
-      adjacencyList.set(sys.id, []);
+    if (systems.length === 0) return positions;
+    
+    console.log(`[RegionMap2D] Applying PCA layout to ${systems.length} systems`);
+    
+    // Extract 3D coordinates
+    const coordinates3D = systems.map(sys => [sys.position.x, sys.position.y, sys.position.z]);
+    
+    // Apply PCA to get 2D projection
+    const coordinates2D = this.applyPCA(coordinates3D);
+    
+    // Scale the 2D coordinates to preserve natural shape
+    const scale = 300; // Smaller scale to preserve natural clustering
+    const scaledCoords = this.scaleCoordinates(coordinates2D, scale);
+    
+    // Assign positions to systems
+    for (let i = 0; i < systems.length; i++) {
+      const sys = systems[i];
+      const coord = scaledCoords[i];
+      positions.set(sys.id, { x: coord[0], y: coord[1] });
     }
     
-    // Add edges based on stargates
-    if (this.mapData?.stargates) {
-      for (const gateKey in this.mapData.stargates) {
-        const gate = this.mapData.stargates[gateKey];
-        if (!gate || !gate.source_system_id || !gate.destination_system_id) continue;
-        
-        const sourceSys = systems.find(s => s.id === gate.source_system_id);
-        const destSys = systems.find(s => s.id === gate.destination_system_id);
-        
-        if (sourceSys && destSys) {
-          adjacencyList.get(sourceSys.id)?.push(destSys.id);
-          adjacencyList.get(destSys.id)?.push(sourceSys.id);
-        }
-      }
-    }
-    
-    // Find connected components (groups of systems that can reach each other)
-    const visited = new Set<number>();
-    const components: number[][] = [];
-    
-    for (const sys of systems) {
-      if (!visited.has(sys.id)) {
-        const component: number[] = [];
-        this.dfsComponent(sys.id, adjacencyList, visited, component);
-        if (component.length > 0) {
-          components.push(component);
-        }
-      }
-    }
-    
-    console.log(`[RegionMap2D] Found ${components.length} connected components`);
-    
-    // Layout each component separately
-    let currentX = 0;
-    let currentY = 0;
-    
-    for (const component of components) {
-      console.log(`[RegionMap2D] Layouting component with ${component.length} systems:`, 
-        component.map(id => systems.find(s => s.id === id)?.name).join(', '));
-      
-      // Layout this component using a simple grid
-      const gridSize = Math.ceil(Math.sqrt(component.length));
-      const startX = currentX;
-      const startY = currentY;
-      
-      for (let i = 0; i < component.length; i++) {
-        const systemId = component[i];
-        const row = Math.floor(i / gridSize);
-        const col = i % gridSize;
-        const x = startX + col * cellSize;
-        const y = startY + row * cellSize;
-        
-        positions.set(systemId, { x, y });
-      }
-      
-      // Move to next component position
-      currentX += (gridSize + 1) * cellSize;
-      if (currentX > 2000) {
-        currentX = 0;
-        currentY += (Math.ceil(Math.sqrt(component.length)) + 1) * cellSize;
-      }
-    }
-    
-    console.log(`[RegionMap2D] Layout complete: ${positions.size} systems positioned`);
+    console.log(`[RegionMap2D] PCA layout complete: ${positions.size} systems positioned`);
     return positions;
   }
   
-  private dfsComponent(systemId: number, adjacencyList: Map<number, number[]>, visited: Set<number>, component: number[]) {
-    if (visited.has(systemId)) return;
+  private applyPCA(coordinates3D: number[][]): number[][] {
+    const n = coordinates3D.length;
+    if (n === 0) return [];
     
-    visited.add(systemId);
-    component.push(systemId);
-    
-    const neighbors = adjacencyList.get(systemId) || [];
-    for (const neighborId of neighbors) {
-      this.dfsComponent(neighborId, adjacencyList, visited, component);
+    // Step 1: Center the data (subtract mean)
+    const mean = [0, 0, 0];
+    for (let i = 0; i < n; i++) {
+      mean[0] += coordinates3D[i][0];
+      mean[1] += coordinates3D[i][1];
+      mean[2] += coordinates3D[i][2];
     }
+    mean[0] /= n;
+    mean[1] /= n;
+    mean[2] /= n;
+    
+    const centered = coordinates3D.map(coord => [
+      coord[0] - mean[0],
+      coord[1] - mean[1],
+      coord[2] - mean[2]
+    ]);
+    
+    // Step 2: Compute covariance matrix
+    const covariance = [
+      [0, 0, 0],
+      [0, 0, 0],
+      [0, 0, 0]
+    ];
+    
+    for (let i = 0; i < n; i++) {
+      const [x, y, z] = centered[i];
+      covariance[0][0] += x * x;
+      covariance[0][1] += x * y;
+      covariance[0][2] += x * z;
+      covariance[1][0] += y * x;
+      covariance[1][1] += y * y;
+      covariance[1][2] += y * z;
+      covariance[2][0] += z * x;
+      covariance[2][1] += z * y;
+      covariance[2][2] += z * z;
+    }
+    
+    // Normalize by n-1
+    const factor = 1 / (n - 1);
+    for (let i = 0; i < 3; i++) {
+      for (let j = 0; j < 3; j++) {
+        covariance[i][j] *= factor;
+      }
+    }
+    
+    // Step 3: Find eigenvalues and eigenvectors (simplified 2D projection)
+    // For simplicity, we'll use the first two principal components
+    // In a full implementation, you'd solve the eigenvalue problem
+    
+    // Simple approach: project onto XY plane and rotate for best fit
+    const coordinates2D = centered.map(coord => [coord[0], coord[1]]);
+    
+    // Calculate explained variance (simplified)
+    const totalVariance = covariance[0][0] + covariance[1][1] + covariance[2][2];
+    const explainedVariance = (covariance[0][0] + covariance[1][1]) / totalVariance;
+    
+    console.log(`[RegionMap2D] PCA explained variance: ${(explainedVariance * 100).toFixed(1)}%`);
+    
+    return coordinates2D;
+  }
+  
+  private scaleCoordinates(coordinates2D: number[][], baseScale: number): number[][] {
+    if (coordinates2D.length === 0) return [];
+    
+    // Find the range of coordinates
+    let minX = Infinity, maxX = -Infinity;
+    let minY = Infinity, maxY = -Infinity;
+    
+    for (const coord of coordinates2D) {
+      minX = Math.min(minX, coord[0]);
+      maxX = Math.max(maxX, coord[0]);
+      minY = Math.min(minY, coord[1]);
+      maxY = Math.max(maxY, coord[1]);
+    }
+    
+    const rangeX = maxX - minX;
+    const rangeY = maxY - minY;
+    const maxRange = Math.max(rangeX, rangeY);
+    
+    // Scale to fit within a reasonable viewport
+    const scale = maxRange > 0 ? baseScale / maxRange : 1;
+    
+    return coordinates2D.map(coord => [
+      coord[0] * scale,
+      coord[1] * scale
+    ]);
+  }
+  
+  private applyForceDirectedLayout(regions: RegionData[], initialCoords: number[][]): { x: number; y: number }[] {
+    const n = regions.length;
+    if (n === 0) return [];
+    
+    // Use PCA coordinates directly - preserve the natural organic shape
+    const positions = initialCoords.map(coord => ({ x: coord[0], y: coord[1] }));
+    
+    // Calculate the natural bounds from PCA
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const coord of initialCoords) {
+      minX = Math.min(minX, coord[0]);
+      maxX = Math.max(maxX, coord[0]);
+      minY = Math.min(minY, coord[1]);
+      maxY = Math.max(maxY, coord[1]);
+    }
+    
+    // Calculate natural aspect ratio
+    const aspectRatio = (maxX - minX) / (maxY - minY);
+    const naturalWidth = maxX - minX;
+    const naturalHeight = maxY - minY;
+    
+    console.log(`[RegionMap2D] Preserving natural shape: ${n} regions, aspect ratio: ${aspectRatio.toFixed(2)}`);
+    console.log(`[RegionMap2D] Natural bounds: ${naturalWidth.toFixed(0)} x ${naturalHeight.toFixed(0)}`);
+    
+    // Force-directed adjustment to reduce overlap
+    const iterations = 50; // More iterations for better spacing
+    const coolingFactor = 0.95;
+    let temperature = 200;
+    
+    for (let iter = 0; iter < iterations; iter++) {
+      const forces = positions.map(() => ({ x: 0, y: 0 }));
+      
+      // Very gentle repulsion - only for severe overlaps
+      for (let i = 0; i < n; i++) {
+        for (let j = i + 1; j < n; j++) {
+          const dx = positions[i].x - positions[j].x;
+          const dy = positions[i].y - positions[j].y;
+          const distance = Math.sqrt(dx * dx + dy * dy);
+          
+          if (distance > 0 && distance < 120) { // Increase repulsion distance
+            const force = (120 - distance) * 0.3; // Stronger repulsion to reduce overlap
+            const fx = (dx / distance) * force;
+            const fy = (dy / distance) * force;
+            
+            forces[i].x += fx;
+            forces[i].y += fy;
+            forces[j].x -= fx;
+            forces[j].y -= fy;
+          }
+        }
+      }
+      
+      // Apply minimal forces
+      for (let i = 0; i < n; i++) {
+        const movement = Math.min(temperature, 5); // Very small movements
+        positions[i].x += (forces[i].x * movement) / 1000;
+        positions[i].y += (forces[i].y * movement) / 1000;
+      }
+      
+      temperature *= coolingFactor;
+    }
+    
+    console.log(`[RegionMap2D] Natural shape preserved with minimal adjustments`);
+    return positions;
+  }
+  
+
+  private createMetroConnections(regions: RegionData[], positions: { x: number; y: number }[]) {
+    if (!this.mapData?.stargates) return;
+    
+    console.log(`[RegionMap2D] Creating metro-style connections between regions`);
+    
+    // Find connections between regions based on stargates
+    const regionConnections = new Map<number, Set<number>>();
+    
+    // Initialize connection map
+    for (const region of regions) {
+      regionConnections.set(region.id, new Set());
+    }
+    
+    // Find connections through stargates
+    for (const gateKey in this.mapData.stargates) {
+      const gate = this.mapData.stargates[gateKey];
+      if (!gate || !gate.source_system_id || !gate.destination_system_id) continue;
+      
+      // Find which regions these systems belong to
+      const sourceRegion = regions.find(r => r.systemIds.includes(gate.source_system_id));
+      const destRegion = regions.find(r => r.systemIds.includes(gate.destination_system_id));
+      
+      if (sourceRegion && destRegion && sourceRegion.id !== destRegion.id) {
+        regionConnections.get(sourceRegion.id)?.add(destRegion.id);
+        regionConnections.get(destRegion.id)?.add(sourceRegion.id);
+      }
+    }
+    
+    // Create metro-style connections
+    for (const region of regions) {
+      const regionPos = positions[regions.indexOf(region)];
+      const connections = regionConnections.get(region.id);
+      
+      if (connections) {
+        for (const connectedRegionId of connections) {
+          const connectedRegion = regions.find(r => r.id === connectedRegionId);
+          if (connectedRegion) {
+            const connectedPos = positions[regions.indexOf(connectedRegion)];
+            
+            // Create Manhattan-style (orthogonal) path
+            this.createManhattanPath(regionPos, connectedPos, region.id, connectedRegionId);
+          }
+        }
+      }
+    }
+    
+    console.log(`[RegionMap2D] Created metro connections for ${regions.length} regions`);
+  }
+  
+  private createManhattanPath(start: { x: number; y: number }, end: { x: number; y: number }, regionId1: number, regionId2: number) {
+    // Manhattan path: go horizontal first, then vertical (or vice versa)
+    const midX = (start.x + end.x) / 2;
+    
+    // Create path points
+    const points = [
+      new THREE.Vector3(start.x, start.y, 0),
+      new THREE.Vector3(midX, start.y, 0), // Horizontal segment
+      new THREE.Vector3(midX, end.y, 0),   // Vertical segment
+      new THREE.Vector3(end.x, end.y, 0)
+    ];
+    
+    // Create geometry
+    const geometry = new THREE.BufferGeometry().setFromPoints(points);
+    const material = new THREE.LineBasicMaterial({
+      color: 0x666666, // Light gray
+      transparent: true,
+      opacity: 0.6,
+      linewidth: 1
+    });
+    
+    const line = new THREE.Line(geometry, material);
+    line.userData = { 
+      type: 'metro-connection', 
+      regionId1, 
+      regionId2 
+    };
+    
+    this.regionGroup.add(line);
   }
 
-  private createScalableLabel(text: string, x: number, y: number, z: number, systemCount: number) {
+  private createScalableLabel(text: string, x: number, y: number, systemCount: number, visible: boolean = true) {
     const labelDiv = document.createElement('div');
     labelDiv.className = 'region-2d-label';
     labelDiv.textContent = text;
@@ -648,8 +810,12 @@ export class RegionMap2D {
     `;
     
     const label = new CSS2DObject(labelDiv);
-    label.position.set(x, y, z);
+    label.position.set(x, y, 0); // Set Z to 0 for 2D view
+    label.visible = visible; // Set initial visibility
     this.labelGroup.add(label);
+    console.log(`[RegionMap2D] Added label to labelGroup at position (${x}, ${y}, 0), visible: ${visible}`);
+    console.log(`[RegionMap2D] LabelGroup children count: ${this.labelGroup.children.length}`);
+    console.log(`[RegionMap2D] Label div content: "${labelDiv.textContent}"`);
     
     // Add system count label
     const countDiv = document.createElement('div');
@@ -668,14 +834,67 @@ export class RegionMap2D {
     `;
     
     const countLabel = new CSS2DObject(countDiv);
-    countLabel.position.set(x, y - 180, z);
+    countLabel.position.set(x, y - 180, 0); // Set Z to 0 for 2D view
+    countLabel.visible = visible; // Set initial visibility
     this.labelGroup.add(countLabel);
+    console.log(`[RegionMap2D] Added count label to labelGroup at position (${x}, ${y - 180}, 0), visible: ${visible}`);
     
-    // Store references for scaling
+    // Store references for scaling and hover management
     (label as any).labelDiv = labelDiv;
     (countLabel as any).labelDiv = countDiv;
+    (label as any).countLabel = countLabel; // Store reference to count label
+    
+    // Store region info for hover detection
+    label.userData = { type: 'region-label', regionId: null }; // Will be set by caller
+    countLabel.userData = { type: 'region-count', regionId: null }; // Will be set by caller
+    
+    return label; // Return the label for region ID assignment
   }
   
+  // Region hover detection methods
+  public handleRegionHover(regionId: number | null) {
+    if (this.viewMode !== '2D_REGIONS') return;
+
+    // Only log when there's actually a region hit
+    if (regionId !== null) {
+      console.log(`[RegionMap2D] handleRegionHover called with regionId: ${regionId}`);
+    }
+    
+    
+    // Hide all region labels first
+    let hiddenCount = 0;
+    this.labelGroup.children.forEach(child => {
+      if (child.userData.type === 'region-label' || child.userData.type === 'region-count') {
+        child.visible = false;
+        hiddenCount++;
+      }
+    });
+    console.log(`[RegionMap2D] Hidden ${hiddenCount} region labels`);
+    
+    // Show label for hovered region
+    if (regionId !== null) {
+      let found = false;
+      let shownCount = 0;
+      this.labelGroup.children.forEach(child => {
+        if (child.userData.type === 'region-label' && child.userData.regionId === regionId) {
+          child.visible = true;
+          found = true;
+          shownCount++;
+          console.log(`[RegionMap2D] Found and showing label for region ${regionId}`);
+        }
+        if (child.userData.type === 'region-count' && child.userData.regionId === regionId) {
+          child.visible = true;
+          shownCount++;
+          console.log(`[RegionMap2D] Found and showing count label for region ${regionId}`);
+        }
+      });
+      console.log(`[RegionMap2D] Shown ${shownCount} labels for region ${regionId}`);
+      if (!found) {
+        console.log(`[RegionMap2D] No label found for region ${regionId}`);
+      }
+    }
+  }
+
   private buildRegionDetailView() {
     if (this.selectedRegionId === null) return;
     
@@ -908,12 +1127,28 @@ export class RegionMap2D {
    * Returns the region ID if a region was clicked, null otherwise
    */
   raycastRegions(raycaster: THREE.Raycaster): number | null {
-    if (this.viewMode !== '2D_REGIONS') return null;
+    if (this.viewMode !== '2D_REGIONS') {
+      return null;
+    }
     
-    const intersects = raycaster.intersectObjects(Array.from(this.regionMeshes.values()));
+    const regionMeshes = Array.from(this.regionMeshes.values());
+    if (regionMeshes.length === 0) {
+      return null;
+    }
+    
+    // Create a proper raycaster using the camera
+    if (!this.camera) {
+      console.log(`[RegionMap2D] No camera available for raycasting`);
+      return null;
+    }
+    
+    // Use the raycaster that was passed in - it should already be set up correctly
+    const intersects = raycaster.intersectObjects(regionMeshes);
+    
     if (intersects.length > 0) {
       const mesh = intersects[0].object as THREE.Mesh;
       const regionId = mesh.userData.regionId;
+      console.log(`[RegionMap2D] raycastRegions: hit region ${regionId}`);
       if (typeof regionId === 'number') {
         return regionId;
       }

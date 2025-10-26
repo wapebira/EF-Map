@@ -5003,6 +5003,19 @@ function App() {
     if (meteorsGroupRef.current) {
       meteorsGroupRef.current.visible = viewMode === '3D';
     }
+    
+    // Disable rotation in 2D modes
+    if (controlsRef.current) {
+      if (viewMode === '2D_REGIONS' || viewMode === '2D_REGION_DETAIL') {
+        controlsRef.current.enableRotate = false;
+        controlsRef.current.enableZoom = true; // Keep zoom enabled
+        controlsRef.current.enablePan = true; // Keep pan enabled
+      } else {
+        controlsRef.current.enableRotate = true;
+        controlsRef.current.enableZoom = true;
+        controlsRef.current.enablePan = true;
+      }
+    }
   }, [viewMode, selectedRegionFor2D]);
   
   // Camera positioning for different view modes
@@ -6490,12 +6503,24 @@ function App() {
         return;
       }
 
+      // Create raycaster for 2D views
+      const raycaster2D = new THREE.Raycaster();
+      raycaster2D.setFromCamera(mouse, cameraRef.current);
+      
       // Handle system hover in 2D region detail view (before 3D mode check)
       if (viewModeRef.current === '2D_REGION_DETAIL' && regionMap2DRef.current) {
         console.log('[App] Attempting system raycast in 2D_REGION_DETAIL mode');
-        const systemId = regionMap2DRef.current.raycastSystems(raycaster);
+        const systemId = regionMap2DRef.current.raycastSystems(raycaster2D);
         console.log('[App] Raycast result:', systemId);
         regionMap2DRef.current.handleSystemHover(systemId);
+      }
+      
+      // Handle region hover in 2D regions view (before 3D mode check)
+      if (viewModeRef.current === '2D_REGIONS' && regionMap2DRef.current) {
+        console.log('[App] Attempting region raycast in 2D_REGIONS mode');
+        const regionId = regionMap2DRef.current.raycastRegions(raycaster2D);
+        console.log('[App] Region raycast result:', regionId);
+        regionMap2DRef.current.handleRegionHover(regionId);
       }
 
       // Only run 3D raycasting when in 3D mode
