@@ -59,7 +59,7 @@ const AutoCompleteInput = ({ value, onChange, onSelect, dataSource, placeholder 
 
     if (newValue.length >= 3) {
       const filteredSuggestions = dataSource.filter(item =>
-        item.toLowerCase().startsWith(newValue.toLowerCase())
+        item.toLowerCase().includes(newValue.toLowerCase())
       );
       setSuggestions(filteredSuggestions);
       setIsSuggestionsVisible(true);

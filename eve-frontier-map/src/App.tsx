@@ -410,6 +410,12 @@ function App() {
   const [selectedRegionFor2D, setSelectedRegionFor2D] = useState<number | null>(null);
   const viewModeRef = useRef<ViewMode>('3D');
   
+  // Store camera state when drilling down into region detail
+  const saved2DRegionsCameraState = useRef<{
+    position: THREE.Vector3;
+    target: THREE.Vector3;
+  } | null>(null);
+  
   // Update viewModeRef when viewMode changes
   useEffect(() => {
     viewModeRef.current = viewMode;
@@ -5028,7 +5034,7 @@ function App() {
     if (viewMode === '2D_REGIONS') {
       // Position camera for region overview - looking down at XY plane
       const targetPos = new THREE.Vector3(0, 0, 0);
-      const cameraPos = new THREE.Vector3(0, 0, 30000); // Look down from above
+      const cameraPos = new THREE.Vector3(0, 0, 8000); // Closer zoom - was 30000
       
       // Animate camera
       const startPos = camera.position.clone();
@@ -5093,9 +5099,49 @@ function App() {
       const regionId = regionMap2DRef.current.raycastRegions(raycaster);
       if(regionId !== null){
         console.log('[App] Region clicked:', regionId);
+        
+        // Save current camera state before drilling down
+        if (cameraRef.current && controlsRef.current) {
+          saved2DRegionsCameraState.current = {
+            position: cameraRef.current.position.clone(),
+            target: controlsRef.current.target.clone()
+          };
+        }
+        
         setSelectedRegionFor2D(regionId);
         setViewMode('2D_REGION_DETAIL');
         e.stopPropagation();
+      } else {
+        // Clicked on empty space - clear locked region and reset camera
+        console.log('[App] Clicked on empty space - clearing locked region');
+        const wasLocked = regionMap2DRef.current.unlockRegion();
+        
+        // Reset camera to default position if there was a locked region
+        if (wasLocked && cameraRef.current && controlsRef.current) {
+          const targetPosition = new THREE.Vector3(0, 0, 8000);
+          const targetLookAt = new THREE.Vector3(0, 0, 0);
+          
+          const startPosition = cameraRef.current.position.clone();
+          const startTarget = controlsRef.current.target.clone();
+          const duration = 800;
+          const startTime = Date.now();
+          
+          const animateCamera = () => {
+            const elapsed = Date.now() - startTime;
+            const progress = Math.min(elapsed / duration, 1);
+            const eased = 1 - Math.pow(1 - progress, 3);
+            
+            cameraRef.current!.position.lerpVectors(startPosition, targetPosition, eased);
+            controlsRef.current!.target.lerpVectors(startTarget, targetLookAt, eased);
+            controlsRef.current!.update();
+            
+            if (progress < 1) {
+              requestAnimationFrame(animateCamera);
+            }
+          };
+          
+          animateCamera();
+        }
       }
     };
     dom.addEventListener('click', handleRegionClick, true);
@@ -7038,19 +7084,156 @@ function App() {
     };
   }, [isLoaded, hoveredSystem, isDraggingRef, mouseDownPosRef, mouseDownTimeRef, createSystemLabelElement, selectSystem, isPlanetCountActive, showDistance, highlightedSystem, cinematicMode, cinematicLabels, openPanels, ensurePanel, lastSelectedSystemName, setCinematicOrbitRequested]);
 
-  const handleSearch = (event: React.KeyboardEvent<HTMLInputElement>, systemNameFromSelection?: string) => {
+  const handleSearch = (event: React.KeyboardEvent<HTMLInputElement>, nameFromSelection?: string) => {
     if (event.key === 'Enter' && mapData) {
-      const query = (systemNameFromSelection || searchQuery).toLowerCase().trim();
-        const foundSystem = Object.values(mapData.solar_systems).find(
-          (system) => system.name.toLowerCase().trim() === query
-        );
+      const query = (nameFromSelection || searchQuery).toLowerCase().trim();
+      
+      // First try to find a system
+      const foundSystem = Object.values(mapData.solar_systems).find(
+        (system) => system.name.toLowerCase().trim() === query
+      );
+      
       if (foundSystem) {
-        selectSystem(foundSystem);
-  // ensure external selection propagation even if already highlighted
-  setLastSelectedSystemName(foundSystem.name);
+        // If in 2D regions view, find and highlight the region that contains this system
+        if (viewMode === '2D_REGIONS' && regionMap2DRef.current) {
+          const systemRegionId = foundSystem.region_id;
+          const region = Object.values(mapData.regions).find(r => Number(r.id) === Number(systemRegionId));
+          
+          if (region) {
+            
+            // Get the 2D position of the region
+            const region2DPos = regionMap2DRef.current.getRegion2DPosition(region.id);
+            
+            if (region2DPos && cameraRef.current && controlsRef.current) {
+              const centerX = region2DPos.x;
+              const centerY = region2DPos.y;
+              
+              // Animate camera to zoom to the region
+              const targetPosition = new THREE.Vector3(centerX, centerY, 800);
+              const targetLookAt = new THREE.Vector3(centerX, centerY, 0);
+              
+              const startPosition = cameraRef.current.position.clone();
+              const startTarget = controlsRef.current.target.clone();
+              const duration = 1000;
+              const startTime = Date.now();
+              
+              const animateCamera = () => {
+                const elapsed = Date.now() - startTime;
+                const progress = Math.min(elapsed / duration, 1);
+                const eased = 1 - Math.pow(1 - progress, 3);
+                
+                cameraRef.current!.position.lerpVectors(startPosition, targetPosition, eased);
+                controlsRef.current!.target.lerpVectors(startTarget, targetLookAt, eased);
+                controlsRef.current!.update();
+                
+                if (progress < 1) {
+                  requestAnimationFrame(animateCamera);
+                } else {
+                  // After zoom, highlight the region permanently (lock it)
+                  regionMap2DRef.current?.handleRegionHover(region.id, true);
+                }
+              };
+              
+              animateCamera();
+            }
+            
+            // Highlight the region and lock it
+            regionMap2DRef.current.handleRegionHover(region.id, true);
+            
+            // Clear search query
+            setSearchQuery('');
+          }
+        } else {
+          // In 3D or 2D detail view, select the system normally
+          selectSystem(foundSystem);
+          // ensure external selection propagation even if already highlighted
+          setLastSelectedSystemName(foundSystem.name);
+        }
+        return;
+      }
+      
+      // If no system found, try to find a region
+      const foundRegion = Object.values(mapData.regions).find(
+        (region) => region.name.toLowerCase().trim() === query
+      );
+      
+      if (foundRegion) {
+        // Select the region based on current view mode
+        if (viewMode === '2D_REGIONS' && regionMap2DRef.current && mapData) {
+          // In 2D region view, highlight and zoom to the region
+          const region2DPos = regionMap2DRef.current.getRegion2DPosition(foundRegion.id);
+          
+          if (region2DPos && cameraRef.current && controlsRef.current) {
+            const centerX = region2DPos.x;
+            const centerY = region2DPos.y;
+            
+            // Animate camera to zoom to region
+            const targetPosition = new THREE.Vector3(centerX, centerY, 800);
+            const targetLookAt = new THREE.Vector3(centerX, centerY, 0);
+            
+            // Animate camera
+            const startPosition = cameraRef.current.position.clone();
+            const startTarget = controlsRef.current.target.clone();
+            const duration = 1000; // 1 second
+            const startTime = Date.now();
+            
+            const animateCamera = () => {
+              const elapsed = Date.now() - startTime;
+              const progress = Math.min(elapsed / duration, 1);
+              const eased = 1 - Math.pow(1 - progress, 3); // Ease out cubic
+              
+              // Move camera position (X, Y, and Z)
+              cameraRef.current!.position.lerpVectors(startPosition, targetPosition, eased);
+              // Move what the camera is looking at (X and Y, Z stays at 0)
+              controlsRef.current!.target.lerpVectors(startTarget, targetLookAt, eased);
+              controlsRef.current!.update();
+              
+                if (progress < 1) {
+                  requestAnimationFrame(animateCamera);
+                } else {
+                  // After zoom, highlight the region permanently (lock it)
+                  regionMap2DRef.current?.handleRegionHover(foundRegion.id, true);
+                }
+              };
+            
+            animateCamera();
+          }
+          
+          // Highlight the region and lock it (will stay visible until another search/action)
+          regionMap2DRef.current.handleRegionHover(foundRegion.id, true); // true = lock
+          
+          // Clear search query to show the highlighted region clearly
+          setSearchQuery('');
+        } else {
+          // In 3D view, highlight the region by selecting a system in that region
+          // and enabling the region highlighter
+          const allSystems = Object.values(mapData.solar_systems);
+          console.log('[handleSearch] Total systems:', allSystems.length);
+          console.log('[handleSearch] Looking for region_id:', foundRegion.id, 'type:', typeof foundRegion.id);
+          console.log('[handleSearch] Sample system region_ids:', allSystems.slice(0, 5).map(s => ({ name: s.name, region_id: s.region_id, type: typeof s.region_id })));
+          
+          const systemInRegion = allSystems.find(
+            (system) => {
+              const match = Number(system.region_id) === Number(foundRegion.id);
+              if (match) console.log('[handleSearch] Found matching system:', system.name, system.region_id);
+              return match;
+            }
+          );
+          console.log('[handleSearch] System in region:', systemInRegion?.name);
+          if (systemInRegion) {
+            console.log('[handleSearch] Selecting system and enabling region highlighter');
+            selectSystem(systemInRegion);
+            setIsRegionHighlighterActive(true);
+            ensurePanel('region-stats');
+            bringToFront('region-stats');
+          } else {
+            console.log('[handleSearch] No system found in region!');
+          }
+        }
       } else {
+        console.log('[handleSearch] No region found for query:', query);
         setHighlightedSystem(null);
-        alert('System not found');
+        alert('System or Region not found');
       }
     }
   };
@@ -7468,14 +7651,17 @@ function App() {
         <div style={{ display:'flex', alignItems:'center', gap:'6px', minWidth:340 }}>
           <div style={{ flex:1 }}>
             <AutoCompleteInput
-              placeholder="Search for a system..."
+              placeholder="Search for a system or region..."
               value={searchQuery}
               onChange={setSearchQuery}
               onSelect={(selected) => {
                 setSearchQuery(selected);
                 handleSearch({ key: 'Enter' } as React.KeyboardEvent<HTMLInputElement>, selected);
               }}
-              dataSource={mapData ? Object.values(mapData.solar_systems).map(s => s.name) : []}
+              dataSource={mapData ? [
+                ...Object.values(mapData.solar_systems).map(s => s.name),
+                ...Object.values(mapData.regions).map(r => r.name)
+              ] : []}
             />
           </div>
           <button
@@ -7507,6 +7693,37 @@ function App() {
               setResetToken(t=> t+1);
               setHighlightedSystem(null);
               setLastSelectedSystemId(null);
+              // Clear locked region from search and reset camera if in 2D regions view
+              if (regionMap2DRef.current) {
+                const wasLocked = regionMap2DRef.current.unlockRegion();
+                
+                // Reset camera to default position if in 2D regions view and there was a locked region
+                if (wasLocked && viewMode === '2D_REGIONS' && cameraRef.current && controlsRef.current) {
+                  const targetPosition = new THREE.Vector3(0, 0, 8000);
+                  const targetLookAt = new THREE.Vector3(0, 0, 0);
+                  
+                  const startPosition = cameraRef.current.position.clone();
+                  const startTarget = controlsRef.current.target.clone();
+                  const duration = 800;
+                  const startTime = Date.now();
+                  
+                  const animateCamera = () => {
+                    const elapsed = Date.now() - startTime;
+                    const progress = Math.min(elapsed / duration, 1);
+                    const eased = 1 - Math.pow(1 - progress, 3);
+                    
+                    cameraRef.current!.position.lerpVectors(startPosition, targetPosition, eased);
+                    controlsRef.current!.target.lerpVectors(startTarget, targetLookAt, eased);
+                    controlsRef.current!.update();
+                    
+                    if (progress < 1) {
+                      requestAnimationFrame(animateCamera);
+                    }
+                  };
+                  
+                  animateCamera();
+                }
+              }
               if(selectedLabelObj.current){
                 try {
                   const parent = selectedLabelObj.current.parent as THREE.Object3D | null;
@@ -7968,7 +8185,12 @@ function App() {
               3D
             </button>
             <button
-              onClick={() => { setViewMode('2D_REGIONS'); setSelectedRegionFor2D(null); }}
+              onClick={() => { 
+                setViewMode('2D_REGIONS'); 
+                setSelectedRegionFor2D(null);
+                // Clear saved camera state when switching to 2D regions from other views
+                saved2DRegionsCameraState.current = null;
+              }}
               style={{
                 padding:'4px 10px',
                 fontSize:'11px',
@@ -7986,7 +8208,40 @@ function App() {
             </button>
             {viewMode === '2D_REGION_DETAIL' && selectedRegionFor2D && (
               <button
-                onClick={() => setViewMode('2D_REGIONS')}
+                onClick={() => {
+                  setViewMode('2D_REGIONS');
+                  
+                  // Restore saved camera position after a brief delay to ensure view mode has switched
+                  setTimeout(() => {
+                    if (saved2DRegionsCameraState.current && cameraRef.current && controlsRef.current) {
+                      const { position, target } = saved2DRegionsCameraState.current;
+                      
+                      const startPosition = cameraRef.current.position.clone();
+                      const startTarget = controlsRef.current.target.clone();
+                      const duration = 800;
+                      const startTime = Date.now();
+                      
+                      const animateCamera = () => {
+                        const elapsed = Date.now() - startTime;
+                        const progress = Math.min(elapsed / duration, 1);
+                        const eased = 1 - Math.pow(1 - progress, 3); // Ease out cubic
+                        
+                        cameraRef.current!.position.lerpVectors(startPosition, position, eased);
+                        controlsRef.current!.target.lerpVectors(startTarget, target, eased);
+                        controlsRef.current!.update();
+                        
+                        if (progress < 1) {
+                          requestAnimationFrame(animateCamera);
+                        } else {
+                          // Clear saved state after restoration
+                          saved2DRegionsCameraState.current = null;
+                        }
+                      };
+                      
+                      animateCamera();
+                    }
+                  }, 50);
+                }}
                 style={{
                   padding:'4px 10px',
                   fontSize:'11px',

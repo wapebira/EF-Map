@@ -46,6 +46,7 @@ export class RegionMap2D {
   
   private viewMode: ViewMode = '3D';
   private selectedRegionId: number | null = null;
+  private lockedRegionId: number | null = null; // Locked region for search results
   
   private regionGroup: THREE.Group;
   private systemGroup: THREE.Group;
@@ -363,15 +364,11 @@ export class RegionMap2D {
       console.log(`[RegionMap2D] Created region mesh for ${region.name} (ID: ${region.id}) at position (${position.x}, ${position.y}, 0)`);
       
       // Add scalable label (hidden by default, shown on hover)
-      const label = this.createScalableLabel(region.name, position.x, position.y + radius + 20, region.systemCount, false);
+      const label = this.createScalableLabel(region.name, position.x, position.y, region.systemCount, radius, false);
       // Set region ID for hover detection
       if (label) {
         label.userData.regionId = region.id;
-        if (label.userData.countLabel) {
-          label.userData.countLabel.userData.regionId = region.id;
-        }
-        console.log(`[RegionMap2D] Created label for region ${region.id} (${region.name})`);
-        console.log(`[RegionMap2D] Label regionId: ${label.userData.regionId}, Count label regionId: ${label.userData.countLabel?.userData.regionId}`);
+        console.log(`[RegionMap2D] Created combined label for region ${region.id} (${region.name})`);
       }
     }
     
@@ -792,7 +789,19 @@ export class RegionMap2D {
     this.regionGroup.add(line);
   }
 
-  private createScalableLabel(text: string, x: number, y: number, systemCount: number, visible: boolean = true) {
+  private createScalableLabel(text: string, x: number, y: number, systemCount: number, radius: number, visible: boolean = true) {
+    // Create a single container with both labels using fixed pixel spacing
+    const containerDiv = document.createElement('div');
+    containerDiv.style.cssText = `
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      pointer-events: none;
+      user-select: none;
+    `;
+    
+    // Region name label
     const labelDiv = document.createElement('div');
     labelDiv.className = 'region-2d-label';
     labelDiv.textContent = text;
@@ -802,22 +811,11 @@ export class RegionMap2D {
       font-size: 16px;
       font-weight: 600;
       text-shadow: 0 0 8px rgba(0,0,0,0.8), 0 2px 4px rgba(0,0,0,0.6);
-      pointer-events: none;
-      user-select: none;
       white-space: nowrap;
       text-align: center;
-      transform-origin: center;
     `;
     
-    const label = new CSS2DObject(labelDiv);
-    label.position.set(x, y, 0); // Set Z to 0 for 2D view
-    label.visible = visible; // Set initial visibility
-    this.labelGroup.add(label);
-    console.log(`[RegionMap2D] Added label to labelGroup at position (${x}, ${y}, 0), visible: ${visible}`);
-    console.log(`[RegionMap2D] LabelGroup children count: ${this.labelGroup.children.length}`);
-    console.log(`[RegionMap2D] Label div content: "${labelDiv.textContent}"`);
-    
-    // Add system count label
+    // System count label
     const countDiv = document.createElement('div');
     countDiv.className = 'region-2d-count';
     countDiv.textContent = `${systemCount} systems`;
@@ -826,73 +824,88 @@ export class RegionMap2D {
       font-family: system-ui, sans-serif;
       font-size: 12px;
       text-shadow: 0 0 6px rgba(0,0,0,0.8);
-      pointer-events: none;
-      user-select: none;
       white-space: nowrap;
       text-align: center;
-      transform-origin: center;
     `;
     
-    const countLabel = new CSS2DObject(countDiv);
-    countLabel.position.set(x, y - 180, 0); // Set Z to 0 for 2D view
-    countLabel.visible = visible; // Set initial visibility
-    this.labelGroup.add(countLabel);
-    console.log(`[RegionMap2D] Added count label to labelGroup at position (${x}, ${y - 180}, 0), visible: ${visible}`);
+    containerDiv.appendChild(labelDiv);
+    containerDiv.appendChild(countDiv);
     
-    // Store references for scaling and hover management
-    (label as any).labelDiv = labelDiv;
-    (countLabel as any).labelDiv = countDiv;
-    (label as any).countLabel = countLabel; // Store reference to count label
+    // Create single CSS2D object with both labels
+    const label = new CSS2DObject(containerDiv);
+    label.position.set(x, y + radius + 20, 0); // Position above the circle
+    label.visible = visible;
+    this.labelGroup.add(label);
+    
+    console.log(`[RegionMap2D] Added combined label to labelGroup at position (${x}, ${y + radius + 20}, 0), visible: ${visible}`);
+    
+    // Store references for hover management
+    (label as any).labelDiv = containerDiv;
     
     // Store region info for hover detection
     label.userData = { type: 'region-label', regionId: null }; // Will be set by caller
-    countLabel.userData = { type: 'region-count', regionId: null }; // Will be set by caller
     
-    return label; // Return the label for region ID assignment
+    return label;
   }
   
   // Region hover detection methods
-  public handleRegionHover(regionId: number | null) {
+  public handleRegionHover(regionId: number | null, lock: boolean = false) {
     if (this.viewMode !== '2D_REGIONS') return;
 
-    // Only log when there's actually a region hit
-    if (regionId !== null) {
-      console.log(`[RegionMap2D] handleRegionHover called with regionId: ${regionId}`);
+    // If lock is true, set the locked region
+    if (lock && regionId !== null) {
+      this.lockedRegionId = regionId;
+      console.log(`[RegionMap2D] Locked region: ${regionId}`);
     }
-    
     
     // Hide all region labels first
-    let hiddenCount = 0;
     this.labelGroup.children.forEach(child => {
-      if (child.userData.type === 'region-label' || child.userData.type === 'region-count') {
+      if (child.userData.type === 'region-label') {
         child.visible = false;
-        hiddenCount++;
       }
     });
-    console.log(`[RegionMap2D] Hidden ${hiddenCount} region labels`);
     
-    // Show label for hovered region
-    if (regionId !== null) {
-      let found = false;
-      let shownCount = 0;
+    // Show locked region label (from search) - always visible
+    if (this.lockedRegionId !== null) {
       this.labelGroup.children.forEach(child => {
-        if (child.userData.type === 'region-label' && child.userData.regionId === regionId) {
+        if (child.userData.type === 'region-label' && Number(child.userData.regionId) === Number(this.lockedRegionId)) {
           child.visible = true;
-          found = true;
-          shownCount++;
-          console.log(`[RegionMap2D] Found and showing label for region ${regionId}`);
-        }
-        if (child.userData.type === 'region-count' && child.userData.regionId === regionId) {
-          child.visible = true;
-          shownCount++;
-          console.log(`[RegionMap2D] Found and showing count label for region ${regionId}`);
         }
       });
-      console.log(`[RegionMap2D] Shown ${shownCount} labels for region ${regionId}`);
-      if (!found) {
-        console.log(`[RegionMap2D] No label found for region ${regionId}`);
-      }
     }
+    
+    // Show hovered region label (if hovering and different from locked)
+    if (regionId !== null && regionId !== this.lockedRegionId) {
+      this.labelGroup.children.forEach(child => {
+        if (child.userData.type === 'region-label' && Number(child.userData.regionId) === Number(regionId)) {
+          child.visible = true;
+        }
+      });
+      console.log(`[RegionMap2D] Showing labels for locked region: ${this.lockedRegionId} and hovered region: ${regionId}`);
+    } else if (regionId !== null) {
+      console.log(`[RegionMap2D] Showing labels for region: ${regionId}`);
+    }
+  }
+  
+  // Unlock region (for clearing search results)
+  // Returns true if a region was unlocked (to trigger camera reset in parent)
+  public unlockRegion(): boolean {
+    const wasLocked = this.lockedRegionId !== null;
+    this.lockedRegionId = null;
+    this.handleRegionHover(null);
+    return wasLocked;
+  }
+  
+  // Get the 2D position of a region (after PCA transformation)
+  public getRegion2DPosition(regionId: number | string): { x: number; y: number } | null {
+    const numericId = Number(regionId);
+    const mesh = this.regionMeshes.get(numericId);
+    
+    if (!mesh) {
+      return null;
+    }
+    
+    return { x: mesh.position.x, y: mesh.position.y };
   }
 
   private buildRegionDetailView() {
@@ -1048,18 +1061,9 @@ export class RegionMap2D {
   updateTextScaling() {
     if (!this.camera || this.viewMode !== '2D_REGIONS') return;
     
-    // Calculate distance from camera to center of regions
-    const distance = this.camera.position.length();
-    const scale = Math.max(0.5, Math.min(2.0, 20000 / distance));
-    
-    // Update all labels
-    for (const child of this.labelGroup.children) {
-      const label = child as CSS2DObject;
-      const labelDiv = (label as any).labelDiv;
-      if (labelDiv) {
-        labelDiv.style.transform = `scale(${scale})`;
-      }
-    }
+    // CSS2D labels already maintain constant screen size automatically
+    // No transform scaling needed - they're rendered in screen space
+    // Just ensure labels are visible and properly positioned
   }
   
   /**

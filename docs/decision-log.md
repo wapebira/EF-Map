@@ -70,6 +70,30 @@ Older entries and legacy indexer details have been archived: [archive\decision-l
 - Preview URLs
   - Pattern: `https://<branch-or-alias>.ef-map.pages.dev` (project `ef-map`).
 
+## 2025-10-26 – 2D Region View: Camera State Preservation and Fixed Label Spacing
+- **Goal**: Improve 2D region view navigation UX by preserving camera position when drilling down and fixing label spacing consistency across zoom levels.
+- **Context**: Users reported two issues: (1) clicking Back from region detail view reset camera to default zoom instead of restoring previous position, and (2) region labels overlapped when zoomed out because spacing between region name and system count changed with zoom level.
+- **Changes**:
+  - **Camera state preservation** (`eve-frontier-map/src/App.tsx`):
+    - Added `saved2DRegionsCameraState` ref to store camera position and target when clicking a region
+    - Modified region click handler to save camera state before drilling down to `2D_REGION_DETAIL`
+    - Updated Back button to restore saved camera state with smooth 800ms animation (ease-out cubic)
+    - Clear saved state when manually switching to 2D regions view from other modes
+    - Also clear and reset camera when clicking Reset button or empty space
+  - **Fixed label spacing** (`eve-frontier-map/src/modules/RegionMap2D.ts`):
+    - Refactored region labels from two separate CSS2D objects to a single container
+    - Used CSS Flexbox with fixed `gap: 8px` for consistent pixel spacing
+    - Removed transform scaling logic from `updateTextScaling()` - CSS2D labels already maintain constant screen size
+    - System count label now uses proportional offset based on circle radius: `Math.max(30, radius + 15)`
+  - **Simplified hover management**: Updated `handleRegionHover` to work with single combined label objects instead of separate label/count pairs
+- **Result**: 
+  - ✅ Back button returns to exact previous camera position and zoom level
+  - ✅ Region name and system count maintain fixed 8px spacing at all zoom levels
+  - ✅ No label overlapping when zoomed out
+  - ✅ Labels stay consistent apparent size on screen
+- **Risk**: low (UI/UX improvement, no data changes).
+- **Gates**: build ✅ | tests n/a | smoke: manual testing.
+
 ## 2025-10-01 – Roadmap refresh: log telemetry focus & HTML embed stance
 - Goal: Mirror the overlay initiative roadmap updates by prioritizing the helper log watcher, introducing a combat telemetry milestone, and documenting a cautious stance on HTML embedding inside the …
 - Risk: low (documentation only).
@@ -86,6 +110,14 @@ Older entries and legacy indexer details have been archived: [archive\decision-l
 - Goal: Track overlay repo progress where the DX12 module now renders the star catalog as a point cloud, ensuring roadmap alignment here.
 - Risk: low (documentation alignment only).
 - Gates: build n/a | tests n/a | smoke n/a.
+## 2025-10-23 – 2D Region View with Drill-Down Navigation
+- Goal: Introduce multi-level 2D visualization allowing users to view all regions in a grid layout, then drill down to see individual systems within a selected region in 2D.
+- What: New `RegionMap2D` module (`eve-frontier-map/src/modules/RegionMap2D.ts`) computes region centers from constituent systems, renders regions as interactive circles in a grid, and handles 2D system layout when drilling down. App.tsx integration adds view mode state (`3D`, `2D_REGIONS`, `2D_REGION_DETAIL`), smooth camera transitions (800ms/600ms with quadratic easing), raycasting-based region click detection, and bottom-left UI controls for mode switching. When in 2D modes, 3D star field and stargate lines are hidden; 2D geometry uses X-Z plane projection (Y dimension flattened). Region colors assigned via golden angle (137.5°) for visual distinction.
+- Why: User requested ability to view map at region level (similar to traditional 2D region maps) and drill down to systems within regions, providing better spatial overview at different scales.
+- Implementation: Grid layout (sqrt(N) rows/cols, 8000-unit spacing), circle radius scaled by system count (200-600 units). Region detail view centers on bounding box with 1.2x padding. CSS2D labels for region names and counts. Click handlers via raycaster intersects on region meshes. All geometry computed once on init; visibility toggled per mode.
+- Risk: Low (self-contained module; 3D view unchanged; 2D modes are additive feature). No persistence, worker, or routing changes.
+- Gates: typecheck ✅ | build ✅ (npm run build passes, no errors) | smoke PENDING (switch to Regions view → grid displays, click region → systems appear, Back button returns to grid, 3D button restores original view).
+- Files: `eve-frontier-map/src/modules/RegionMap2D.ts` (new), `eve-frontier-map/src/App.tsx` (integrated module + UI controls), `docs/2D_REGION_VIEW.md` (new, feature documentation).
 ## 2025-10-01 – Overlay schema v2 + event queue infrastructure
 - Goal: Finalize the shared overlay state v2 contract and introduce the helper ↔ overlay event queue backing forthcoming EF-Map browser integrations.
 - Risk: low (documentation alignment only in this repo).
